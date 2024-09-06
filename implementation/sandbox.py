@@ -9,13 +9,12 @@ import subprocess
 import cloudpickle
 
 
-# Setup logging to a file named sandbox.log in the current directory
 log_file_path = pathlib.Path(__file__).parent / "sandbox.log"
 logging.basicConfig(
-    filename=log_file_path,  # Log to the file sandbox.log
+    filename=log_file_path, 
     filemode='w',  # Overwrite the file each time the script runs
-    level=logging.DEBUG,  # Set the logging level to DEBUG
-    format="%(asctime)s [%(levelname)s] %(message)s"  # Log format
+    level=logging.INFO,  
+    format="%(asctime)s [%(levelname)s] %(message)s"  
 )
 
 logger = logging.getLogger('logger')
@@ -154,7 +153,7 @@ class ExternalProcessSandbox(DummySandbox):
             logger.debug("Before retcode = self._exec(call_data_folder, input_path, error_file)")
             retcode = self._exec(call_data_folder, input_path, error_file)
 
-            if retcode != 0:
+            if not retcode:
                 return None, False
 
             output_file = call_data_folder / f"output.pickle"
@@ -164,9 +163,9 @@ class ExternalProcessSandbox(DummySandbox):
         except Exception as e:
             logger.debug(f"Could not execute code: {e}", exc_info=True)
             return None, False
-        #finally:
+        finally:
             # Perform cleanup regardless of success or failure
-        #    self.cleanup(call_data_folder, input_path, error_file)
+            self.cleanup(call_data_folder, input_path, error_file)
 
     def cleanup(self, call_data_folder: pathlib.Path, input_path: pathlib.Path, error_file: pathlib.Path):
         try:

@@ -62,22 +62,22 @@ class LLM_model:
         """Returns multiple predicted continuations for each prompt in a list of prompts."""
         try:
             self.tokenizer.padding_side = 'left'
-            max_total_length = 512  # Define max length based on model capacity
+            #max_total_length = 512  # Define max length based on model capacity
         
             # Store original lengths of each prompt without truncation
             original_lengths = [len(self.tokenizer.encode(prompt, add_special_tokens=False)) for prompt in prompts]
 
             # Tokenize prompts with truncation and padding
-            inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=max_total_length).to(self.device)
+            inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=False).to(self.device)#, max_length=max_total_length).to(self.device)
             input_length = inputs.input_ids.shape[1]
             logger.debug(f"LLM: input dims is {inputs.input_ids.shape}")
             batch_size = inputs.input_ids.shape[0]
             logger.debug(f"Prompts being processed by LLM is {batch_size}")
 
             # Check if any prompt was truncated
-            for i, prompt in enumerate(prompts):
-                if original_lengths[i] > max_total_length:
-                    logger.info(f"Truncated prompt: {prompt[:50]}... (original length: {original_lengths[i]} tokens, truncated to {max_total_length} tokens)")
+            #for i, prompt in enumerate(prompts):
+            #    if original_lengths[i] > max_total_length:
+            #        logger.info(f"Truncated prompt: {prompt[:50]}... (original length: {original_lengths[i]} tokens, truncated to {max_total_length} tokens)")
 
             all_samples = []
 

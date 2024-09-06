@@ -270,8 +270,7 @@ class ProgramsDatabase:
                 logger.debug("Program body is None. Skipping registration.")
                 return
             if island.cluster_length() < cluster_check_threshold:
-                program=program.clean_body()
-                if island.function_body_exists(program):
+                if island.function_body_exists(program.clean_body()):
                     logger.debug("Program with identical body already exists in island. Skipping registration.")
                     return
 
@@ -303,7 +302,6 @@ class ProgramsDatabase:
         island_id: int,
         scores_per_test: ScoresPerTest,
     ) -> None: 
-        logger.debug(f"In _register_program_in_island")
         try:
             self._islands[island_id].register_program(program, scores_per_test)
         except Exception as e:
@@ -371,7 +369,7 @@ class ProgramsDatabase:
         try: 
             code, version_generated = self._islands[island_id].get_prompt()
         except Exception as e: 
-            logger.error(f"Cannot call get prompt on island {e}")
+            logger.error(f"Cannot call get prompt, code is {code} on island {e}")
         expected_version = self._islands[island_id].version
         prompt = Prompt(code, version_generated, island_id, expected_version)
 
@@ -476,7 +474,6 @@ class Island:
         scores_per_test: ScoresPerTest,
     ) -> None:
         """Stores a program on this island, in its appropriate cluster."""
-        program.body=program.clean_body()
         try: 
             signature = self._get_signature(scores_per_test)
         except Exception as e: 
@@ -492,37 +489,23 @@ class Island:
     def get_prompt(self) -> tuple[str, int]:
         """Constructs a prompt containing functions from this island."""
         signatures = list(self._clusters.keys())
-
-        try:
-            # Use get_score() to retrieve scores for each cluster
-            cluster_scores = np.array([self._clusters[signature].get_score() for signature in signatures])
-        except Exception as e:
-            logger.error(f" Error {e} in get_prompt ") 
+        cluster_scores = np.array([self._clusters[signature].get_score() for signature in signatures])
 
         # Convert scores to probabilities using softmax with temperature schedule.
         period = self._cluster_sampling_temperature_period
-        try:
-            temperature = self._cluster_sampling_temperature_init * (1 - (self._num_programs % period) / period)
-            probabilities = self._softmax(cluster_scores, temperature)
-        except Exception as e:
-            logger.info(f" Error in temperature as {e}")
+        temperature = self._cluster_sampling_temperature_init * (1 - (self._num_programs % period) / period)
+        probabilities = self._softmax(cluster_scores, temperature)
 
         functions_per_prompt = min(len(self._clusters), self._functions_per_prompt)
-        try:
-            idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities)
-            chosen_signatures = [signatures[i] for i in idx]
-        except Exception as e:
-            logger.error(f"Cannot call idx because {e}")
+        idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities)
+        chosen_signatures = [signatures[i] for i in idx]
 
         implementations = []
         scores = []
         for signature in chosen_signatures:
             cluster = self._clusters[signature]
-            try:
-                implementations.append(cluster.sample_program())
-                scores.append(cluster.get_score())  # Ensure to use get_score() here
-            except Exception as e:
-                logger.error(f"Cannot call sample program because {e}")
+            implementations.append(cluster.sample_program())
+            scores.append(cluster.get_score())  
 
         indices = np.argsort(scores)
         sorted_implementations = [implementations[i] for i in indices]
@@ -561,13 +544,13 @@ class Island:
             )
             versioned_functions.append(header)
         except Exception as e: 
-            logger.info(f"Error in using replace for header {e}")
+            logger.error(f"Error in using replace for header {e}")
 
         if not isinstance(self._template, code_manipulation.Program):
             try:
                 self._template = code_manipulation.text_to_program(self._template)
             except Exception as e:
-                logger.info(f"Error in converting text to Program: {e}")
+                logger.error(f"Error in converting text to Program: {e}")
                 return None
 
         # Check if `preface` contains `self._function_to_evolve` and replace it if found
@@ -576,7 +559,7 @@ class Island:
             if self._function_to_evolve in preface:
                 new_function_version = f'{self._function_to_evolve}_v{next_version}'
                 preface = preface.replace(self._function_to_evolve, new_function_version)
-                logger.info(f"Replaced {self._function_to_evolve} with {new_function_version} in preface.")
+                logger.debug(f"Replaced {self._function_to_evolve} with {new_function_version} in preface.")
                 # Update the template with the modified preface
                 self._template = dataclasses.replace(self._template, preface=preface)
             else:
@@ -587,12 +570,12 @@ class Island:
         try: 
             prompt = dataclasses.replace(self._template, functions=versioned_functions)
         except Exception as e: 
-            logger.info(f"Error in prompt replace {e}")
+            logger.error(f"Error in prompt replace {e}")
     
         final_prompt = str(prompt).rstrip('\n')
-        logger.info(f"Final prompt is {final_prompt}")
     
         return final_prompt
+
 
 
     def function_body_exists(self, cleaned_body: str) -> bool:
@@ -601,7 +584,7 @@ class Island:
             try:
                 programs = cluster.get_programs()  # Retrieve all programs from the cluster
                 for program in programs:
-                    if program.body == cleaned_body:
+                    if program.clean_body()== cleaned_body:
                         return True
             except Exception as e:
                 logger.error(f"Error accessing programs in cluster: {e}")
@@ -645,7 +628,6 @@ class Cluster:
         return self._programs
 
     def register_program(self, program: code_manipulation.Function) -> None:
-        logger.info(f"Registered program {program}.")
         self._programs.append(program)
         self._lengths.append(len(str(program)))
 

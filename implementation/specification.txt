@@ -2,7 +2,7 @@
 Finds large independent set in graph G where nodes are binary strings of length n.
 Nodes in G are connected if they share a subsequence of length at least length n-s. 
 
-On every iteration, improve the priority_vX function over its previous versions above.
+On every iteration, improve the priority function over its previous versions above.
 Try to make the code short.
 """
 

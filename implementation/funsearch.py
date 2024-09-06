@@ -54,7 +54,7 @@ class TaskManager:
 
     def initialize_logger(self):
         logger = logging.getLogger('main_logger')
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
         log_file_path = os.path.join(os.getcwd(), 'funsearch.log')
         handler = RotatingFileHandler(log_file_path, maxBytes=100 * 1024 * 1024, backupCount=3)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -62,6 +62,8 @@ class TaskManager:
         logger.addHandler(handler)
         logger.propagate = False
         return logger
+
+
 
     async def adjust_consumers(self, channel, queue_name, target_fnc, processes, *args, max_consumers=80, min_consumers=1, threshold=5):
         while True:
@@ -73,23 +75,42 @@ class TaskManager:
             if message_count > threshold and consumer_count < max_consumers:
                 # CPU check for evaluator_queue
                 if queue_name == "evaluator_queue":
-                    # Get the number of CPUs with less than 50% usage
-                    cpu_usage = psutil.cpu_percent(percpu=True)
-                    available_cpus = sum(1 for usage in cpu_usage if usage < 50)
-                    self.logger.info(f"Available CPUs with <50% usage: {available_cpus}")
+                    # Get the CPUs available inside the Docker container (set of CPU IDs)
+                    cpu_affinity = os.sched_getaffinity(0)  # CPUs available to the container (e.g., {1, 2, 10, 12})
+                    self.logger.info(f"cpu_affinity is {cpu_affinity}")
+                    cpu_usage = psutil.cpu_percent(percpu=True)  # Gets the usage for all system CPUs
+
+                    # Map only the container CPUs to their actual usage
+                    container_cpu_usage = [cpu_usage[i] for i in cpu_affinity]
+
+                    # Count how many of the available CPUs are under 50% usage
+                    available_cpus_with_low_usage = sum(1 for usage in container_cpu_usage if usage < 50)
+
+                    # Log the number of available CPUs with low usage
+                    self.logger.info(f"Available CPUs with <50% usage (in container): {available_cpus_with_low_usage}")
 
                     # Scale up only if more than 3 CPUs have less than 50% usage
-                    if available_cpus <= 4:
+                    if available_cpus_with_low_usage <= 4:
                         self.logger.info(f"Cannot scale up {target_fnc}: Not enough available CPU resources.")
                         await asyncio.sleep(60)
                         continue
 
                 # GPU check for sampler_queue
                 if queue_name == "sampler_queue":
-                    # Get total available GPU memory across all GPUs
+                    # Respect CUDA_VISIBLE_DEVICES
+                    visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+
+                    # If CUDA_VISIBLE_DEVICES is set, filter the GPUs
+                    if visible_devices and visible_devices[0]:
+                        visible_devices = [int(dev.strip()) for dev in visible_devices]
+
                     gpus = GPUtil.getGPUs()
-                    total_available_gpu_memory = sum(gpu.memoryFree for gpu in gpus)
-                    self.logger.info(f"Total available GPU memory: {total_available_gpu_memory / 1024:.2f} GB")
+
+                    # Only consider GPUs that are listed in CUDA_VISIBLE_DEVICES
+                    filtered_gpus = [gpu for gpu in gpus if gpu.id in visible_devices]
+
+                    total_available_gpu_memory = sum(gpu.memoryFree for gpu in filtered_gpus)
+                    self.logger.info(f"Total available GPU memory (in container): {total_available_gpu_memory / 1024:.2f} GB")
 
                     # Scale up only if the total available GPU memory is more than 38 GB
                     if total_available_gpu_memory < 38 * 1024:
@@ -120,9 +141,8 @@ class TaskManager:
             # Sleep for 10 minutes before checking again
             await asyncio.sleep(120)
 
-
     async def periodic_checkpoint(self, main_database):
-        checkpoint_interval = 10800 # 3 hours
+        checkpoint_interval = 600 # 10 min
         while True:
             await asyncio.sleep(checkpoint_interval)
             #evoke save_checkpoint every checkpoint_interval seconds
@@ -345,7 +365,7 @@ class TaskManager:
                 database_queue = await channel.declare_queue("database_queue", durable=False, auto_delete=True)
 
                 evaluator_instance = evaluator.Evaluator(
-                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=30, local_id=local_id
+                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=300, local_id=local_id
                 )
                 evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
                 await evaluator_task
