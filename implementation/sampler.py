@@ -84,9 +84,7 @@ class LLM_model:
             # Generate multiple outputs for each prompt by passing the batch _samples_per_prompt times
             for _ in range(self._samples_per_prompt):
                 try:
-                    logger.debug(f"Before generating output")
                     outputs = self.model.generate(**inputs, **self.generate_kwargs, pad_token_id=self.tokenizer.eos_token_id)  # [batch_size, generated_length]
-                    logger.debug(f"After generating output")
                 except Exception as e:
                     logger.error(f"Could not generate prompts because {e}")
                 logger.debug(f"LLM: output dims is {outputs.shape}")
@@ -99,7 +97,7 @@ class LLM_model:
 
             # Transpose the results to group samples by prompt
             grouped_samples = list(map(list, zip(*all_samples)))
-            logger.debug(f"grouped samples are {grouped_samples}")
+            logger.debug(f"Grouped samples are {grouped_samples}")
 
             return grouped_samples
 
@@ -134,7 +132,6 @@ class Sampler:
                     async for message in stream:
                         batch.append(message)
                         current_time = asyncio.get_event_loop().time()
-                        logger.debug(f"Time elapsed is {(current_time - batch_start_time)}")
                         if len(batch) >= self.samples_per_batch or (current_time - batch_start_time) > batch_timeout:  
                             await self.process_batch(batch)
                             batch = []  # Reset batch after processing
@@ -145,7 +142,7 @@ class Sampler:
                 except Exception as e:
                     logger.error(f"Exception in consume_and_process: {e}")
         except asyncio.CancelledError:
-            logger.info("consume_and_process was canceled.")
+            logger.info("Consume_and_process was canceled.")
         except Exception as e:
             logger.error(f"Error setting up the channel or iterator: {e}")
 
@@ -158,6 +155,7 @@ class Sampler:
             try:
                 async with message.process():
                     prompt = programs_database.Prompt.deserialize(message.body.decode())
+                    logger.info(f"Prompt is {prompt}")
                     prompts.append(prompt.code)
                     metadata.append({
                         "island_id": prompt.island_id,
@@ -190,4 +188,4 @@ class Sampler:
                     )
                     logger.debug("Successfully published prompt to evaluator_queue")
                 except Exception as e:
-                    logger.error(f"SAMPLER: Exception in published prompt to evaluator_queue {e}.")
+                    logger.error(f"Sampler: Exception in published prompt to evaluator_queue {e}.")

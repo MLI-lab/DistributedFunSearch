@@ -18,6 +18,7 @@ import code_manipulation
 import config as config_lib
 import json
 import aio_pika
+import re
 
 logger = logging.getLogger('main_logger')
 
@@ -556,25 +557,34 @@ class Island:
         # Check if `preface` contains `self._function_to_evolve` and replace it if found
         if hasattr(self._template, 'preface'):
             preface = getattr(self._template, 'preface', '')
-            if self._function_to_evolve in preface:
-                new_function_version = f'{self._function_to_evolve}_v{next_version}'
-                preface = preface.replace(self._function_to_evolve, new_function_version)
-                logger.debug(f"Replaced {self._function_to_evolve} with {new_function_version} in preface.")
+    
+            # Create a regex pattern to match the function name followed by `_v{number}`
+            pattern = re.escape(self._function_to_evolve) + r'_v\d+'
+    
+            # Define the new versioned function name
+            new_function_version = f'{self._function_to_evolve}_v{next_version}'
+    
+            # Replace the matched pattern (e.g., function_v1) with the new version
+            if re.search(pattern, preface):
+                preface = re.sub(pattern, new_function_version, preface)
+                logger.debug(f"Replaced with {new_function_version} in preface.")
+        
                 # Update the template with the modified preface
                 self._template = dataclasses.replace(self._template, preface=preface)
             else:
                 logger.info(f"The preface does not contain the function name {self._function_to_evolve}.")
         else:
             logger.info(f"The template does not have a preface attribute.")
-    
-        try: 
+
+        try:
             prompt = dataclasses.replace(self._template, functions=versioned_functions)
-        except Exception as e: 
-            logger.error(f"Error in prompt replace {e}")
-    
+        except Exception as e:
+            logger.error(f"Error in prompt replace: {e}")
+
         final_prompt = str(prompt).rstrip('\n')
-    
+
         return final_prompt
+
 
 
 

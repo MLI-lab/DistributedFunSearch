@@ -77,7 +77,7 @@ class TaskManager:
                 if queue_name == "evaluator_queue":
                     # Get the CPUs available inside the Docker container (set of CPU IDs)
                     cpu_affinity = os.sched_getaffinity(0)  # CPUs available to the container (e.g., {1, 2, 10, 12})
-                    self.logger.info(f"cpu_affinity is {cpu_affinity}")
+                    self.logger.debug(f"cpu_affinity is {cpu_affinity}")
                     cpu_usage = psutil.cpu_percent(percpu=True)  # Gets the usage for all system CPUs
 
                     # Map only the container CPUs to their actual usage
@@ -365,7 +365,7 @@ class TaskManager:
                 database_queue = await channel.declare_queue("database_queue", durable=False, auto_delete=True)
 
                 evaluator_instance = evaluator.Evaluator(
-                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=300, local_id=local_id
+                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=100, local_id=local_id
                 )
                 evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
                 await evaluator_task

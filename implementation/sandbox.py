@@ -122,7 +122,8 @@ class ExternalProcessSandbox(DummySandbox):
         function_to_run: str,
         test_input,
         timeout_seconds: int,
-        count: int
+        count: int, 
+        cleanup: bool = False
     ) -> tuple[Any, bool]:
         call_data_folder = (self.output_path / f"call{count}").absolute()
 
@@ -164,8 +165,8 @@ class ExternalProcessSandbox(DummySandbox):
             logger.debug(f"Could not execute code: {e}", exc_info=True)
             return None, False
         finally:
-            # Perform cleanup regardless of success or failure
-            self.cleanup(call_data_folder, input_path, error_file)
+            if cleanup: 
+                self.cleanup(call_data_folder, input_path, error_file)
 
     def cleanup(self, call_data_folder: pathlib.Path, input_path: pathlib.Path, error_file: pathlib.Path):
         try:
