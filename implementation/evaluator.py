@@ -13,6 +13,8 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from torch.multiprocessing import Manager
 import gc
+from profiling import async_time_execution, async_track_memory
+
 
 logger = logging.getLogger('main_logger')
 
@@ -113,6 +115,8 @@ class Evaluator:
             base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id)
         self.executor = ProcessPoolExecutor(max_workers=10)
 
+    @async_track_memory
+    @async_time_execution
     async def consume_and_process(self):
         async with self.channel:
             await self.channel.set_qos(prefetch_count=1)

@@ -19,6 +19,8 @@ import config as config_lib
 import json
 import aio_pika
 import re
+from profiling import async_time_execution, async_track_memory
+
 
 logger = logging.getLogger('main_logger')
 
@@ -175,7 +177,8 @@ class ProgramsDatabase:
 
         return checkpoint_data
 
-
+    @async_time_execution
+    @async_track_memory
     async def consume_and_process(self) -> None:
         """ Consumes messages in batches from database queue and sends to be processed """
         batch_size = 10  
@@ -498,7 +501,8 @@ class Island:
         probabilities = self._softmax(cluster_scores, temperature)
 
         functions_per_prompt = min(len(self._clusters), self._functions_per_prompt)
-        idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities)
+        idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities, replace=False) # without replacement so that prompt cannot contain the same two previous versions
+
         chosen_signatures = [signatures[i] for i in idx]
 
         implementations = []

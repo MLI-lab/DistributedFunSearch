@@ -9,6 +9,8 @@ import asyncio
 import json
 import programs_database
 from typing import List
+from profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
+
 
 logger = logging.getLogger('main_logger')
 
@@ -57,7 +59,8 @@ class LLM_model:
             repetition_penalty=self.repetition_penalty,
             do_sample=True,
         )
-
+    @sync_track_memory
+    @sync_time_execution
     def draw_batch_samples(self, prompts: list) -> list:
         """Returns multiple predicted continuations for each prompt in a list of prompts."""
         try:
@@ -121,6 +124,8 @@ class Sampler:
             self.samples_per_prompt
         )
 
+    @async_time_execution
+    @async_track_memory
     async def consume_and_process(self) -> None:
         try:
             await self.channel.set_qos(prefetch_count=20)
