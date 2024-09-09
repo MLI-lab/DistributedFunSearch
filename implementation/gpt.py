@@ -1,60 +1,67 @@
-import openai
+from openai import OpenAI
 import asyncio
-import aio_pika
-from programs_database import Prompt
-import json
+import os
+import random
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+from accelerate.inference import prepare_pippy
+import numpy as np
 import logging
+import aio_pika
+import asyncio
+import json
+import programs_database
 from typing import List
+from profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
+
+
+import openai
+import os
+import logging
 
 logger = logging.getLogger('main_logger')
 
-import openai
-
 class LLM_model:
-    """Language model that predicts continuation of provided source code using GPT-4o Mini."""
-
-    def __init__(self, samples_per_prompt: int, api_key: str, model="gpt-4o-mini") -> None:
+    def __init__(self, samples_per_prompt: int, model="gpt-4o-mini"):
         self.samples_per_prompt = samples_per_prompt
-        self.api_key = api_key
         self.model = model
-        openai.api_key = self.api_key
+        self.client = openai.Client(api_key=os.getenv('OPENAI_API_KEY'))
 
-    async def draw_sample(self, prompt: str) -> list:
-        """Returns multiple predicted continuations for a given prompt using GPT-4o Mini."""
+    def draw_sample(self, prompt: str):  # No async needed
         try:
-            response = await openai.ChatCompletion.create(
-                model=self.model,
+            # Using synchronous ChatCompletion.create
+            response = self.client.chat.completions.create(
+                model=self.model,  # Your gpt-4o-mini model
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant specializing in Python programming."},
                     {"role": "user", "content": prompt}
                 ],
-                n=self.samples_per_prompt  # Generate specified number of samples per prompt
+                max_tokens=150,
+                n=self.samples_per_prompt
             )
-            logger.info(f"Repsonse looks like {response}")
-            return [choice['content'] for choice in response.choices]
+            logger.info(f"response is {response}")
+            # Correctly access 'message.content' in the response
+            return [choice.message.content for choice in response.choices]
         except Exception as e:
             logger.error(f"API error during draw_sample: {str(e)}")
             return []
 
 class Sampler:
-    """Node that samples program continuations and sends them for analysis."""
-
     def __init__(self, connection, channel, sampler_queue, evaluator_queue, config):
         self.connection = connection
         self.channel = channel
         self.sampler_queue = sampler_queue
         self.evaluator_queue = evaluator_queue
-        self.config=config
-        self._llm = LLM_model(samples_per_prompt= self.config.samples_per_prompt, api_key=config.api_key)
-        
+        self.config = config
+        self._llm = LLM_model(samples_per_prompt=self.config.samples_per_prompt)
 
-    async def consume_and_process(self) -> None:
+    async def consume_and_process(self):
         async with self.sampler_queue.iterator() as stream:
             async for message in stream:
                 async with message.process():
                     try:
-                        prompt = Prompt.deserialize(message.body.decode())
-                        responses = await self._llm.draw_sample(prompt.code)
+                        prompt = programs_database.Prompt.deserialize(message.body.decode())
+                        responses = self._llm.draw_sample(prompt.code)  # Removed 'await' since 'draw_sample' is synchronous
                         for response in responses:
                             message_data = {
                                 "sample": response,

@@ -13,7 +13,7 @@ import sys
 import pickle
 import config as config_lib
 import programs_database
-import sampler
+import gpt
 import code_manipulation
 from multiprocessing import Manager
 from multiprocessing.managers import BaseManager
@@ -291,7 +291,7 @@ class TaskManager:
                 sampler_queue = await channel.declare_queue("sampler_queue", durable=False, auto_delete=True)
                 evaluator_queue = await channel.declare_queue("evaluator_queue", durable=False, auto_delete=True)
 
-                sampler_instance = sampler.Sampler(connection, channel, sampler_queue, evaluator_queue, self.config)
+                sampler_instance = gpt.Sampler(connection, channel, sampler_queue, evaluator_queue, self.config)
                 sampler_task = asyncio.create_task(sampler_instance.consume_and_process())
                 await sampler_task
             except Exception as e:
