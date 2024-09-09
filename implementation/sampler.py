@@ -25,11 +25,11 @@ class LLM_model:
         # Define tuples for sampling
         temperature_top_p_tuples = [
             (0.94445, 0.7778), (1.1667, 0.64445), (0.944445, 0.8222),
-            (1.05, 0.6), (1.15, 0.75), (1.1, 0.8)
-        ]
+            (1.05, 0.6) ]
+            #, (1.15, 0.75), (1.1, 0.8)
+
         rep_penalty_max_new_tokens_tuples = [
-            (1.222, 246), (1.1, 108), (1.05, 60),
-            (1.05, 140), (1.222, 260), (1.2, 100)
+            (1.222, 246), (1.1, 140), (1.222, 260), (1.2, 100)
         ]
 
         # Sample from tuples
@@ -124,11 +124,10 @@ class Sampler:
             self.samples_per_prompt
         )
 
-    @async_time_execution
-    @async_track_memory
+
     async def consume_and_process(self) -> None:
         try:
-            await self.channel.set_qos(prefetch_count=20)
+            await self.channel.set_qos(prefetch_count=10)
             async with self.sampler_queue.iterator() as stream:
                 batch = []
                 batch_timeout=0.4
@@ -138,7 +137,7 @@ class Sampler:
                         batch.append(message)
                         current_time = asyncio.get_event_loop().time()
                         if len(batch) >= self.samples_per_batch or (current_time - batch_start_time) > batch_timeout:  
-                            await self.process_batch(batch)
+                            await self.process_batch_s(batch)
                             batch = []  # Reset batch after processing
                             batch_start_time = asyncio.get_event_loop().time() 
                 except asyncio.CancelledError:
@@ -151,7 +150,9 @@ class Sampler:
         except Exception as e:
             logger.error(f"Error setting up the channel or iterator: {e}")
 
-    async def process_batch(self, batch: List[aio_pika.IncomingMessage]):
+    @async_time_execution
+    @async_track_memory
+    async def process_batch_s(self, batch: List[aio_pika.IncomingMessage]):
         prompts = []
         metadata = []
 
@@ -160,8 +161,11 @@ class Sampler:
             try:
                 async with message.process():
                     prompt = programs_database.Prompt.deserialize(message.body.decode())
-                    logger.info(f"Prompt is {prompt}")
-                    prompts.append(prompt.code)
+                    try: 
+                        logger.info(f"Prompt is {prompt}")
+                        prompts.append(prompt.code)
+                    except Exception as e:
+                        logger.error(f"Sampler error cannot print prompt or append {e}")
                     metadata.append({
                         "island_id": prompt.island_id,
                         "version_generated": prompt.version_generated,

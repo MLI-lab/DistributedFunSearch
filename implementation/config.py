@@ -45,9 +45,9 @@ class ProgramsDatabaseConfig:
   functions_per_prompt: int = 2
   num_islands: int = 10
   reset_period: int = 4 * 60 * 60 
-  cluster_sampling_temperature_init: float = 0.1
-  cluster_sampling_temperature_period: int = 30_000
-  prompts_per_batch= 5
+  cluster_sampling_temperature_init: float = 2 # changed from 0.1 to 1
+  cluster_sampling_temperature_period: int = 30_000 # after 30_000 reset 
+  prompts_per_batch= 10
 
 
 

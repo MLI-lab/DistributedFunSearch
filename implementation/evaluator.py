@@ -115,8 +115,7 @@ class Evaluator:
             base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id)
         self.executor = ProcessPoolExecutor(max_workers=10)
 
-    @async_track_memory
-    @async_time_execution
+
     async def consume_and_process(self):
         async with self.channel:
             await self.channel.set_qos(prefetch_count=1)
@@ -129,7 +128,8 @@ class Evaluator:
                     raise  # Ensure the cancellation is propagated
                 finally:
                     self.shutdown()
-
+    @async_time_execution
+    @async_track_memory
     async def process_message(self, message: aio_pika.IncomingMessage):
         async with message.process():
             raw_data = message.body.decode()
@@ -154,9 +154,13 @@ class Evaluator:
                     logger.debug(f"Evaluator: scores_per_test {scores_per_test}")
 
             if scores_per_test:
-                result = (new_function, data['island_id'], scores_per_test, data['expected_version'])
-                logger.debug(f"Scores are {scores_per_test}")
-            else:
+                last_score = list(scores_per_test.values())[-1]
+                if last_score != 0:
+                    result = (new_function, data['island_id'], scores_per_test, data['expected_version'])
+                    logger.debug(f"Scores are {scores_per_test}")
+                else:
+                    result = ("return", data['island_id'], {}, data['expected_version'])
+            else: 
                 result = ("return", data['island_id'], {}, data['expected_version'])
             try:
                 await self.publish_to_database(result, message)

@@ -136,7 +136,9 @@ class ProgramsDatabase:
         self._template = template
         self.samples_per_batch = config.prompts_per_batch
         self._function_to_evolve = function_to_evolve
-        self._correct_programs = 0 
+        self.registered_programs = 0 
+        self.total_programs = 0 
+        self.execution_failed=0
         self._best_score_per_island = [-float('inf')] * config.num_islands
         self._best_program_per_island = [None] * config.num_islands
         self._best_scores_per_test_per_island = [None] * config.num_islands
@@ -154,7 +156,9 @@ class ProgramsDatabase:
         Serializes the necessary state of the database for checkpointing.
         """
         checkpoint_data = {
-            "correct_programs": self._correct_programs,
+            "registered_programs": self.registered_programs,
+            "total_programs": self.total_programs,
+            "execution_failed": self.execution_failed,
             "best_score_per_island": self._best_score_per_island,
             "best_program_per_island": [str(program) if program else None for program in self._best_program_per_island],
             "best_scores_per_test_per_island": self._best_scores_per_test_per_island,
@@ -177,8 +181,7 @@ class ProgramsDatabase:
 
         return checkpoint_data
 
-    @async_time_execution
-    @async_track_memory
+
     async def consume_and_process(self) -> None:
         """ Consumes messages in batches from database queue and sends to be processed """
         batch_size = 10  
@@ -202,6 +205,8 @@ class ProgramsDatabase:
                 except Exception as e:
                     logger.error(f"Error processing messages: {e}")
 
+    @async_time_execution
+    @async_track_memory
     async def process_batch(self, batch: List[aio_pika.IncomingMessage]):
         """
         Processes a batch of messages asynchronously.
@@ -222,6 +227,7 @@ class ProgramsDatabase:
 
             if data["new_function"] == "return":
                 await self.get_prompt()
+                self.execution_failed+= 1
                 logger.debug("Received None for new_function. Skipping registration.")
                 return
             try:
@@ -239,7 +245,7 @@ class ProgramsDatabase:
             expected_version = data.get("expected_version", None)
             try:
                 await self.register_program(program, island_id, scores_per_test, expected_version)
-                self._correct_programs += 1
+                self.total_programs+= 1
             except Exception as e:
                 logger.error(f"Database: Error in register program {e}")
             try:
@@ -267,9 +273,7 @@ class ProgramsDatabase:
             
         # Do not register program in island if body is None or identical body already exists.
         if island_id is not None:
-            logger.debug(f"In if island_id is not None: ")
             island = self._islands[island_id]
-            logger.debug(f"After if island_id is not None: and island is {island} ")
             if program.body is None:
                 logger.debug("Program body is None. Skipping registration.")
                 return
@@ -297,6 +301,7 @@ class ProgramsDatabase:
                     return
             try: 
                 await self._register_program_in_island(program, island_id, scores_per_test)
+                self.registered_programs += 1
             except Exception as e: 
                 logger.error(f"Could not call self._register_program_in_island because {e}")
 
@@ -358,7 +363,7 @@ class ProgramsDatabase:
                 logger.info("Reset islands sucessfully")
                 # Fetch new prompt after reset to start loop again ( as evaluator and sampler queue are now empty)
                 # Not really necessary as probably workers busy with processing messages 
-                # await self.get_prompt() 
+                await self.get_prompt() 
         except Exception as e:
             logger.error(f"Error during island reset: {e}")
 
@@ -371,11 +376,16 @@ class ProgramsDatabase:
         """
         island_id = np.random.randint(len(self._islands))
         try: 
+            # Code is the string that is the prompz
             code, version_generated = self._islands[island_id].get_prompt()
         except Exception as e: 
-            logger.error(f"Cannot call get prompt, code is {code} on island {e}")
+            logger.error(f"Cannot call get prompt, code on island {e}")
         expected_version = self._islands[island_id].version
-        prompt = Prompt(code, version_generated, island_id, expected_version)
+        logger.info(f"Code is {code} and version generated {version_generated}")
+        try: 
+            prompt = Prompt(code, version_generated, island_id, expected_version)
+        except Exception as e: 
+            logger.error(f"Error here: Prompt(code, version_generated, island_id, expected_version) code error message is: {e}")
 
         try:
             serialized_prompt = prompt.serialize()
@@ -398,7 +408,10 @@ def create_new_manager():
 
 def create_cluster_proxy(manager, score, program):
     """ Factory method to create cluster proxies using the island-specific manager. """
+    logger = logging.getLogger('main_logger')  # Get the main logger
+    logger.info(f"Creating cluster proxy with score {score} and program {program}")
     return manager.Cluster(score, program)
+
 
 
 class Island:
@@ -422,6 +435,7 @@ class Island:
         self.version = 0
         self.scores_per_test=None
 
+
     def get_clusters(self):
         """Return the clusters dictionary."""
         return self._clusters
@@ -429,11 +443,15 @@ class Island:
     def cluster_length(self):
         return len(self._clusters)
 
-    def _get_signature(self, scores_per_test: ScoresPerTest) -> Signature:
-        """Represents test scores as a canonical signature, i.e., input {'test3': 88, 'test1': 95, 'test2': 90} 
-        to sorted output tuple (95, 90, 88).
-        """
+    def _get_signature(self, scores_per_test):
+        """ Converts string tuple keys to actual tuples, sorts them, and retrieves corresponding values. """
+        # Converting string keys to tuples if they are not already tuples
+        if all(isinstance(k, str) for k in scores_per_test.keys()):
+            scores_per_test = {eval(k): v for k, v in scores_per_test.items()}
+
+        # Sorting keys which are now tuples and creating a signature tuple
         return tuple(scores_per_test[k] for k in sorted(scores_per_test.keys()))
+
 
     def _reduce_score(self, scores_per_test: dict, mode: str = 'last') -> float:
         """
@@ -444,6 +462,7 @@ class Island:
         """
         n_dimensions = 6  # Define the number of expected dimensions (e.g., 6)
         all_dimensions = list(range(n_dimensions))  # Create a list of dimensions [0, 1, 2, ..., n_dimensions-1]
+        print(f"Scores per test are: {scores_per_test}")
 
         if mode == 'last':
             return scores_per_test[list(scores_per_test.keys())[-1]]
@@ -481,7 +500,7 @@ class Island:
         try: 
             signature = self._get_signature(scores_per_test)
         except Exception as e: 
-            logger.error(f"Error in  signature = self._get_signature(scores_per_test) in Island due to {e}")
+            print(f"Error in  signature = self._get_signature(scores_per_test) in Island due to {e}")
         if signature not in self._clusters:
             score = self._reduce_score(scores_per_test)
             self._clusters[signature] = create_cluster_proxy(self.manager, score, program)
@@ -492,31 +511,65 @@ class Island:
 
     def get_prompt(self) -> tuple[str, int]:
         """Constructs a prompt containing functions from this island."""
-        signatures = list(self._clusters.keys())
+        print("In get prompt in island")
+        signatures = list(self._clusters.keys()) # clusters is a manager dict that exposes its keys directly
+        print(f"After acessing keys of clusters sig are {signatures}")
         cluster_scores = np.array([self._clusters[signature].get_score() for signature in signatures])
+        try: 
+            print(f"Cluster scores are {cluster_scores}")
+        except Exception as e: 
+            print(f"Cannot print debug cluster score because {e}")
 
         # Convert scores to probabilities using softmax with temperature schedule.
         period = self._cluster_sampling_temperature_period
-        temperature = self._cluster_sampling_temperature_init * (1 - (self._num_programs % period) / period)
-        probabilities = self._softmax(cluster_scores, temperature)
+        if self._num_programs % period==0: 
+            print(f"Resetting to initial temperature value")
+        temperature = self._cluster_sampling_temperature_init * (1 - (self._num_programs % period) / period) # temperarture decreases as more programs get added, Every time self._num_programs % self._cluster_sampling_temperature_period equals 0 the temp resets to iniial value
+    
+        # Calculate softmax probabilities
+        try: 
+            probabilities = self._softmax(cluster_scores, temperature)
+        except Exception as e: 
+            print(f" cannot call softmax because cluster scores are {cluster_scores}")
+        try: 
+            print(f"Probabilities are {probabilities}")
+        except Exception as e: 
+            print(f"Cannot debug probabilities because {e}")
 
+        # Count non-zero probabilities
+        #non_zero_prob_count = np.count_nonzero(probabilities)
+    
+        # Adjust functions_per_prompt to non-zero probabilities
         functions_per_prompt = min(len(self._clusters), self._functions_per_prompt)
-        idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities, replace=False) # without replacement so that prompt cannot contain the same two previous versions
+        #functions_per_prompt = min(non_zero_prob_count, self._functions_per_prompt)
 
+        # Log warning if non-zero probabilities are fewer than requested
+        #if non_zero_prob_count < self._functions_per_prompt:
+        #    logger.error(f"Sampling fewer functions ({non_zero_prob_count}) than requested due to non-zero probabilities.")
+
+        #if functions_per_prompt == 0:
+        #    logger.error("No valid non-zero probabilities to sample from.")
+        #    return None, 0
+
+        # Proceed with sampling based on available non-zero probabilities
+        try:
+            #idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities)
+            idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities, replace=False)
+        except ValueError as e:
+            print(f"Error in sampling with np.random.choice: {e}")
+            return None, 0
+
+        # Select and sort implementations based on their scores
         chosen_signatures = [signatures[i] for i in idx]
-
-        implementations = []
-        scores = []
-        for signature in chosen_signatures:
-            cluster = self._clusters[signature]
-            implementations.append(cluster.sample_program())
-            scores.append(cluster.get_score())  
+        implementations = [self._clusters[signature].sample_program() for signature in chosen_signatures]
+        scores = [self._clusters[signature].get_score() for signature in chosen_signatures]
 
         indices = np.argsort(scores)
         sorted_implementations = [implementations[i] for i in indices]
         version_generated = len(sorted_implementations) + 1
 
         return self._generate_prompt(sorted_implementations), version_generated
+
 
 
     def _generate_prompt(
@@ -549,13 +602,13 @@ class Island:
             )
             versioned_functions.append(header)
         except Exception as e: 
-            logger.error(f"Error in using replace for header {e}")
+            print(f"Error in using replace for header {e}")
 
         if not isinstance(self._template, code_manipulation.Program):
             try:
                 self._template = code_manipulation.text_to_program(self._template)
             except Exception as e:
-                logger.error(f"Error in converting text to Program: {e}")
+                print(f"Error in converting text to Program: {e}")
                 return None
 
         # Check if `preface` contains `self._function_to_evolve` and replace it if found
@@ -571,19 +624,19 @@ class Island:
             # Replace the matched pattern (e.g., function_v1) with the new version
             if re.search(pattern, preface):
                 preface = re.sub(pattern, new_function_version, preface)
-                logger.debug(f"Replaced with {new_function_version} in preface.")
+                self.logger.debug(f"Replaced with {new_function_version} in preface.")
         
                 # Update the template with the modified preface
                 self._template = dataclasses.replace(self._template, preface=preface)
             else:
-                logger.info(f"The preface does not contain the function name {self._function_to_evolve}.")
+                self.logger.info(f"The preface does not contain the function name {self._function_to_evolve}.")
         else:
-            logger.info(f"The template does not have a preface attribute.")
+            self.logger.info(f"The template does not have a preface attribute.")
 
         try:
             prompt = dataclasses.replace(self._template, functions=versioned_functions)
         except Exception as e:
-            logger.error(f"Error in prompt replace: {e}")
+            self.logger.error(f"Error in prompt replace: {e}")
 
         final_prompt = str(prompt).rstrip('\n')
 
@@ -599,14 +652,19 @@ class Island:
                 programs = cluster.get_programs()  # Retrieve all programs from the cluster
                 for program in programs:
                     if program.clean_body()== cleaned_body:
+                        self.logger.debug(f"Sucessfully compared without error")
                         return True
             except Exception as e:
-                logger.error(f"Error accessing programs in cluster: {e}")
+                self.logger.error(f"Error accessing programs in cluster: {e}")
         return False
 
 
 class IslandProxy(NamespaceProxy):
     _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'get_prompt', 'function_body_exists', '_get_signature', 'cluster_length', 'get_clusters')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)  # Initialize the NamespaceProxy with arguments from Manager
+        self.logger = logging.getLogger('main_logger')  # Get the logger for this proxy
 
     def register_program(self, program, scores_per_test):
         self._callmethod('register_program', (program, scores_per_test))
@@ -625,7 +683,7 @@ class IslandProxy(NamespaceProxy):
 
     def get_clusters(self):
         return self._callmethod('get_clusters')
-     
+
 
 
 class Cluster:
@@ -665,6 +723,10 @@ class Cluster:
 class ClusterProxy(NamespaceProxy):
     _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'sample_program', 'get_score', 'get_programs')
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)  # Initialize the NamespaceProxy with arguments from Manager
+        self.logger = logging.getLogger('main_logger')  # Get the logger for this proxy
+
     def register_program(self, program):
         self._callmethod('register_program', (program,))
 
@@ -676,6 +738,8 @@ class ClusterProxy(NamespaceProxy):
 
     def get_programs(self):
         return self._callmethod('get_programs')
+
+
 
 
 

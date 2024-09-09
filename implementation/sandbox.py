@@ -19,6 +19,9 @@ logging.basicConfig(
 
 logger = logging.getLogger('logger')
 
+main_logger = logging.getLogger('my_logger')
+
+
 
 CONTAINER_MAIN = (pathlib.Path(__file__).parent / "container" / "container_main.py").absolute()
 
@@ -108,7 +111,7 @@ class ExternalProcessSandbox(DummySandbox):
                 time.sleep(0.1)  # Sleep briefly before checking again
 
             # If we reach here, the process timed out
-            logger.error("Process terminated due to timeout")
+            main_logger.error("Process terminated due to timeout")
             process.kill()  # Forcefully terminate the process
             return False
 
@@ -123,7 +126,7 @@ class ExternalProcessSandbox(DummySandbox):
         test_input,
         timeout_seconds: int,
         count: int, 
-        cleanup: bool = False
+        cleanup: bool = True
     ) -> tuple[Any, bool]:
         call_data_folder = (self.output_path / f"call{count}").absolute()
 

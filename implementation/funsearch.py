@@ -365,7 +365,7 @@ class TaskManager:
                 database_queue = await channel.declare_queue("database_queue", durable=False, auto_delete=True)
 
                 evaluator_instance = evaluator.Evaluator(
-                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=100, local_id=local_id
+                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=300, local_id=local_id
                 )
                 evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
                 await evaluator_task
