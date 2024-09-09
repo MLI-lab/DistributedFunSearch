@@ -26,6 +26,24 @@ class LLM_model:
         self.samples_per_prompt = samples_per_prompt
         self.model = model
         self.client = openai.Client(api_key=os.getenv('OPENAI_API_KEY'))
+        # Initialize counters for tracking usage
+        self.total_requests = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_tokens = 0
+        self.total_cost = 0.0  # Track total cost
+
+    def calculate_cost(self, prompt_tokens, completion_tokens):
+        # Rates for gpt-4o-mini
+        prompt_rate = 0.150 / 1_000_000  # $0.150 per 1M input tokens
+        completion_rate = 0.600 / 1_000_000  # $0.600 per 1M output tokens
+
+        # Calculate cost for this request
+        prompt_cost = prompt_tokens * prompt_rate
+        completion_cost = completion_tokens * completion_rate
+
+        # Return total cost
+        return prompt_cost + completion_cost
 
     def draw_sample(self, prompt: str):  # No async needed
         try:
@@ -39,9 +57,29 @@ class LLM_model:
                 max_tokens=150,
                 n=self.samples_per_prompt
             )
-            logger.info(f"response is {response}")
+
+            # Extract usage details from the response as attributes
+            usage = response.usage
+            self.total_requests += 1
+            self.total_prompt_tokens += usage.prompt_tokens
+            self.total_completion_tokens += usage.completion_tokens
+            self.total_tokens += usage.total_tokens
+
+            # Calculate the cost for this request
+            cost = self.calculate_cost(usage.prompt_tokens, usage.completion_tokens)
+            self.total_cost += cost
+
+            # Log the response, tokens, and cost
+            logger.info(f"Response: {response}")
+            logger.info(f"Tokens used in this request: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
+            logger.info(f"Cost for this request: ${cost:.6f}")
+            logger.info(f"Total cost so far: ${self.total_cost:.6f}")
+            logger.info(f"Total requests so far: {self.total_requests}")
+            logger.info(f"Total tokens used so far: prompt={self.total_prompt_tokens}, completion={self.total_completion_tokens}, total={self.total_tokens}")
+
             # Correctly access 'message.content' in the response
             return [choice.message.content for choice in response.choices]
+        
         except Exception as e:
             logger.error(f"API error during draw_sample: {str(e)}")
             return []
