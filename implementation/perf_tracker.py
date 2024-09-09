@@ -6,116 +6,137 @@ from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime
 
-# Path to the checkpoint file and output HTML file
-CHECKPOINT_FILEPATH = "/franziska/implementation/checkpoint.pkl"
+# Directory where checkpoints are saved
+CHECKPOINT_DIR = "/franziska/implementation/"
 HTML_OUTPUT_PATH = "/franziska/implementation/performance_over_time.html"
 
-# Initialize the Plotly figure with 4 rows and 3 columns
+# Figure setup
 fig = make_subplots(rows=4, cols=3, shared_xaxes=False, vertical_spacing=0.1,
                     subplot_titles=['Performance Over Time'] + [f'Cluster Diversity for Island {i+1}' for i in range(10)])
 
-# Configure the layout for the entire figure
+# Adjust title and font sizes globally
 fig.update_layout(
     title='Island and Cluster Analysis',
     legend_title='Islands',
-    hovermode='closest'
+    hovermode='closest',
+    font=dict(size=10),  # Smaller font size for general text
 )
 
-# Function to update the cluster diversity plot for each island
-def update_cluster_visualization(selected_island, islands_state, last_reset_time, row, col):
+# Apply specific settings to x-axes to reduce the label font size
+for i in range(1, 12):
+    fig.update_xaxes(row=(i - 1) // 3 + 1, col=(i - 1) % 3 + 1, tickfont=dict(size=8))  # Make x-axis labels smaller
+
+# Store island performance data globally
+island_performance_data = {}
+
+# Update performance plot with lines connecting points for each island
+def update_performance_plot(checkpoint_data, file_mtime):
+    time_value = datetime.fromtimestamp(file_mtime)  # Convert file modification time to datetime
+    
+    for idx, score in enumerate(checkpoint_data.get("best_score_per_island", [])):
+        island_id = idx + 1
+        
+        # If the island doesn't exist in the performance data, initialize it
+        if island_id not in island_performance_data:
+            island_performance_data[island_id] = {'times': [], 'scores': []}
+        
+        # Append the current time and score to the respective island's data
+        island_performance_data[island_id]['times'].append(time_value)
+        island_performance_data[island_id]['scores'].append(score)
+        
+        # Plot the island's performance over time (connecting the dots with lines)
+        fig.add_trace(
+            go.Scatter(
+                x=island_performance_data[island_id]['times'], 
+                y=island_performance_data[island_id]['scores'], 
+                mode='lines+markers', 
+                name=f'Island {island_id} Performance',
+                marker=dict(size=8),  # Marker size can be adjusted here
+                line=dict(width=2)    # Line width can also be adjusted here
+            ),
+            row=1, col=1
+        )
+
+# Update cluster data visualization
+def update_cluster_visualization(selected_island, islands_state, file_mtime, row, col):
     island = islands_state[selected_island]
     clusters = island.get('clusters', {})
-
-    # Convert to numpy.datetime64 for better handling in Plotly
-    time_value = np.datetime64(datetime.fromtimestamp(last_reset_time))
-
-    x_values = []
-    y_values = []
-    sizes = []
-    labels = []
-
-    # Increased jitter magnitude and applied jitter directly to datetime
+    time_value = np.datetime64(datetime.fromtimestamp(file_mtime))
     jitter = np.random.uniform(-5, 5, size=len(clusters))  # Jitter in minutes
 
+    sizes = []  # Define sizes array to store the size of each cluster
+
+    # Calculate marker sizes for clusters
     for i, (cluster_signature, cluster_info) in enumerate(clusters.items()):
-        cluster_score = cluster_info.get('score', 0)
-        cluster_size = len(cluster_info.get('programs', []))
+        cluster_size = len(cluster_info.get('programs', []))  # Get the size of the cluster (number of programs)
+        sizes.append(cluster_size * 20)  # Set the size of the marker proportional to the number of programs
 
-        # Apply jitter in minutes
-        jitter_timedelta = np.timedelta64(int(jitter[i] * 60), 's')
-        x_values.append(time_value + jitter_timedelta)
-        y_values.append(cluster_score)
-        sizes.append(cluster_size * 20)
-        labels.append(f"Cluster Score: {cluster_score}, Size: {cluster_size}")
+        jitter_timedelta = np.timedelta64(int(jitter[i] * 60), 's')  # Apply jitter for cluster visualization, range is 5 min before and after
+        fig.add_trace(
+            go.Scatter(
+                x=[time_value + jitter_timedelta],
+                y=[cluster_info.get('score', 0)],
+                mode='markers',
+                marker=dict(size=sizes[i], color='rgba(100, 200, 255, 0.6)', sizemode='area', sizeref=2.0 * max(sizes) / (40. ** 2), sizemin=4),
+                text=f"Cluster Score: {cluster_info.get('score', 0)}, Size: {cluster_size}",
+                name=f"Island {selected_island + 1}"
+            ),
+            row=row, col=col
+        )
 
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=y_values,
-            mode='markers',
-            marker=dict(size=sizes, color='rgba(100, 200, 255, 0.6)', sizemode='area', sizeref=2.0 * max(sizes) / (40. ** 2), sizemin=4),
-            text=labels,
-            name=f"Island {selected_island + 1}"
-        ),
-        row=row, col=col
-    )
-
-# Function to update the entire visualization and pre-load all islands' data
-def update_visualization():
-    if os.path.exists(CHECKPOINT_FILEPATH):
-        with open(CHECKPOINT_FILEPATH, "rb") as f:
+# Update visualization
+def update_visualization(checkpoint_filepath, file_mtime):
+    if os.path.exists(checkpoint_filepath):
+        with open(checkpoint_filepath, "rb") as f:
             checkpoint_data = pickle.load(f)
-
-        best_scores_per_island = checkpoint_data.get("best_score_per_island", [])
-        islands_state = checkpoint_data.get("islands_state", [])
         
-        # Start with the current time
-        last_reset_time = time.time()
-
-        # Update performance over time for all islands
-        for idx, score in enumerate(best_scores_per_island):
-            # Increment the time to simulate a time step
-            current_time = last_reset_time + idx * 60  # Increment by 60 seconds (for example)
-            fig.add_trace(
-                go.Scatter(x=[datetime.fromtimestamp(current_time)], y=[score], mode='lines+markers', name=f'Island {idx + 1} Performance'),
-                row=1, col=1
-            )
-
-        # Update cluster diversity data for each island
+        # Update performance plot (with lines connecting points)
+        update_performance_plot(checkpoint_data, file_mtime)
+        
+        # Update cluster plots with jitter
         row, col = 1, 2
-        for idx in range(len(islands_state)):
+        for idx in range(len(checkpoint_data.get("islands_state", []))):
             if col > 3:
                 row += 1
                 col = 1
-            
-            # Use a different time value for each island's cluster update
-            update_cluster_visualization(idx, islands_state, last_reset_time + idx * 60, row, col)
+            update_cluster_visualization(idx, checkpoint_data['islands_state'], file_mtime + idx * 60, row, col)
             col += 1
-
+        
         fig.write_html(HTML_OUTPUT_PATH, auto_open=False)
-
     else:
         print("Checkpoint file not found.")
 
-# Function to check file modification and update
-def check_for_updates(filepath, interval=60):
-    last_mtime = None
+# Monitor for new checkpoint files
+def check_for_new_checkpoints(directory, interval=60):
+    last_seen_timestamp = None
+    
     while True:
         try:
-            current_mtime = os.path.getmtime(filepath)
-            if last_mtime is None:
-                last_mtime = current_mtime
-            elif current_mtime > last_mtime:
-                print("File has been modified. Updating visualization...")
-                last_mtime = current_mtime
-                update_visualization()
-        except FileNotFoundError:
-            print("File not found. Waiting for it to appear...")
+            # List all checkpoint files and extract the timestamp from their names
+            checkpoint_files = [f for f in os.listdir(directory) if f.startswith("checkpoint_") and f.endswith(".pkl")]
+            checkpoint_timestamps = [int(f.split("_")[1].split(".")[0]) for f in checkpoint_files]
+            
+            if checkpoint_timestamps:
+                # Find the most recent checkpoint file
+                latest_timestamp = max(checkpoint_timestamps)
+                
+                # If there's a new checkpoint, process it
+                if last_seen_timestamp is None or latest_timestamp > last_seen_timestamp:
+                    latest_checkpoint_file = f"checkpoint_{latest_timestamp}.pkl"
+                    print(f"New checkpoint detected: {latest_checkpoint_file}")
+                    
+                    # Update the visualization with the new checkpoint
+                    checkpoint_filepath = os.path.join(directory, latest_checkpoint_file)
+                    update_visualization(checkpoint_filepath, latest_timestamp)
+                    
+                    # Update the last seen timestamp
+                    last_seen_timestamp = latest_timestamp
+
         except Exception as e:
-            print("Error checking file:", e)
+            print(f"Error while checking for new checkpoints: {e}")
+        
         time.sleep(interval)
 
-# Main execution block
 if __name__ == "__main__":
-    print("Monitoring changes to:", CHECKPOINT_FILEPATH)
-    check_for_updates(CHECKPOINT_FILEPATH)
+    print(f"Monitoring new checkpoints in directory: {CHECKPOINT_DIR}")
+    check_for_new_checkpoints(CHECKPOINT_DIR)

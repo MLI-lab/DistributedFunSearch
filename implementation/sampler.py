@@ -29,7 +29,7 @@ class LLM_model:
             #, (1.15, 0.75), (1.1, 0.8)
 
         rep_penalty_max_new_tokens_tuples = [
-            (1.222, 246), (1.1, 140), (1.222, 260), (1.2, 100)
+            (1.222, 246), (1.1, 140), (1.222, 260), (1.2, 100), (1.222223, 300)
         ]
 
         # Sample from tuples
@@ -59,8 +59,8 @@ class LLM_model:
             repetition_penalty=self.repetition_penalty,
             do_sample=True,
         )
-    @sync_track_memory
-    @sync_time_execution
+    #@sync_track_memory
+    #@sync_time_execution
     def draw_batch_samples(self, prompts: list) -> list:
         """Returns multiple predicted continuations for each prompt in a list of prompts."""
         try:
@@ -150,8 +150,8 @@ class Sampler:
         except Exception as e:
             logger.error(f"Error setting up the channel or iterator: {e}")
 
-    @async_time_execution
-    @async_track_memory
+    #@async_time_execution
+    #@async_track_memory
     async def process_batch_s(self, batch: List[aio_pika.IncomingMessage]):
         prompts = []
         metadata = []

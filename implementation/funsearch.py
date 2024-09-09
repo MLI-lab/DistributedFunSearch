@@ -21,6 +21,7 @@ import copy
 import psutil # for checking CPU utilization.
 import GPUtil # for checking GPU memory usage.
 from typing import Sequence, Any
+import threading
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -29,11 +30,11 @@ class CustomManager(BaseManager):
     pass
 
 def save_checkpoint(main_database):
-    filepath = os.path.join(os.getcwd(), "checkpoint.pkl")
+    timestamp = int(time.time())  # Gets the current time as an integer timestamp
+    filepath = os.path.join(os.getcwd(), f"checkpoint_{timestamp}.pkl")  # Creates a file name with the timestamp
     data = main_database.serialize_checkpoint()
     with open(filepath, "wb") as f:
         pickle.dump(data, f)
-
 
 
 class TaskManager:
@@ -64,7 +65,6 @@ class TaskManager:
         return logger
 
 
-
     async def adjust_consumers(self, channel, queue_name, target_fnc, processes, *args, max_consumers=80, min_consumers=1, threshold=5):
         while True:
             queue = await channel.declare_queue(queue_name, durable=False, auto_delete=True)
@@ -75,18 +75,13 @@ class TaskManager:
             if message_count > threshold and consumer_count < max_consumers:
                 # CPU check for evaluator_queue
                 if queue_name == "evaluator_queue":
-                    # Get the CPUs available inside the Docker container (set of CPU IDs)
                     cpu_affinity = os.sched_getaffinity(0)  # CPUs available to the container (e.g., {1, 2, 10, 12})
                     self.logger.debug(f"cpu_affinity is {cpu_affinity}")
                     cpu_usage = psutil.cpu_percent(percpu=True)  # Gets the usage for all system CPUs
-
-                    # Map only the container CPUs to their actual usage
                     container_cpu_usage = [cpu_usage[i] for i in cpu_affinity]
 
                     # Count how many of the available CPUs are under 50% usage
                     available_cpus_with_low_usage = sum(1 for usage in container_cpu_usage if usage < 50)
-
-                    # Log the number of available CPUs with low usage
                     self.logger.info(f"Available CPUs with <50% usage (in container): {available_cpus_with_low_usage}")
 
                     # Scale up only if more than 3 CPUs have less than 50% usage
@@ -97,18 +92,12 @@ class TaskManager:
 
                 # GPU check for sampler_queue
                 if queue_name == "sampler_queue":
-                    # Respect CUDA_VISIBLE_DEVICES
                     visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
-
-                    # If CUDA_VISIBLE_DEVICES is set, filter the GPUs
                     if visible_devices and visible_devices[0]:
                         visible_devices = [int(dev.strip()) for dev in visible_devices]
 
                     gpus = GPUtil.getGPUs()
-
-                    # Only consider GPUs that are listed in CUDA_VISIBLE_DEVICES
                     filtered_gpus = [gpu for gpu in gpus if gpu.id in visible_devices]
-
                     total_available_gpu_memory = sum(gpu.memoryFree for gpu in filtered_gpus)
                     self.logger.info(f"Total available GPU memory (in container): {total_available_gpu_memory / 1024:.2f} GB")
 
@@ -119,35 +108,57 @@ class TaskManager:
                         continue
 
                 # If resource checks passed, scale up
-                proc = mp.Process(target=target_fnc, args=args)
-                self.logger.info(f"Scaling up on {target_fnc} ... ")
-                proc.start()
-                with self.shared_lock:
-                    processes.append(proc)
+                try:
+                    if self.shared_lock.acquire(timeout=10):  # Acquire lock with timeout
+                        try:
+                            proc = mp.Process(target=target_fnc, args=args)
+                            self.logger.info(f"Scaling up on {target_fnc} ...")
+                            proc.start()
+                            processes.append(proc)
+                        finally:
+                            self.shared_lock.release()  # Always release lock after scaling
+                    else:
+                        self.logger.warning("Failed to acquire lock within 10 seconds for scaling up")
+                except Exception as e:
+                    self.logger.error(f"Exception while scaling up: {e}")
+
                 await asyncio.sleep(60)
                 continue
 
             # Scale down if message count is below the threshold and there are more consumers than the minimum
             if message_count < threshold and consumer_count > min_consumers:
-                with self.shared_lock:
-                    if processes:
-                        proc = processes.pop()
-                        proc.terminate()
-                        proc.join()  # Wait for it to fully terminate
-                        self.logger.info(f"Scaled down on {target_fnc}, process {proc.pid} terminated.")
+                try:
+                    if self.shared_lock.acquire(timeout=10):  # Acquire lock with timeout
+                        try:
+                            if processes:
+                                proc = processes.pop()
+                                proc.terminate()
+                                proc.join()  # Wait for it to fully terminate
+                                self.logger.info(f"Scaled down on {target_fnc}, process {proc.pid} terminated.")
+                        finally:
+                            self.shared_lock.release()  # Always release lock after scaling
+                    else:
+                        self.logger.warning("Failed to acquire lock within 10 seconds for scaling down")
+                except Exception as e:
+                    self.logger.error(f"Exception while scaling down: {e}")
+
                 await asyncio.sleep(60)
                 continue
 
             # Sleep for 10 minutes before checking again
             await asyncio.sleep(120)
 
+
     async def periodic_checkpoint(self, main_database):
-        checkpoint_interval = 600 # 10 min
+        checkpoint_interval = 600  # 10 min
         while True:
-            await asyncio.sleep(checkpoint_interval)
-            #evoke save_checkpoint every checkpoint_interval seconds
-            await asyncio.get_running_loop().run_in_executor(None, save_checkpoint, main_database)
+            await asyncio.sleep(checkpoint_interval)  # Non-blocking sleep
+            save_checkpoint(main_database)  # Directly save the checkpoint
             self.logger.info("Checkpoint has been saved.")
+
+    def start_periodic_checkpoint_thread(self, main_database):
+        asyncio.create_task(self.periodic_checkpoint(main_database))
+
 
     async def main_task(self):
         amqp_url = URL(f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/').update_query(heartbeat=2800)
@@ -186,7 +197,7 @@ class TaskManager:
             )
 
             main_database_task = asyncio.create_task(main_database.consume_and_process())
-            checkpoint_task = asyncio.create_task(self.periodic_checkpoint(main_database))
+            self.start_periodic_checkpoint_thread(main_database)
                 
             # Initialize sampler instances in separate processes
             for _ in range(self.config.num_samplers):
@@ -233,7 +244,7 @@ class TaskManager:
                     max_consumers=5, min_consumers=0, threshold=5
                 )
             )
-            self.tasks = [checkpoint_task, main_database_task, adjust_eval_consumers_task, adjust_sampler_consumers_task, adjust_db_consumers_task]
+            self.tasks = [ main_database_task, adjust_eval_consumers_task, adjust_sampler_consumers_task, adjust_db_consumers_task]
             self.channels = [self.database_channel, self.sampler_channel]
             self.queues = [["database_queue"], ["sampler_queue"], ["evaluator_queue"]]
 
@@ -365,7 +376,7 @@ class TaskManager:
                 database_queue = await channel.declare_queue("database_queue", durable=False, auto_delete=True)
 
                 evaluator_instance = evaluator.Evaluator(
-                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=300, local_id=local_id
+                    connection, channel, evaluator_queue, database_queue, template,'priority', 'evaluate', inputs, 'sandboxstorage', timeout_seconds=600, local_id=local_id
                 )
                 evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
                 await evaluator_task

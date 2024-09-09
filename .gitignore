@@ -3,3 +3,8 @@ implementation/funsearch.log
 implementation/sandbox.log
 implementation/checkpoint_full.txt
 implementation/checkpoint.pkl
+implementation/__pycache__/
+implementation/checkpoint_*.pkl
+/franziska/implementation/checkpoint_*.pkl
+checkpoint_*.pkl
+implementation/performance_over_time.html

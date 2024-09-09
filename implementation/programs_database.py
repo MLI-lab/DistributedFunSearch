@@ -205,8 +205,8 @@ class ProgramsDatabase:
                 except Exception as e:
                     logger.error(f"Error processing messages: {e}")
 
-    @async_time_execution
-    @async_track_memory
+    #@async_time_execution
+    #@async_track_memory
     async def process_batch(self, batch: List[aio_pika.IncomingMessage]):
         """
         Processes a batch of messages asynchronously.
@@ -256,17 +256,23 @@ class ProgramsDatabase:
     async def register_program(self, program: code_manipulation.Function, island_id: int | None, scores_per_test: ScoresPerTest, expected_version: int = None):
         """
         Performs checks and registers a program.
-        Method executes all checks and function calls synchronously because the functions it calls (`_register_program_in_island` and `reset_islands`) currently do not contain any I/O blocking tasks (i.e., no `await` statements inside them). The use of `await` in this method is for potential future asynchronous operations.
         """
 
-        # Reset islands if the reset period has been exceeded
+        # Reset islands if the reset period has been exceeded and at least 50 programs have been registered
+        logger.info(f"Difference between resetting times is {time.time() - self._last_reset_time} and config time is {self._config.reset_period}")
         if (time.time() - self._last_reset_time > self._config.reset_period):
-            logger.info("Reset period exceeded, resetting islands.")
-            self._last_reset_time = time.time()
-            try: 
-                await self.reset_islands()  # Currently running synchronously because it contains no await statements
-            except Exception as e:
-                logger.error(f"Error in reset island {e}")
+            # Check if all islands have at least 50 programs
+            all_islands_sufficiently_populated = all(island.get_num_programs() >= self._config.reset_programs for island in self._islands)
+
+            if all_islands_sufficiently_populated:
+                logger.info("Reset period exceeded and islands have 50 or more programs, resetting islands.")
+                self._last_reset_time = time.time()
+                try:
+                    await self.reset_islands()  # Reset islands only if both conditions are satisfied
+                except Exception as e:
+                    logger.error(f"Error in reset island {e}")
+            else:
+                logger.info("Reset period exceeded, but not all islands have 50 programs. Skipping reset for now.")
 
         # Threshold for cluster size to check if function body exists.
         cluster_check_threshold = 20
@@ -435,6 +441,8 @@ class Island:
         self.version = 0
         self.scores_per_test=None
 
+    def get_num_programs(self) -> int:
+        return self._num_programs
 
     def get_clusters(self):
         """Return the clusters dictionary."""
@@ -509,58 +517,59 @@ class Island:
         self._num_programs += 1
 
 
+
     def get_prompt(self) -> tuple[str, int]:
         """Constructs a prompt containing functions from this island."""
-        print("In get prompt in island")
-        signatures = list(self._clusters.keys()) # clusters is a manager dict that exposes its keys directly
-        print(f"After acessing keys of clusters sig are {signatures}")
+        signatures = list(self._clusters.keys())  # clusters is a manager dict that exposes its keys directly
         cluster_scores = np.array([self._clusters[signature].get_score() for signature in signatures])
-        try: 
-            print(f"Cluster scores are {cluster_scores}")
-        except Exception as e: 
-            print(f"Cannot print debug cluster score because {e}")
+        print(f"Cluster scores are {cluster_scores}")
 
-        # Convert scores to probabilities using softmax with temperature schedule.
+        # Initialize the temperature
         period = self._cluster_sampling_temperature_period
-        if self._num_programs % period==0: 
-            print(f"Resetting to initial temperature value")
-        temperature = self._cluster_sampling_temperature_init * (1 - (self._num_programs % period) / period) # temperarture decreases as more programs get added, Every time self._num_programs % self._cluster_sampling_temperature_period equals 0 the temp resets to iniial value
-    
-        # Calculate softmax probabilities
-        try: 
-            probabilities = self._softmax(cluster_scores, temperature)
-        except Exception as e: 
-            print(f" cannot call softmax because cluster scores are {cluster_scores}")
-        try: 
-            print(f"Probabilities are {probabilities}")
-        except Exception as e: 
-            print(f"Cannot debug probabilities because {e}")
+        temperature = self._cluster_sampling_temperature_init * (1 - (self._num_programs % period) / period)
+        threshold = 1e-6  # Probability threshold to filter valid clusters
 
-        # Count non-zero probabilities
-        #non_zero_prob_count = np.count_nonzero(probabilities)
-    
+        while True:
+            try:
+                probabilities = self._softmax(cluster_scores, temperature)
+                print(f"Probabilities at temperature {temperature} are {probabilities}")
+            except Exception as e:
+                print(f"Cannot call softmax because cluster scores are {cluster_scores}")
+                return None, 0
+
+            # Filter out near-zero probabilities
+            valid_indices = np.where(probabilities > threshold)[0]
+            valid_probabilities = probabilities[valid_indices]
+            valid_signatures = [signatures[i] for i in valid_indices]
+
+            if len(valid_signatures) > 0:
+                # If we have valid signatures, break out of the loop
+                break
+
+            # If no valid signatures, adjust temperature (make it smaller to increase peakiness)
+            print(f"No valid clusters at temperature {temperature}. Decreasing temperature.")
+            temperature *= 0.9  # Decrease temperature by 10% each time
+
+            # Optionally, set a lower limit to avoid an infinite loop
+            if temperature < 1e-6:
+                print("Temperature too low, returning None.")
+                return None, 0
+
+        # Normalize the remaining valid probabilities
+        valid_probabilities = valid_probabilities / valid_probabilities.sum()
+
         # Adjust functions_per_prompt to non-zero probabilities
-        functions_per_prompt = min(len(self._clusters), self._functions_per_prompt)
-        #functions_per_prompt = min(non_zero_prob_count, self._functions_per_prompt)
-
-        # Log warning if non-zero probabilities are fewer than requested
-        #if non_zero_prob_count < self._functions_per_prompt:
-        #    logger.error(f"Sampling fewer functions ({non_zero_prob_count}) than requested due to non-zero probabilities.")
-
-        #if functions_per_prompt == 0:
-        #    logger.error("No valid non-zero probabilities to sample from.")
-        #    return None, 0
+        functions_per_prompt = min(len(valid_signatures), self._functions_per_prompt)
 
         # Proceed with sampling based on available non-zero probabilities
         try:
-            #idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities)
-            idx = np.random.choice(len(signatures), size=functions_per_prompt, p=probabilities, replace=False)
+            idx = np.random.choice(len(valid_signatures), size=functions_per_prompt, p=valid_probabilities, replace=False)
         except ValueError as e:
             print(f"Error in sampling with np.random.choice: {e}")
             return None, 0
 
         # Select and sort implementations based on their scores
-        chosen_signatures = [signatures[i] for i in idx]
+        chosen_signatures = [valid_signatures[i] for i in idx]
         implementations = [self._clusters[signature].sample_program() for signature in chosen_signatures]
         scores = [self._clusters[signature].get_score() for signature in chosen_signatures]
 
@@ -569,7 +578,6 @@ class Island:
         version_generated = len(sorted_implementations) + 1
 
         return self._generate_prompt(sorted_implementations), version_generated
-
 
 
     def _generate_prompt(
@@ -660,11 +668,14 @@ class Island:
 
 
 class IslandProxy(NamespaceProxy):
-    _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'get_prompt', 'function_body_exists', '_get_signature', 'cluster_length', 'get_clusters')
+    _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'get_prompt', 'function_body_exists', '_get_signature', 'cluster_length', 'get_clusters', 'get_num_programs')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # Initialize the NamespaceProxy with arguments from Manager
         self.logger = logging.getLogger('main_logger')  # Get the logger for this proxy
+
+    def get_num_programs(self):
+        return self._callmethod('get_num_programs')
 
     def register_program(self, program, scores_per_test):
         self._callmethod('register_program', (program, scores_per_test))

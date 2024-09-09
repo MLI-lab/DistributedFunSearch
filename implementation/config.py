@@ -44,7 +44,8 @@ class ProgramsDatabaseConfig:
   """
   functions_per_prompt: int = 2
   num_islands: int = 10
-  reset_period: int = 4 * 60 * 60 
+  reset_period: int = 12 * 60 #* 60 
+  reset_programs: int= 1
   cluster_sampling_temperature_init: float = 2 # changed from 0.1 to 1
   cluster_sampling_temperature_period: int = 30_000 # after 30_000 reset 
   prompts_per_batch= 10
@@ -72,5 +73,6 @@ class Config:
   max_new_tokens: int = 60
   top_p: float = 0.9
   repetition_penalty: float = 1.2
+  api_key='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'
 
 
