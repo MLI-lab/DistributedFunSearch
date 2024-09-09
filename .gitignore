@@ -1,3 +1,5 @@
 implementation/sandboxstorage/
 implementation/funsearch.log
 implementation/sandbox.log
+implementation/checkpoint_full.txt
+implementation/checkpoint.pkl
