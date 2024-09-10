@@ -87,7 +87,7 @@ class TaskManager:
                     # Scale up only if more than 3 CPUs have less than 50% usage
                     if available_cpus_with_low_usage <= 4:
                         self.logger.info(f"Cannot scale up {target_fnc}: Not enough available CPU resources.")
-                        await asyncio.sleep(60)
+                        await asyncio.sleep(300)
                         continue
 
                 # GPU check for sampler_queue
@@ -104,7 +104,7 @@ class TaskManager:
                     # Scale up only if the total available GPU memory is more than 38 GB
                     if total_available_gpu_memory < 38 * 1024:
                         self.logger.info(f"Cannot scale up {target_fnc}: Not enough GPU memory resources.")
-                        await asyncio.sleep(60)
+                        await asyncio.sleep(300)
                         continue
 
                 # If resource checks passed, scale up
@@ -122,7 +122,7 @@ class TaskManager:
                 except Exception as e:
                     self.logger.error(f"Exception while scaling up: {e}")
 
-                await asyncio.sleep(60)
+                await asyncio.sleep(120)
                 continue
 
             # Scale down if message count is below the threshold and there are more consumers than the minimum
@@ -142,11 +142,11 @@ class TaskManager:
                 except Exception as e:
                     self.logger.error(f"Exception while scaling down: {e}")
 
-                await asyncio.sleep(60)
+                await asyncio.sleep(120)
                 continue
 
             # Sleep for 10 minutes before checking again
-            await asyncio.sleep(120)
+            await asyncio.sleep(200)
 
 
     async def periodic_checkpoint(self, main_database):

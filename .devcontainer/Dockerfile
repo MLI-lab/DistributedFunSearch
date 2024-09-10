@@ -22,7 +22,8 @@ ENV LANG=en_US.UTF-8 \
 RUN apt-get update && \
     apt-get install -y \
     git \
-    tmux && \
+    tmux \
+    wget && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
