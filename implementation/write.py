@@ -3,7 +3,7 @@ import pprint
 import time
 
 # Load the checkpoint data
-filepath = "/franziska/implementation/checkpoint_1725990865.pkl"
+filepath = "/franziska/implementation/checkpoint_2024-09-11_13-20-29.pkl"
 with open(filepath, "rb") as f:
     checkpoint_data = pickle.load(f)
 

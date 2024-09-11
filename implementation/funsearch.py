@@ -65,7 +65,7 @@ class TaskManager:
 
     def initialize_logger(self):
         logger = logging.getLogger('main_logger')
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.DEBUG)
         log_file_path = os.path.join(os.getcwd(), 'funsearch.log')
         handler = RotatingFileHandler(log_file_path, maxBytes=100 * 1024 * 1024, backupCount=3)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

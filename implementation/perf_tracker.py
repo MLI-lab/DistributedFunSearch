@@ -67,8 +67,11 @@ def update_cluster_visualization(selected_island, islands_state, file_mtime, row
 
     sizes = []  # Define sizes array to store the size of each cluster
 
+    # Initialize loop index
+    i = 0
+
     # Calculate marker sizes for clusters with logarithmic scaling
-    for i, (cluster_signature, cluster_info) in enumerate(clusters.items()):
+    for cluster_key, cluster_info in clusters.items():
         cluster_size = len(cluster_info.get('programs', []))  # Get the size of the cluster (number of programs)
         log_size = math.log(cluster_size + 1)  # Apply logarithmic scaling to avoid size 0 for empty clusters
         scaled_size = log_size * 10  # Adjust scaling factor for marker size
@@ -84,11 +87,14 @@ def update_cluster_visualization(selected_island, islands_state, file_mtime, row
                 y=[cluster_info.get('score', 0)],
                 mode='markers',
                 marker=dict(size=sizes[i], color='rgba(100, 200, 255, 0.6)', sizemode='area', sizeref=2.0 * max(sizes) / (40. ** 2), sizemin=4),
-                text=f"True Time: {datetime.fromtimestamp(file_mtime)}<br>Cluster Score: {cluster_info.get('score', 0)}, Size: {cluster_size}",
+                text=f"True Time: {datetime.fromtimestamp(file_mtime)}<br>Signature: {cluster_key}<br>Size: {cluster_size}",
                 name=f"Island {selected_island + 1}"
             ),
             row=row, col=col
         )
+
+        # Increment size index in the loop
+        i += 1
 
 
 
@@ -117,27 +123,38 @@ def update_visualization(checkpoint_filepath, file_mtime):
 # Monitor for new checkpoint files
 def check_for_new_checkpoints(directory, interval=60):
     last_seen_timestamp = None
-    
+
     while True:
         try:
-            # List all checkpoint files and extract the timestamp from their names
+            # List all checkpoint files
             checkpoint_files = [f for f in os.listdir(directory) if f.startswith("checkpoint_") and f.endswith(".pkl")]
-            checkpoint_timestamps = [int(f.split("_")[1].split(".")[0]) for f in checkpoint_files]
             
+            checkpoint_timestamps = []
+            for f in checkpoint_files:
+                # Split the filename to extract the date-time part
+                parts = f.split("_")
+                if len(parts) > 2:
+                    # Join the date and time parts together, ignoring the 'pkl' extension
+                    timestamp_str = "_".join(parts[1:3])
+                    # Remove the '.pkl' from the time part
+                    timestamp_str = timestamp_str.replace('.pkl', '')
+                    # Convert the date-time string to a datetime object
+                    timestamp_dt = datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
+                    # Convert the datetime object to a Unix timestamp
+                    timestamp = timestamp_dt.timestamp()
+                    checkpoint_timestamps.append((timestamp, f))
+                else:
+                    print(f"Filename does not have the correct format to extract timestamp: {f}")
+
             if checkpoint_timestamps:
                 # Find the most recent checkpoint file
-                latest_timestamp = max(checkpoint_timestamps)
+                latest_timestamp, latest_file = max(checkpoint_timestamps, key=lambda x: x[0])
                 
-                # If there's a new checkpoint, process it
                 if last_seen_timestamp is None or latest_timestamp > last_seen_timestamp:
-                    latest_checkpoint_file = f"checkpoint_{latest_timestamp}.pkl"
-                    print(f"New checkpoint detected: {latest_checkpoint_file}")
-                    
-                    # Update the visualization with the new checkpoint
-                    checkpoint_filepath = os.path.join(directory, latest_checkpoint_file)
+                    print(f"New checkpoint detected: {latest_file}")
+                    # Update visualization
+                    checkpoint_filepath = os.path.join(directory, latest_file)
                     update_visualization(checkpoint_filepath, latest_timestamp)
-                    
-                    # Update the last seen timestamp
                     last_seen_timestamp = latest_timestamp
 
         except Exception as e:
@@ -148,3 +165,4 @@ def check_for_new_checkpoints(directory, interval=60):
 if __name__ == "__main__":
     print(f"Monitoring new checkpoints in directory: {CHECKPOINT_DIR}")
     check_for_new_checkpoints(CHECKPOINT_DIR)
+
