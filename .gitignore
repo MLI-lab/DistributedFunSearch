@@ -13,4 +13,5 @@ implementation/asyncio_debug.log
 implementation/ChachingFace/models--meta-llama--Meta-Llama-3.1-8B-Instruct
 implementation/ChachingFace/models--meta-llama--CodeLlama-13b-Python-hf
 implementation/ChachingFace/models--meta-llama--Meta-Llama-3.1-8B-Instruct
+/franziska/implementation/ChachingFace/models--bigcode--starcoder2-15b
 implementation/ChachingFace/.locks
