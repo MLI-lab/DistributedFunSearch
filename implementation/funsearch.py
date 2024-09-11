@@ -18,17 +18,19 @@ import code_manipulation
 from multiprocessing import Manager
 from multiprocessing.managers import BaseManager
 import copy
-import psutil # for checking CPU utilization.
-import GPUtil # for checking GPU memory usage.
+import psutil 
+import GPUtil 
 from typing import Sequence, Any
 import threading
+import datetime
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s: %(message)s",
-    handlers=[logging.FileHandler("asyncio_debug.log")]
-)
+# For logging asynchio 
+#logging.basicConfig(
+#    level=logging.INFO,
+#    format="%(asctime)s %(levelname)s: %(message)s",
+#    handlers=[logging.FileHandler("asyncio_debug.log")]
+#)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -37,8 +39,9 @@ class CustomManager(BaseManager):
     pass
 
 def save_checkpoint(main_database):
-    timestamp = int(time.time())  # Gets the current time as an integer timestamp
-    filepath = os.path.join(os.getcwd(), f"checkpoint_{timestamp}.pkl")  # Creates a file name with the timestamp
+    # Gets the current time and formats it as a string 'YYYY-MM-DD_HH-MM-SS'
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filepath = os.path.join(os.getcwd(), f"checkpoint_{timestamp}.pkl")  # Creates a file name with the readable timestamp
     data = main_database.serialize_checkpoint()
     with open(filepath, "wb") as f:
         pickle.dump(data, f)
@@ -72,37 +75,32 @@ class TaskManager:
         return logger
 
 
-    async def adjust_consumers(self, channel, queue_name, target_fnc, processes, *args, max_consumers=80, min_consumers=1, threshold=5):
+    async def adjust_consumers(self, channel, queue_name, target_fnc, processes, *args, max_consumers=80, min_consumers=1, sleep=600, sleep_after_scale=120, sleep_after_rsfull=1200, threshold=5):
         while True:
-            self.logger.info(f"Start checking consumers for {target_fnc} at {time.time()}")
             queue = await channel.declare_queue(queue_name, durable=False, auto_delete=True)
             message_count = queue.declaration_result.message_count
             consumer_count = queue.declaration_result.consumer_count
-            self.logger.info(f"Message count: {message_count}, Consumer count: {consumer_count}, at {time.time()}")
 
             # Scale up only if message count is above the threshold and consumer count is below the max
             if message_count > threshold and consumer_count < max_consumers:
                 # CPU check for evaluator_queue
                 if queue_name == "evaluator_queue":
-                    self.logger.info(f"CPU affinity check start at {time.time()}")
                     cpu_affinity = os.sched_getaffinity(0)  # CPUs available to the container (e.g., {1, 2, 10, 12})
                     cpu_usage = psutil.cpu_percent(percpu=True)  # Gets the usage for all system CPUs
                     container_cpu_usage = [cpu_usage[i] for i in cpu_affinity]
 
-                    # Count how many of the available CPUs are under 50% usage
-                    available_cpus_with_low_usage = sum(1 for usage in container_cpu_usage if usage < 50)
-                    self.logger.info(f"Available CPUs with <50% usage (in container): {available_cpus_with_low_usage}")
-                    self.logger.info(f"CPU usage check done at {time.time()}")
+                    # Count how many of the available CPUs are under 60% usage
+                    available_cpus_with_low_usage = sum(1 for usage in container_cpu_usage if usage < 60)
+                    self.logger.info(f"Available CPUs with <60% usage (in container): {available_cpus_with_low_usage}")
 
                     # Scale up only if more than 3 CPUs have less than 50% usage
                     if available_cpus_with_low_usage <= 4:
                         self.logger.info(f"Cannot scale up {target_fnc}: Not enough available CPU resources.")
-                        await asyncio.sleep(600)
+                        await asyncio.sleep(sleep_after_rsfull)
                         continue
 
                 # GPU check for sampler_queue
                 if queue_name == "sampler_queue":
-                    self.logger.info(f"GPU affinity check start at {time.time()}")
                     visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
                     if visible_devices and visible_devices[0]:
                         visible_devices = [int(dev.strip()) for dev in visible_devices]
@@ -111,17 +109,16 @@ class TaskManager:
                     filtered_gpus = [gpu for gpu in gpus if gpu.id in visible_devices]
                     total_available_gpu_memory = sum(gpu.memoryFree for gpu in filtered_gpus)
                     self.logger.info(f"Total available GPU memory (in container): {total_available_gpu_memory / 1024:.2f} GB")
-                    self.logger.info(f"GPU usage check done at {time.time()}")
 
                     # Scale up only if the total available GPU memory is more than 38 GB
                     if total_available_gpu_memory < 38 * 1024:
                         self.logger.info(f"Cannot scale up {target_fnc}: Not enough GPU memory resources.")
-                        await asyncio.sleep(600)
+                        await asyncio.sleep(sleep_after_rsfull)
                         continue
 
                 # If resource checks passed, scale up
                 try:
-                    if self.shared_lock.acquire(timeout=100):  # Acquire lock with timeout
+                    if self.shared_lock.acquire(timeout=10):  # Acquire lock with timeout
                         try:
                             proc = mp.Process(target=target_fnc, args=args)
                             self.logger.info(f"Scaling up on {target_fnc} ...")
@@ -134,13 +131,13 @@ class TaskManager:
                 except Exception as e:
                     self.logger.error(f"Exception while scaling up: {e}")
 
-                await asyncio.sleep(120)
+                await asyncio.sleep(sleep_after_scale)
                 continue
 
             # Scale down if message count is below the threshold and there are more consumers than the minimum
             if message_count < threshold and consumer_count > min_consumers:
                 try:
-                    if self.shared_lock.acquire(timeout=100):  # Acquire lock with timeout
+                    if self.shared_lock.acquire(timeout=10):  # Acquire lock with timeout
                         try:
                             if processes:
                                 proc = processes.pop()
@@ -154,12 +151,17 @@ class TaskManager:
                 except Exception as e:
                     self.logger.error(f"Exception while scaling down: {e}")
 
-                await asyncio.sleep(120)
+                await asyncio.sleep(sleep_after_scale)
                 continue
 
-            # Sleep for 10 minutes before checking again
-            self.logger.info(f"Sleeping for 60 seconds at {time.time()}")
-            await asyncio.sleep(300)
+            # Sleep before checking again
+            await asyncio.sleep(sleep)
+
+
+    def schedule_consumer_adjustments(self, template, function_to_evolve, amqp_url): # Runs in the background
+        asyncio.create_task(self.adjust_consumers(self.sampler_channel, "evaluator_queue", self.evaluator_process, self.evaluator_processes, template, self.inputs, amqp_url, max_consumers=230, min_consumers=1, sleep=120, sleep_after_scale=60, sleep_after_rsfull=1200, threshold=5))
+        asyncio.create_task(self.adjust_consumers(self.sampler_channel, "sampler_queue", self.sampler_process, self.sampler_processes, amqp_url, max_consumers=5, min_consumers=1,sleep=120, sleep_after_scale=120, sleep_after_rsfull=1200,threshold=5))
+        asyncio.create_task(self.adjust_consumers(self.database_channel, "database_queue", self.database_process, self.database_processes, self.config.programs_database, template, function_to_evolve, amqp_url, max_consumers=5, min_consumers=0, sleep=1200, sleep_after_scale=1200, sleep_after_rsfull=1200, threshold=5))
 
 
     async def periodic_checkpoint(self, main_database):
@@ -194,6 +196,7 @@ class TaskManager:
             # Channels on separate connections
             self.sampler_channel = await sampler_connection.channel()
             self.database_channel = await database_connection.channel()
+            
 
             evaluator_queue = await self.sampler_channel.declare_queue("evaluator_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
             sampler_queue = await self.sampler_channel.declare_queue("sampler_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
@@ -201,7 +204,6 @@ class TaskManager:
 
             template = code_manipulation.text_to_program(self.specification)
             function_to_evolve = 'priority'
-
         
             # Initialize the designated ProgramsDatabase instance for checkpointing
             main_database = programs_database.ProgramsDatabase(
@@ -211,6 +213,7 @@ class TaskManager:
 
             main_database_task = asyncio.create_task(main_database.consume_and_process())
             self.start_periodic_checkpoint_thread(main_database)
+            self.schedule_consumer_adjustments(template, function_to_evolve, amqp_url) 
                 
             # Initialize sampler instances in separate processes
             for _ in range(self.config.num_samplers):
@@ -233,31 +236,7 @@ class TaskManager:
                 with self.shared_lock:
                     self.database_processes.append(proc)  # Maintain a list of database processes
 
-            adjust_eval_consumers_task = asyncio.create_task(
-                self.adjust_consumers(
-                    self.sampler_channel, "evaluator_queue", self.evaluator_process, 
-                    self.evaluator_processes, template, self.inputs, amqp_url,
-                    max_consumers=80, min_consumers=1, threshold=5
-                )
-            )
-
-            adjust_sampler_consumers_task = asyncio.create_task(
-                self.adjust_consumers(
-                    self.sampler_channel, "sampler_queue", self.sampler_process, 
-                    self.sampler_processes, amqp_url,
-                    max_consumers=5, min_consumers=1, threshold=5
-                )
-            )
-
-            adjust_db_consumers_task = asyncio.create_task(
-                self.adjust_consumers(
-                    self.database_channel, "database_queue", self.database_process, 
-                    self.database_processes, self.config.programs_database, 
-                    template, function_to_evolve, amqp_url,
-                    max_consumers=5, min_consumers=0, threshold=5
-                )
-            )
-            self.tasks = [ main_database_task, adjust_eval_consumers_task, adjust_sampler_consumers_task, adjust_db_consumers_task]
+            self.tasks = [main_database_task]
             self.channels = [self.database_channel, self.sampler_channel]
             self.queues = [["database_queue"], ["sampler_queue"], ["evaluator_queue"]]
 
@@ -274,6 +253,7 @@ class TaskManager:
             self.logger.debug("Published initial program")
             
             await asyncio.gather(*self.tasks)
+            
 
 
         except Exception as e:
@@ -316,7 +296,7 @@ class TaskManager:
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.set_debug(False)  # Enable asyncio debug mode
+        #loop.set_debug(False)  # Enable asyncio debug mode
         loop.run_until_complete(run_sampler())
 
 
@@ -360,7 +340,7 @@ class TaskManager:
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.set_debug(False)  # Enable asyncio debug mode
+        #loop.set_debug(False)  # Enable asyncio debug mode
         loop.run_until_complete(run_database())
 
 
@@ -404,7 +384,7 @@ class TaskManager:
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.set_debug(False)  # Enable asyncio debug mode
+        #loop.set_debug(False)  # Enable asyncio debug mode
         loop.run_until_complete(run_evaluator())
 
     async def run(self):
@@ -425,4 +405,4 @@ if __name__ == "__main__":
     manager.register('Cluster', programs_database.Cluster, programs_database.ClusterProxy)
     manager.start() 
     task_manager = TaskManager(specification, [(6,1), (7,1), (8,1), (9,1), (10,1), (11,1)], config)
-    asyncio.run(task_manager.run(), debug=False)
+    asyncio.run(task_manager.run() ) #, debug=True)

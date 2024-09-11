@@ -66,7 +66,7 @@ class Config:
   programs_database: ProgramsDatabaseConfig = dataclasses.field(default_factory=ProgramsDatabaseConfig)
   rabbitmq: RabbitMQConfig = dataclasses.field(default_factory=RabbitMQConfig)
   num_samplers: int = 1
-  num_evaluators: int = 13
+  num_evaluators: int = 5
   num_pdb: int = 0
   samples_per_prompt: int = 4
   temperature: float = 0.2

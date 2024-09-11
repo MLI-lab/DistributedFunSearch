@@ -10,7 +10,7 @@ import json
 import aio_pika
 import sys
 import asyncio
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed #try pathos for multiprocessing
 from torch.multiprocessing import Manager
 import gc
 from profiling import async_time_execution, async_track_memory
