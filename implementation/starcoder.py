@@ -21,7 +21,11 @@ class LLM_model:
         self._samples_per_prompt = samples_per_prompt
         self.device = device
         self.checkpoint = checkpoint
-        
+        self.checkpoint = checkpoint
+        current_directory = os.getcwd()
+        sub_dir = "ChachingFace"
+        self.cache_dir = os.path.join(current_directory, sub_dir)
+
         # Define tuples for sampling
         temperature_top_p_tuples = [
             (0.94445, 0.7778), (1.1667, 0.64445), (0.944445, 0.8222),
@@ -41,14 +45,14 @@ class LLM_model:
         self.repetition_penalty = repetition_penalty
         self.max_new_tokens = max_new_tokens
 
-        self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint, cache_dir=self.cache_dir)
         
         # Add padding token to process prompts in batches 
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({'pad_token': self.tokenizer.eos_token}) # sets the EOS token as padding token
         
         try: 
-            self.model = AutoModelForCausalLM.from_pretrained(self.checkpoint, device_map="auto", torch_dtype=torch.float16)
+            self.model = AutoModelForCausalLM.from_pretrained(self.checkpoint, device_map="auto", cache_dir=self.cache_dir, torch_dtype=torch.float16)
         except Exception as e: 
             logger.error(f"Could not download model because: {e}")
 

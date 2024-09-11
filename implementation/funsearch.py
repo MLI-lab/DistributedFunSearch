@@ -13,7 +13,7 @@ import sys
 import pickle
 import config as config_lib
 import programs_database
-import sampler
+import llama
 import code_manipulation
 from multiprocessing import Manager
 from multiprocessing.managers import BaseManager
@@ -177,6 +177,8 @@ class TaskManager:
 
     async def main_task(self):
         amqp_url = URL(f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/').update_query(heartbeat=180000)
+        pid = os.getpid()
+        self.logger.info(f"main_task is running in process with PID: {pid}")
         try:
             # Create connections for the samplers and database
             sampler_connection = await aio_pika.connect_robust(
@@ -216,25 +218,28 @@ class TaskManager:
             self.schedule_consumer_adjustments(template, function_to_evolve, amqp_url) 
                 
             # Initialize sampler instances in separate processes
-            for _ in range(self.config.num_samplers):
-                proc = mp.Process(target=self.sampler_process, args=(amqp_url,))
+            for i in range(self.config.num_samplers):
+                proc = mp.Process(target=self.sampler_process, args=(amqp_url,), name=f"Sampler-{i}")
                 proc.start()
+                self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid}")
                 with self.shared_lock:
                     self.sampler_processes.append(proc)
 
             # Initialize evaluator instances in separate processes
-            for _ in range(self.config.num_evaluators):
-                proc = mp.Process(target=self.evaluator_process, args=(template, self.inputs, amqp_url))
+            for i in range(self.config.num_evaluators):
+                proc = mp.Process(target=self.evaluator_process, args=(template, self.inputs, amqp_url), name=f"Evaluator-{i}")
                 proc.start()
+                self.logger.info(f"Started Evaluator Process {i} with PID: {proc.pid}")
                 with self.shared_lock:
                     self.evaluator_processes.append(proc)
 
             # Initialize database instances in separate processes
-            for _ in range(self.config.num_pdb - 1):  
-                proc = mp.Process(target=self.database_process, args=(self.config.programs_database, template, function_to_evolve, amqp_url))
+            for i in range(self.config.num_pdb - 1):
+                proc = mp.Process(target=self.database_process, args=(self.config.programs_database, template, function_to_evolve, amqp_url), name=f"Database-{i}")
                 proc.start()
+                self.logger.info(f"Started Database Process {i} with PID: {proc.pid}")
                 with self.shared_lock:
-                    self.database_processes.append(proc)  # Maintain a list of database processes
+                    self.database_processes.append(proc)
 
             self.tasks = [main_database_task]
             self.channels = [self.database_channel, self.sampler_channel]
@@ -254,8 +259,6 @@ class TaskManager:
             
             await asyncio.gather(*self.tasks)
             
-
-
         except Exception as e:
             self.logger.info(f"Exception occurred in evaluator_process: {e}")
 
@@ -284,7 +287,7 @@ class TaskManager:
                 sampler_queue = await channel.declare_queue("sampler_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
                 evaluator_queue = await channel.declare_queue("evaluator_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
 
-                sampler_instance = sampler.Sampler(connection, channel, sampler_queue, evaluator_queue, self.config)
+                sampler_instance = llama.Sampler(connection, channel, sampler_queue, evaluator_queue, self.config)
                 sampler_task = asyncio.create_task(sampler_instance.consume_and_process())
                 await sampler_task
             except Exception as e:
