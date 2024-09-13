@@ -8,6 +8,7 @@ implementation/checkpoint_*.pkl
 /franziska/implementation/checkpoint_*.pkl
 checkpoint_*.pkl
 implementation/performance_over_time.html
+implementation/similarity_over_time.html
 implementation/Island.log
 implementation/asyncio_debug.log
 implementation/ChachingFace/models--meta-llama--Meta-Llama-3.1-8B-Instruct
@@ -15,3 +16,4 @@ implementation/ChachingFace/models--meta-llama--CodeLlama-13b-Python-hf
 implementation/ChachingFace/models--bigcode--starcoder2-15b
 implementation/ChachingFace/.locks
 devcontainer/docker-compose.yml
+implementation/GridSearch/
