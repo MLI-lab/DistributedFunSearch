@@ -10,11 +10,12 @@ import json
 import aio_pika
 import sys
 import asyncio
+import concurrent.futures  
 from concurrent.futures import ProcessPoolExecutor, as_completed #try pathos for multiprocessing
 from torch.multiprocessing import Manager
 import gc
 from profiling import async_time_execution, async_track_memory
-import psutil
+
 
 logger = logging.getLogger('main_logger')
 
@@ -89,7 +90,7 @@ def _sample_to_program(
 
 
 def run_evaluation(sandbox, program, function_to_run, input, timeout_seconds, call_count, call_count_lock):
-    with call_count_lock: # the with statement ensures teh lock is released once the block is exited regardless of whether an exception is raised
+    with call_count_lock: # the with statement ensures teh lock is released once the block is exited regardless of whether an exception is raised # the with statement ensures teh lock is released once the block is exited regardless of whether an exception is raised
         count = call_count.value
         call_count.value += 1
     return sandbox.run(program, function_to_run, input, timeout_seconds, count)
@@ -120,7 +121,7 @@ class Evaluator:
         try: 
             if self.executor:
                 logger.info(f"Evaluator {self.local_id}: Shutting down executor.")
-                self.executor.shutdown(wait=False) # if evaluator spawns processes using the executor and then is cancelled those continue running, if wait=True executer could hand while waiting for the completion of the task if wait= False might fail to clean up properly 
+                self.executor.shutdown(wait=True, timeout=60) # if evaluator spawns processes using the executor and then is cancelled those continue running, if wait=True executer could hand while waiting for the completion of the task if wait= False might fail to clean up properly 
                 # Also if the subtasks are acessing any shared resouces eg call_count or the logger improper termination can cause issues if another process is waiting for them
                 self.executor = None  # Set to None to avoid future attempts to use it
             else:
@@ -152,7 +153,7 @@ class Evaluator:
 
             logger.info(f"Evaluator {self.local_id}: Shutdown process complete.")
         except asyncio.TimeoutError:
-            logger.error(f"Evaluator {self.local_id}: Timeout occurred during shutdown.")
+            logger.warning(f"Evaluator {self.local_id}: Timeout occurred during shutdown.")
         except Exception as e:
             logger.error(f"Evaluator {self.local_id}: Error during shutdown: {e}")
 
@@ -172,7 +173,7 @@ class Evaluator:
                                     # Set a reasonable timeout for processing each message
                                     await asyncio.wait_for(self.process_message(message), timeout=300)  # Adjust the timeout as needed
                                 except asyncio.TimeoutError:
-                                    logger.error("Processing message timed out.")
+                                    logger.warning("Processing message timed out.")
                                 except Exception as e:
                                     logger.error(f"Error while processing message: {e}")
                     except asyncio.CancelledError:
@@ -188,7 +189,7 @@ class Evaluator:
                 # Call shutdown with a timeout
                 await asyncio.wait_for(self.shutdown(), timeout=100)
             except asyncio.TimeoutError:
-                logger.error("Shutdown took too long and timed out.")
+                logger.warning("Shutdown took too long and timed out.")
             except Exception as e:
                 logger.error(f"Error during shutdown: {e}")
 
@@ -225,8 +226,13 @@ class Evaluator:
                         scores_per_test[input] = test_output
                         logger.debug(f"Evaluator: scores_per_test {scores_per_test}")
                 except concurrent.futures.TimeoutError:
-                    logger.error(f"Task for input {input} timed out.")
+                    logger.warning(f"Task for input {input} timed out.")
+                except concurrent.futures.CancelledError:
+                    logger.warning(f"Task for input {input} was cancelled.")
+                except concurrent.futures.BrokenProcessPool:
+                    logger.warning(f"Task for input {input} failed due to a broken process pool (pool was terminated abruptly).")
                 except Exception as e:
+                    # Catch any other exceptions
                     logger.error(f"Error during task execution for input {input}: {e}")
 
             # Prepare the result for publishing
@@ -238,6 +244,9 @@ class Evaluator:
 
             # Publish the result
             await self.publish_to_database(result, message)
+
+        except Exception as e:
+            logger.error(f"Error in process_message: {e}")
 
         except Exception as e:
             logger.error(f"Error in process_message: {e}")
