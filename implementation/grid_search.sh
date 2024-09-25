@@ -157,6 +157,7 @@ check_and_delete_rabbitmq_resources() {
     echo "$(date) - RabbitMQ resources cleaned up."
 }
 
+<<<<<<< HEAD
 # Main script execution loop
 while true; do
     echo "$(date) - Starting grid search..."
@@ -217,4 +218,21 @@ while true; do
     check_and_delete_rabbitmq_resources
 
     echo "$(date) - Grid search restarted." >> "$REMOTE_LOG"
+=======
+# Function to restart grid search
+restart_grid_search() {
+    echo "$(date) - Restarting grid search..."
+    export CUDA_VISIBLE_DEVICES=2,3  # Export environment variable
+    timeout 3690 python /franziska/implementation/grid_search.py
+    echo "$(date) - Grid search script terminated. Restarting..."
+}
+
+# Main script execution loop
+while true; do
+    kill_python_processes
+    sleep 5
+    check_and_delete_rabbitmq_resources
+    sleep 10
+    restart_grid_search
+>>>>>>> 0516afe2cd719dcd52224bde74ea56fcd62f16df
 done

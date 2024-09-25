@@ -12,7 +12,7 @@ import config as config_lib
 import glob
 from itertools import product  # Add this line
 from funsearch import initialize_task_manager
-
+import aio_pika
 
 # Set the base directory and grid search directory
 BASE_DIR = os.getcwd()
@@ -68,20 +68,24 @@ def evaluate_hyperparameters(checkpoint_data):
         return float('nan')
     # Extract the values from the checkpoint data
     registered_programs = checkpoint_data.get('registered_programs', 0)
-    best_scores_per_island = checkpoint_data.get('_best_score_per_island', [])
+    best_scores_per_island = checkpoint_data.get('best_score_per_island', [])
     islands_state = checkpoint_data.get('islands_state', [])
     average_best_score = sum(best_scores_per_island) / len(best_scores_per_island) if best_scores_per_island else 0
     max_best_score = max(best_scores_per_island) if best_scores_per_island else 0
     total_islands_state_length = sum(len(island) for island in islands_state)
     overall_score = (registered_programs + average_best_score + total_islands_state_length + (2 * max_best_score)) / 5
-    logger.info(f"Evaluation results - Registered Programs: {registered_programs}, Average Best Score: {average_best_score}, Max Best Score: {max_best_score}, Total Islands State Length: {total_islands_state_length}, Overall Score: {overall_score}")
+    logger.info(f"Evaluation results - Registered Programs: {registered_programs}, Average Best Score: {average_best_score}, Max Best Score: {max_best_score}, Total Number of Clusters: {total_islands_state_length}, Overall Score: {overall_score}")
     return overall_score, (registered_programs, average_best_score, max_best_score, total_islands_state_length)
 
 def save_results_to_file(param_config, evaluation_metric):
     with open(RESULTS_FILE_PATH, 'a') as file:
-        param_values = ','.join(f"{k}={v}" for k, v in param_config.items())
-        file.write(f"{param_values},{evaluation_metric}\n")
-        logger.info(f"Results saved: {param_values}, Metric={evaluation_metric}")
+        # Only save the modified parameters (those in param_config)
+        param_values = ', '.join(f"{k}={v}" for k, v in param_config.items())
+        # Write config and metric data with appropriate labels
+        file.write(f"config: {param_values}, metric: {evaluation_metric}\n")
+        # Log the saved result
+        logger.info(f"Results saved: config: {param_values}, metric: {evaluation_metric}")
+
 
 def update_config(config, param_updates):
     for param, value in param_updates.items():
@@ -126,7 +130,7 @@ def safe_file_write(path, data):
         logger.error(f"Failed to write data safely: {e}")
         os.unlink(temp_path)
 
-async def run_experiment_with_timeout(config, timeout_seconds):
+async def run_experiment_with_timeout(config, param_config, timeout_seconds):
     # Log the current state of config to verify its attributes before passing it on
     task_manager = initialize_task_manager(config)
     task = asyncio.create_task(task_manager.run())
@@ -136,13 +140,48 @@ async def run_experiment_with_timeout(config, timeout_seconds):
         logger.info("Experiment completed successfully.")
     except asyncio.TimeoutError:
         logger.error("Experiment timeout.")
+        raise  # Re-raise the TimeoutError so it can be handled upstream
     except Exception as e:
         logger.error(f"Unexpected error during task execution: {e}")
+        raise  # Re-raise the exception to propagate it
     finally:
+        # Save the checkpoint data
         checkpoint_data = load_checkpoint(CHECKPOINT_DIR)
         if checkpoint_data:
             metric = evaluate_hyperparameters(checkpoint_data)
-            save_results_to_file(dataclasses.asdict(config), metric)
+            save_results_to_file(param_config, metric)
+
+        # Add a sleep delay before performing the cleanup
+        logger.info("Sleeping for 2 minutes before cleaning up queues and consumers...")
+        # Queue and consumer cleanup
+        try:
+            logger.info("Cleaning up consumers and queues...")
+            
+            # Add logic to clean up your RabbitMQ queues and consumers
+            connection = await aio_pika.connect_robust(
+                config.amqp_url,
+                timeout=300,
+                client_properties={"connection_attempts": 3, "retry_delay": 5},
+                reconnect_interval=5
+            )
+            channel = await connection.channel()
+
+            # Assuming you're using specific queues
+            queues = ["evaluator_queue", "sampler_queue", "database_queue"]
+            for queue_name in queues:
+                try:
+                    queue = await channel.declare_queue(queue_name, durable=False, auto_delete=True)
+                    await queue.purge()  # Purge the queue to clear all messages
+                    await queue.delete()  # Optionally delete the queue entirely if it's no longer needed
+                    logger.info(f"Successfully cleaned up queue: {queue_name}")
+                except Exception as e:
+                    logger.error(f"Error while cleaning up queue {queue_name}: {e}")
+            
+            await channel.close()
+            await connection.close()
+
+        except Exception as e:
+            logger.error(f"Error while cleaning up consumers and queues: {e}")
 
 
 async def perform_grid_search(grid_dict, timeout_seconds):
@@ -158,9 +197,10 @@ async def perform_grid_search(grid_dict, timeout_seconds):
         updated_config = update_config(config, param_config)
         save_last_grid_config(param_config)
         try: 
-            await run_experiment_with_timeout(updated_config, timeout_seconds)
+            await run_experiment_with_timeout(updated_config, param_config, timeout_seconds)
         except Exception as e: 
             logger.error(f"Error in await run experiment {e}")
+            raise e
     logger.info("Grid search completed.")
 
 if __name__ == "__main__":
@@ -169,7 +209,7 @@ if __name__ == "__main__":
         "top_p": [0.6, 0.7, 0.8, 0.9, 1]
     }
     try:
-        asyncio.run(perform_grid_search(grid_params, 650))
+        asyncio.run(perform_grid_search(grid_params, 3660))
     except Exception as e:
         logger.error(f"Grid search error: {e}")
         os._exit(1)

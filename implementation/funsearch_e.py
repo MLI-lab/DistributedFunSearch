@@ -59,7 +59,11 @@ class TaskManager:
         return logger
 
 
+<<<<<<< HEAD
     async def adjust_consumers(self, channel, queue_name, target_fnc, processes, *args, max_consumers=25, min_consumers=1, sleep=300, sleep_after_scale=80, sleep_after_rsfull=1200, threshold=5):
+=======
+    async def adjust_consumers(self, channel, queue_name, target_fnc, processes, *args, max_consumers=80, min_consumers=1, sleep=600, sleep_after_scale=200, sleep_after_rsfull=1200, threshold=5):
+>>>>>>> 0516afe2cd719dcd52224bde74ea56fcd62f16df
         while True:
             queue = await channel.declare_queue(queue_name, durable=False, auto_delete=True)
             message_count = queue.declaration_result.message_count
@@ -143,7 +147,11 @@ class TaskManager:
 
 
     def schedule_consumer_adjustments(self, template, function_to_evolve, amqp_url): # Runs in the background
+<<<<<<< HEAD
         asyncio.create_task(self.adjust_consumers(self.sampler_channel, "evaluator_queue", self.evaluator_process, self.evaluator_processes, template, self.inputs, amqp_url, max_consumers=80, min_consumers=1, sleep=200, sleep_after_scale=120, sleep_after_rsfull=1200, threshold=5))
+=======
+        asyncio.create_task(self.adjust_consumers(self.sampler_channel, "evaluator_queue", self.evaluator_process, self.evaluator_processes, template, self.inputs, amqp_url, max_consumers=30, min_consumers=1, sleep=200, sleep_after_scale=120, sleep_after_rsfull=1200, threshold=5))
+>>>>>>> 0516afe2cd719dcd52224bde74ea56fcd62f16df
 
     async def main_task(self):
         amqp_url = URL(f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/').update_query(heartbeat=180000)

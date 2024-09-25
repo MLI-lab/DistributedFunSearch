@@ -21,6 +21,7 @@ import aio_pika
 import re
 from profiling import async_time_execution, async_track_memory
 from logging.handlers import RotatingFileHandler
+import psutil
 
 
 
@@ -159,7 +160,7 @@ class ProgramsDatabase:
         """
         checkpoint_data = {
             "registered_programs": self.registered_programs,
-            "total_programs": self.total_programs,
+            "total_programs": self.total_programs, #registered + duplicate or version mismatch
             "execution_failed": self.execution_failed,
             "best_score_per_island": self._best_score_per_island,
             "best_program_per_island": [str(program) if program else None for program in self._best_program_per_island],
@@ -183,77 +184,156 @@ class ProgramsDatabase:
 
         return checkpoint_data
 
+    async def shutdown(self):
+        """Gracefully shuts down the ProgramsDatabase, releasing resources."""
+
+        logger.info("Shutting down ProgramsDatabase...")
+
+        # Close the manager for the islands and clusters
+        try:
+            for island in self._islands:
+                island_proxy = island  # Ensure we're dealing with a proxy
+                if hasattr(island_proxy, 'shutdown'):
+                    island_proxy.shutdown()  # Call the shutdown method on each island proxy
+                logger.info(f"Shutdown island proxy for island {island}")
+            logger.info("Shutting down manager...")
+            self.manager.shutdown()  # Gracefully shut down the manager that controls islands
+        except Exception as e:
+            logger.error(f"Error while shutting down the manager or proxies: {e}")
+        # Terminate any processes managed by the Manager
+        try:
+            parent = psutil.Process()
+            children = parent.children(recursive=True)
+            if children:
+                logger.info("Terminating child processes...")
+                for child in children:
+                    logger.info(f"Terminating child process PID {child.pid}")
+                    child.terminate()
+
+                gone, still_alive = psutil.wait_procs(children, timeout=5)
+                if still_alive:
+                    for p in still_alive:
+                        logger.warning(f"Child process PID {p.pid} did not terminate. Forcing kill.")
+                        p.kill()
+                logger.info("All child processes terminated successfully.")
+            else:
+                logger.info("No child processes found.")
+        except Exception as e:
+            logger.error(f"Error while terminating child processes: {e}")
+        # Run garbage collection to clean up
+        gc.collect()
+        logger.info("Shutdown process completed successfully.")
+
 
     async def consume_and_process(self) -> None:
-        """ Consumes messages in batches from database queue and sends to be processed """
+        """ Continuously consumes messages in batches from the database queue and processes them. """
         batch_size = 10  
         batch = []  
         batch_timeout = 0.1  # Timeout in seconds to force batch processing when no more messages are coming in. 
 
-        async with self.channel:
-            await self.channel.set_qos(prefetch_count=10)
-            async with self.database_queue.iterator() as stream:
-                batch_start_time = time.time()
-                try:
-                    async for message in stream:
-                        batch.append(message)
-                        current_time = time.time()
-                        if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
-                            await self.process_batch(batch)
-                            batch = []  
-                            batch_start_time = current_time 
-                except asyncio.CancelledError:
-                    logger.warning("Evaluator raised error and executing self.shutdown")
-                except Exception as e:
-                    logger.error(f"Error processing messages: {e}")
+        try:
+            async with self.channel:
+                await self.channel.set_qos(prefetch_count=batch_size)
+                async with self.database_queue.iterator() as stream:
+                    batch_start_time = time.time()
+
+                    while True:  # Continuous loop to consume messages
+                        try:
+                            async for message in stream:
+                                batch.append(message)
+                                current_time = time.time()
+
+                                # Process batch if batch size is reached or timeout is exceeded
+                                if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
+                                    await self.process_batch(batch)
+                                    batch = []  # Reset batch after processing
+                                    batch_start_time = current_time  # Reset the start time
+
+                        except asyncio.CancelledError:
+                            logger.info("Database task was canceled. Processing any remaining batch.")
+                            if batch:
+                                await self.process_batch(batch)  # Ensure remaining messages are processed
+                            raise  # Propagate the cancellation
+
+                        except Exception as e:
+                            logger.error(f"Error during message consumption: {e}")
+                            raise
+        except asyncio.CancelledError:
+            logger.info("Database consume_and_process was canceled.")
+            raise
+        except Exception as e:
+            logger.error(f"Error initializing the database consume_and_process: {e}")
+            raise
+        finally:
+            try:
+                # Call shutdown with a timeout
+                await asyncio.wait_for(self.shutdown(), timeout=100)
+            except asyncio.TimeoutError:
+                logger.error("Shutdown took too long and timed out.")
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
+
+
 
     #@async_time_execution
     #@async_track_memory
     async def process_batch(self, batch: List[aio_pika.IncomingMessage]):
-        """
-        Processes a batch of messages asynchronously.
-        Each message in the batch is handled concurrently, allowing other tasks to run while one task is waiting for I/O operations (e.g., reading a file or waiting for a network response).
-        """ 
-        tasks = [self.process_message(message) for message in batch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Error processing message: {result}")
+        try:
+            tasks = [self.process_message(message) for message in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Error processing message: {result}")
+        except asyncio.CancelledError:
+            logger.info("Process batch was cancelled.")
+            raise  # Propagate cancellation
+        except Exception as e:
+            logger.error(f"Error in process_batch: {e}")
+            raise
+
 
     async def process_message(self, message: aio_pika.IncomingMessage):
-        """ 
-        Processes messages by registering syntactically correct programs and fetching new prompts.
-        """
-        async with message.process(): # asynch with context manager to acknowledge messages automatically once block of code is complete. 
-            data = json.loads(message.body.decode()) # decode() to convert from bytes to a string, json.loads() from json string into a Python dictionary.
+        try:
+            # Use message.process() with requeue=True to automatically requeue on exceptions
+            async with message.process():
+                data = json.loads(message.body.decode())
 
-            if data["new_function"] == "return":
-                await self.get_prompt()
-                self.execution_failed+= 1
-                logger.debug("Received None for new_function. Skipping registration.")
-                return
-            try:
-                if isinstance(data["new_function"], dict):
-                    program = code_manipulation.Function(**data["new_function"])
-                else:
-                    program = code_manipulation.Function.deserialize(data["new_function"])
-            except Exception as e:
-                logger.error(f"Failed to deserialize program: {e}")
-                await self.get_prompt()
-                return
+                if data["new_function"] == "return":
+                    await self.get_prompt()
+                    self.execution_failed += 1
+                    logger.debug("Received 'return' for new_function. Skipping registration.")
+                    return
 
-            island_id = data["island_id"]
-            scores_per_test = data["scores_per_test"]
-            expected_version = data.get("expected_version", None)
-            try:
+                # Deserialize the program
+                try:
+                    if isinstance(data["new_function"], dict):
+                        program = code_manipulation.Function(**data["new_function"])
+                    else:
+                        program = code_manipulation.Function.deserialize(data["new_function"])
+                except Exception as e:
+                    logger.error(f"Failed to deserialize program: {e}")
+                    await self.get_prompt()
+                    raise  # Raising exception to trigger requeue
+
+                # Extract metadata
+                island_id = data["island_id"]
+                scores_per_test = data["scores_per_test"]
+                expected_version = data.get("expected_version", None)
+
+                # Register the program
                 await self.register_program(program, island_id, scores_per_test, expected_version)
-                self.total_programs+= 1
-            except Exception as e:
-                logger.error(f"Database: Error in register program {e}")
-            try:
+                self.total_programs += 1
+
+                # Fetch a new prompt
                 await self.get_prompt()
-            except Exception as e:
-                logger.error(f"Database: Error in issuing a new prompt after registering new function {e}")
+
+        except asyncio.CancelledError:
+            logger.info("Process message was cancelled.")
+            raise  # Propagate cancellation
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            raise  # Raising exception to trigger requeue
+
 
     async def register_program(self, program: code_manipulation.Function, island_id: int | None, scores_per_test: ScoresPerTest, expected_version: int = None):
         """
@@ -446,6 +526,22 @@ class Island:
         logger.addHandler(handler)
         logger.propagate = False
         return logger
+
+    def shutdown(self):
+        """Gracefully shuts down all clusters and the manager."""
+        try:
+            self.logger.info("Shutting down Island and all clusters.")
+            # Loop through and shutdown each cluster
+            for cluster in self._clusters.values():
+                if hasattr(cluster, 'shutdown'):
+                    cluster.shutdown()
+
+            # Shut down the manager
+            if hasattr(self.manager, 'shutdown'):
+                self.logger.info("Shutting down Island manager.")
+                self.manager.shutdown()
+        except Exception as e:
+            self.logger.error(f"Error during Island shutdown: {e}")
 
     def get_num_programs(self) -> int:
         return self._num_programs
@@ -654,8 +750,6 @@ class Island:
         return final_prompt
 
 
-
-
     def function_body_exists(self, cleaned_body: str) -> bool:
 
         for cluster in self._clusters.values():
@@ -670,7 +764,7 @@ class Island:
 
 
 class IslandProxy(NamespaceProxy):
-    _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'get_prompt', 'function_body_exists', '_get_signature', 'cluster_length', 'get_clusters', 'get_num_programs')
+    _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'get_prompt', 'function_body_exists', '_get_signature', 'cluster_length', 'get_clusters', 'get_num_programs', 'shutdown')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # Initialize the NamespaceProxy with arguments from Manager
@@ -696,6 +790,11 @@ class IslandProxy(NamespaceProxy):
 
     def get_clusters(self):
         return self._callmethod('get_clusters')
+
+    def shutdown(self):
+        """Proxy call to shut down the Island."""
+        return self._callmethod('shutdown')
+
 
 
 
@@ -731,10 +830,19 @@ class Cluster:
         result[max_idx] = 1 - np.sum(result[0:max_idx]) - np.sum(result[max_idx+1:])
         return result
 
+    def shutdown(self):
+        """Gracefully shuts down the cluster. Currently, no specific resources to clean up."""
+        try:
+            self._programs.clear()  # Optional: Clear the list of programs to free memory
+            self._lengths.clear()   # Optional: Clear lengths
+            self.logger.info("Cluster shutdown completed.")
+        except Exception as e:
+            self.logger.error(f"Error during Cluster shutdown: {e}")
+
 
 
 class ClusterProxy(NamespaceProxy):
-    _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'sample_program', 'get_score', 'get_programs')
+    _exposed_ = ('__getattribute__', '__setattr__', '__dict__', 'register_program', 'sample_program', 'get_score', 'get_programs', 'shutdown')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # Initialize the NamespaceProxy with arguments from Manager
@@ -751,6 +859,10 @@ class ClusterProxy(NamespaceProxy):
 
     def get_programs(self):
         return self._callmethod('get_programs')
+
+    def shutdown(self):
+        """Proxy call to shut down the Cluster."""
+        return self._callmethod('shutdown')
 
 
 
