@@ -65,8 +65,8 @@ class Config:
   # In this case, default_factory=ProgramsDatabaseConfig means that calling ProgramsDatabaseConfig() (without any arguments) will provide the default value.
   programs_database: ProgramsDatabaseConfig = dataclasses.field(default_factory=ProgramsDatabaseConfig)
   rabbitmq: RabbitMQConfig = dataclasses.field(default_factory=RabbitMQConfig)
-  num_samplers: int = 1
-  num_evaluators: int = 50
+  num_samplers: int = 0
+  num_evaluators: int = 10
   num_pdb: int = 0
   samples_per_prompt: int = 4
   temperature: float = 0.2

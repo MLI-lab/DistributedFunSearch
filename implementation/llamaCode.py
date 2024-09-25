@@ -113,7 +113,8 @@ class LLM_model:
 class Sampler:
     """Node that samples program continuations and sends them for analysis."""
 
-    def __init__(self, connection, channel, sampler_queue, evaluator_queue, config):
+    def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, d):
+        self.d=d
         self.connection = connection
         self.channel = channel
         self.sampler_queue = sampler_queue
