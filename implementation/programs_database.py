@@ -472,7 +472,9 @@ class ProgramsDatabase:
         try:
             serialized_prompt = prompt.serialize()
             await self.channel.default_exchange.publish(
-                aio_pika.Message(body=serialized_prompt.encode(), delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
+                aio_pika.Message(body=serialized_prompt.encode(),
+                #delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+                ),
                 routing_key='sampler_queue'
             )
             logger.debug("Database: Successfully published prompt to sampler.")

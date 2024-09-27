@@ -60,6 +60,14 @@ class LLM_model:
             
         except Exception as e:
             logger.error(f"Could not load model because: {e}")
+            self.device="cuda"
+            # Load the model and move it to the specified device
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.checkpoint, 
+                cache_dir=self.cache_dir,
+                device_map="auto",
+                torch_dtype=torch.float16  # Use FP16 precision for faster performance on GPUs
+            )
 
         # Setup generation parameters
         self.generate_kwargs = dict(
@@ -199,24 +207,47 @@ class Sampler:
                 try:
                     prompt = programs_database.Prompt.deserialize(message.body.decode())
                     logger.info(f"Prompt is {prompt}")
-                    prompts.append(prompt.code)
-                    metadata.append({
-                        "island_id": prompt.island_id,
-                        "version_generated": prompt.version_generated,
-                        "expected_version": prompt.expected_version,
-                    })
-                    messages_to_process.append(message)
+                    if prompt.code is not None:
+                        prompts.append(prompt.code)
+                        metadata.append({
+                            "island_id": prompt.island_id,
+                            "version_generated": prompt.version_generated,
+                            "expected_version": prompt.expected_version,
+                        })
+                        messages_to_process.append(message)
+                    else:
+                        logger.warning(f"Encountered None prompt in message {message}. Publishing None and acknowledging it.")
+
+                        # Publish message with sample=None for the None prompt
+                        message_data = {
+                            "sample": None,
+                            "island_id": prompt.island_id if prompt else None,
+                            "version_generated": prompt.version_generated if prompt else None,
+                            "expected_version": prompt.expected_version if prompt else None
+                        }
+                        serialized_message = json.dumps(message_data)
+                        await self.channel.default_exchange.publish(
+                            aio_pika.Message(
+                                body=serialized_message.encode(),
+                            ),
+                            routing_key='evaluator_queue'
+                        )
+                    
+                        # Acknowledge the message, no need to requeue
+                        await message.ack()
+
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-                    await message.reject(requeue=True)  # Reject malformed messages immediately
+                    await message.reject(requeue=False)  # Reject malformed messages without requeuing
 
             if not messages_to_process:
-                return  # No valid messages to process
+                logger.warning("No valid prompts found in batch. Publishing message with sample=None.")
+                return  # Exit after processing None prompts
 
-            # Process prompts with the LLM
+            # Process valid prompts with the LLM
             samples_list = self._llm.draw_batch_samples(prompts)
 
-            # Publish results
+            # Publish results for valid prompts
             for samples, meta in zip(samples_list, metadata):
                 for sample in samples:
                     message_data = {
@@ -229,11 +260,10 @@ class Sampler:
                     await self.channel.default_exchange.publish(
                         aio_pika.Message(
                             body=serialized_message.encode(),
-                            delivery_mode=aio_pika.DeliveryMode.PERSISTENT
                         ),
                         routing_key='evaluator_queue'
                     )
-            logger.debug("Successfully published prompts to evaluator_queue")
+            logger.debug("Successfully published valid prompts to evaluator_queue")
 
             # Acknowledge messages after successful processing and publishing
             for message in messages_to_process:
@@ -244,3 +274,4 @@ class Sampler:
             raise  # Re-raise the exception to allow for further handling
         except asyncio.CancelledError:
             logger.info("Process batch was cancelled.")
+

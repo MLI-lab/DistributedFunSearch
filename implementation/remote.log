@@ -1,0 +1,40 @@
+Fri Sep 27 04:27:01 PM CEST 2024 - Restarting Docker containers on remote servers...
+Fri Sep 27 04:27:01 PM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+pytorchFW
+Fri Sep 27 04:27:02 PM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Fri Sep 27 04:27:02 PM CEST 2024 - Restarting Docker container on gpumlp2.msv.ei.tum.de...
+pytorchFW
+Fri Sep 27 04:27:14 PM CEST 2024 - Docker container on gpumlp2.msv.ei.tum.de restarted successfully.
+Fri Sep 27 04:27:14 PM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Fri Sep 27 04:27:25 PM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Fri Sep 27 04:27:25 PM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Fri Sep 27 04:27:26 PM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Fri Sep 27 04:27:26 PM CEST 2024 - Remote Docker containers restarted.
+Fri Sep 27 04:27:26 PM CEST 2024 - Killing all Python processes on the main server...
+Fri Sep 27 04:27:26 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 1 of 5.
+Fri Sep 27 04:27:29 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 2 of 5.
+Fri Sep 27 04:27:31 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 3 of 5.
+Fri Sep 27 04:27:33 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 4 of 5.
+Fri Sep 27 04:27:35 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 5 of 5.
+Fri Sep 27 04:27:37 PM CEST 2024 - Failed to kill Python processes on the main server after 5 attempts.
+Fri Sep 27 04:27:37 PM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Fetching connections...
+Fetching channels...
+Fri Sep 27 04:27:37 PM CEST 2024 - RabbitMQ resources cleaned up.
+Fri Sep 27 04:27:47 PM CEST 2024 - Starting grid search...
+Starting Python script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Python script on gpumlp2.msv.ei.tum.de using Docker container pytorchFW
+Starting Python script on zion.msv.ei.tum.de using Docker container pytorchFW
+Starting Python script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Fri Sep 27 04:27:47 PM CEST 2024 - Sleeping for 3630 seconds...
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Activating Conda environment on gpumlp2.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.64it/s]Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.34it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.24it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.38it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.18it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.87it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.65it/s]
+Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.41it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.97it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.66it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.55it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.60it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.63it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.17it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.92it/s]

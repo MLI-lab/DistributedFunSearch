@@ -102,9 +102,8 @@ class TaskManager:
         current_pid = os.getpid()
         current_thread = threading.current_thread().name
         thread_id = threading.get_ident()
-        self.logger.info(f"scaling_controller: Process ID: {current_pid}, Thread: {current_thread}, Thread ID: {thread_id}")
         check_interval_eval = 120  # seconds
-        check_interval_sam = 300
+        check_interval_sam = 100
         check_interval_db= 1080
         max_evaluators = 25
         min_evaluators = 1
@@ -236,7 +235,7 @@ class TaskManager:
             # Find a suitable GPU with enough free memory
             suitable_gpu_id = None
             for gpu_id, free_memory in gpu_memory_usage.items():
-                if free_memory > 17000:  # Check if more than 17000MiB is available
+                if free_memory > 1000:  # Check if more than 1000 MIB is available
                     suitable_gpu_id = gpu_id
                     break
 
@@ -375,8 +374,6 @@ class TaskManager:
 
             # Start initial processes
             self.start_initial_processes(template, function_to_evolve, amqp_url)
-            #self.tasks = [main_database_task]
-            #, scaling_controller_task]
             self.tasks = [main_database_task, periodic_checkpoint_task, scaling_controller_task]
             self.channels = [self.database_channel, self.sampler_channel]
             self.queues = [["database_queue"], ["sampler_queue"], ["evaluator_queue"]]
@@ -500,8 +497,7 @@ class TaskManager:
                 connection = await aio_pika.connect_robust(
                     amqp_url,
                     timeout=300,
-                    client_properties={"connection_attempts": 3, "retry_delay": 5},
-                    reconnect_interval=5
+                    client_properties={"connection_attempts": 1, "retry_delay": 0}
                 )
                 self.logger.debug(f"Sampler {local_id}: Connected to RabbitMQ.")
                 channel = await connection.channel()
@@ -588,8 +584,7 @@ class TaskManager:
                 connection = await aio_pika.connect_robust(
                     amqp_url,
                     timeout=300,
-                    client_properties={"connection_attempts": 3, "retry_delay": 5},
-                    reconnect_interval=5
+                    client_properties={"connection_attempts": 1, "retry_delay": 0}
                 )
                 channel = await connection.channel()
                 database_queue = await channel.declare_queue("database_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
@@ -612,8 +607,6 @@ class TaskManager:
         finally:
             loop.close()
             self.logger.debug(f"Database process {local_id} has been closed gracefully.")
-
-
 
     def evaluator_process(self, template, inputs, amqp_url):
         import evaluator
@@ -661,8 +654,7 @@ class TaskManager:
                 connection = await aio_pika.connect_robust(
                     amqp_url,
                     timeout=300,
-                    client_properties={"connection_attempts": 3, "retry_delay": 5},
-                    reconnect_interval=5
+                    client_properties={"connection_attempts": 1, "retry_delay": 0}
                 )
                 channel = await connection.channel()
                 evaluator_queue = await channel.declare_queue(
@@ -710,7 +702,6 @@ class TaskManager:
 
 
 
-
     async def run(self):
         try:
             await self.main_task()
@@ -737,7 +728,6 @@ def initialize_task_manager(config=None):
     task_manager = TaskManager(specification, [(6, 1), (7, 1), (8, 1), (9, 1), (10, 1), (11, 1)], config, mang, manager)
 
     return task_manager
-
 
 
 if __name__ == "__main__":

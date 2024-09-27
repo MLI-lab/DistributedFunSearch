@@ -17,6 +17,7 @@ import gc
 from profiling import async_time_execution, async_track_memory
 import psutil
 
+
 logger = logging.getLogger('main_logger')
 
 
@@ -116,38 +117,104 @@ class Evaluator:
             base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id)
         self.executor = ProcessPoolExecutor(max_workers=6)
 
+    async def shutdown(self):
+        logger.info(f"Evaluator {self.local_id}: Initiating shutdown process.")
+        try: 
+            if self.executor:
+                logger.info(f"Evaluator {self.local_id}: Shutting down executor.")
+                self.executor.shutdown(wait=False) # if evaluator spawns processes using the executor and then is cancelled those continue running, if wait=True executer could hand while waiting for the completion of the task if wait= False might fail to clean up properly 
+                # Also if the subtasks are acessing any shared resouces eg call_count or the logger improper termination can cause issues if another process is waiting for them
+                self.executor = None  # Set to None to avoid future attempts to use it
+            else:
+                logger.info(f"Evaluator {self.local_id}: Executor already shut down or not initialized.")
+
+            # Ensure all child processes are terminated
+            parent = psutil.Process()
+            children = parent.children(recursive=True)
+
+            if children:
+                for child in children:
+                    logger.info(f"Evaluator {self.local_id}: Terminating child process PID {child.pid}")
+                    child.terminate()
+
+                # Wait for processes to terminate with a timeout
+                gone, still_alive = psutil.wait_procs(children, timeout=5)
+
+                if still_alive:
+                    for p in still_alive:
+                        logger.warning(f"Evaluator {self.local_id}: Child process PID {p.pid} did not terminate. Forcing kill.")
+                        p.kill()  # Forcefully kill any process that did not terminate
+                else:
+                    logger.info(f"Evaluator {self.local_id}: All child processes terminated successfully.")
+            else:
+                logger.info(f"Evaluator {self.local_id}: No running child processes to terminate.")
+
+            # Run garbage collection to clean up resources
+            gc.collect()
+
+            logger.info(f"Evaluator {self.local_id}: Shutdown process complete.")
+        except asyncio.TimeoutError:
+            logger.warning(f"Evaluator {self.local_id}: Timeout occurred during shutdown.")
+        except Exception as e:
+            logger.error(f"Evaluator {self.local_id}: Error during shutdown: {e}")
+
 
     async def consume_and_process(self):
-        async with self.channel:
-            await self.channel.set_qos(prefetch_count=1)
-            async with self.evaluator_queue.iterator() as stream:
-                try:
-                    async for message in stream:
-                        try: 
-                            await self.process_message(message)
-                        except Exception as e: 
-                            logger.error(f"Error in process message in Evaluator cause {e}")
-                except asyncio.CancelledError:
-                    self.shutdown()  
-                    raise  # Ensure the cancellation is propagated
-                finally:
-                    self.shutdown()
+        try:
+            # Set channel QoS
+            async with self.channel:
+                await self.channel.set_qos(prefetch_count=1)
+
+                # Start consuming messages
+                async with self.evaluator_queue.iterator() as stream:
+                    try:
+                        async for message in stream:
+                            async with message.process():
+                                try:
+                                    # Set a reasonable timeout for processing each message
+                                    await asyncio.wait_for(self.process_message(message), timeout=300)  # Adjust the timeout as needed
+                                except asyncio.TimeoutError:
+                                    logger.warning("Processing message timed out.")
+                                except Exception as e:
+                                    logger.error(f"Error while processing message: {e}")
+                    except asyncio.CancelledError:
+                        logger.info("Consumer was cancelled.")
+                        raise  # Propagate the cancellation upwards
+                    except Exception as e:
+                        logger.error(f"Error in message stream: {e}")
+        except Exception as e:
+            logger.error(f"Exception occurred in consume_and_process: {e}")
+            raise  # Re-raise the exception to be handled by the caller if needed
+        finally:
+            try:
+                # Call shutdown with a timeout
+                await asyncio.wait_for(self.shutdown(), timeout=100)
+            except asyncio.TimeoutError:
+                logger.warning("Shutdown took too long and timed out.")
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
+
+
     #@async_time_execution
     #@async_track_memory
     async def process_message(self, message: aio_pika.IncomingMessage):
-        async with message.process():
+        try:
             raw_data = message.body.decode()
             data = json.loads(raw_data)
-            logger.info(f"Evaluator: Starts to analyse generated continuation of def priority: {data['sample']}")
+            logger.info(f"Evaluator: Starts to analyze generated continuation of def priority: {data['sample']}")
 
+            # Process the new function from the generated code
             new_function, program = _sample_to_program(data["sample"], data.get("version_generated"), self.template, self.function_to_evolve)
+
             tasks = {}
             if new_function.body not in [None, '']:
-                # Submit each test input as task for Multiprocessing
+                # Submit each test input as a task for multiprocessing
                 tasks = {self.executor.submit(run_evaluation, self.sandbox, program, self.function_to_run, input, self.timeout_seconds, self.call_count, self.call_count_lock): input for input in self.inputs}
             else:
-                logger.info("New function body is None or empty. Skipping execution.")
-                return  # Early return if there's nothing to process
+                logger.info("New function body is None or empty. Skipping execution but publishing 'return'.")
+                result = ("return", data['island_id'], {}, data['expected_version'])
+                await self.publish_to_database(result, message)  # Publish "return" result
+                return  # Early return after publishing
 
             scores_per_test = {}
             # Waiting for results from all test inputs
@@ -176,13 +243,14 @@ class Evaluator:
             else:
                 result = ("return", data['island_id'], {}, data['expected_version'])
 
-            # Try publishing the result to the database
-            try:
-                await self.publish_to_database(result, message)
-            except Exception as e:
-                logger.error(f"Error in await self.publish_to_database(result) {e}")
-                raise
+            # Publish the result
+            await self.publish_to_database(result, message)
 
+        except Exception as e:
+            logger.error(f"Error in process_message: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in process_message: {e}")
 
 
     async def publish_to_database(self, result, message):
@@ -202,7 +270,8 @@ class Evaluator:
             # Publishing the serialized result to the database queue
             await self.channel.default_exchange.publish(
                 aio_pika.Message(body=message_body.encode(), 
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT), 
+                #delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+                ), 
                 routing_key='database_queue'
             )
             logger.info(f"Evaluator: Successfully published to database for island_id {island_id}.")
@@ -211,4 +280,3 @@ class Evaluator:
             logger.error(f"Evaluator: Problem in publishing to database for island_id {island_id}: {e}")
             # Optionally re-raise the exception if the caller needs to handle it.
             raise
-
