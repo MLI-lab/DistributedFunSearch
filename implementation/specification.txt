@@ -8,71 +8,64 @@ import numpy as np
 import networkx as nx
 
 def generate_graph(n, s):
-  G = nx.Graph()
-  sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]  # forms nth cartesian product of 0,1 to enumerate all sequences
-
-  # Adding nodes
-  for seq in sequences:
-    G.add_node(seq)
-
-  # Adding edges
-  for i in range(len(sequences)):
-    for j in range(i + 1, len(sequences)):  # no self comparison and repeated comparisons
-      if has_common_subsequence(sequences[i], sequences[j], n, s):
-        G.add_edge(sequences[i], sequences[j])
-  return G
+    G = nx.Graph()
+    sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]  # Generate all binary strings of length n
+    # Adding nodes
+    for seq in sequences:
+        G.add_node(seq)
+    # Adding edges
+    for i in range(len(sequences)):
+        for j in range(i + 1, len(sequences)):
+            if has_common_subsequence(sequences[i], sequences[j], n, s):
+                G.add_edge(sequences[i], sequences[j])
+    return G
 
 def has_common_subsequence(seq1, seq2, n, s):
-  threshold = n - s
-  if threshold <= 0:
-    return True  # Trivial case where subsequence is length 0 or negative
-  # Initialize two rows for DP
-  prev = [0] * (n + 1)  # all zeros vector of dim n+1 (also consider empty sequence case)
-  current = [0] * (n + 1)  # all zeros vector of dim n+1 (also consider empty sequence case)
-
-  # Fill the DP table row by row
-  for i in range(1, n + 1):  # iterate over symbols in seq1
-    for j in range(1, n + 1):  # iterate over symbols in seq2
-      if seq1[i - 1] == seq2[j - 1]:  # python 0 indexing
-        current[j] = prev[j - 1] + 1
-      else:
-        current[j] = max(prev[j], current[j - 1])
-
-      # Check if the current length of LCS meets the threshold
-      if current[j] >= threshold:
-        return True
-
-    # Swap current and prev rows for next iteration
-    prev, current = current, prev
-
-  return False  # No LCS of adequate length was found
+    threshold = n - s
+    if threshold <= 0:
+        return True  # Trivial case where subsequence length is 0 or negative
+    # Initialize two rows for DP
+    prev = [0] * (n + 1)
+    current = [0] * (n + 1)
+    # Fill the DP table row by row
+    for i in range(1, n + 1):
+        for j in range(1, n + 1):
+            if seq1[i - 1] == seq2[j - 1]:
+                current[j] = prev[j - 1] + 1
+            else:
+                current[j] = max(prev[j], current[j - 1])
+            if current[j] >= threshold:
+                return True
+        prev, current = current, prev
+    return False  # No LCS of adequate length was found
 
 def evaluate(params):
-  n,s= params
-  independent_set = solve(n, s)
-  return len(independent_set)
+    n, s = params
+    independent_set = solve(n, s)
+    return len(independent_set)
 
 def solve(n, s):
-  # Generate graph
-  G = generate_graph(n, s)
-  # Dictionary to hold the priority of each node
-  priorities = {node: priority(node, G, n, s) for node in G.nodes}
-
-  # Set to keep track of the independent set
-  independent_set = set()
-
-  # Process nodes in descending order of their priorities
-  for node in sorted(G.nodes, key=lambda x: priorities[x], reverse=True):
-    if priorities[node] == -np.inf:
-      continue  # This node has been invalidated
-    # Add the node to the independent set
-    independent_set.add(node)
-    # Invalidate this node and all its neighbors
-    priorities[node] = -np.inf
-    for neighbor in G.neighbors(node):
-      priorities[neighbor] = -np.inf
-
-  return independent_set
+    # Generate the original graph
+    G_original = generate_graph(n, s)
+    # Create copies of the graph for priority calculation and independent set construction
+    G_for_priority = G_original.copy()
+    G_for_independent_set = G_original.copy()
+    # Compute priorities (pass a copy to prevent modification of the original graph)
+    priorities = {node: priority(node, G_for_priority, n, s) for node in G_original.nodes}
+    # Sort nodes based on priority (highest priority first)
+    nodes_sorted = sorted(G_original.nodes, key=lambda x: priorities[x], reverse=True)
+    independent_set = set()
+    # Build the independent set using the unmodified graph
+    for node in nodes_sorted:
+        if node not in G_for_independent_set:
+            continue  # Node has already been removed
+        # Add the node to the independent set
+        independent_set.add(node)
+        # Remove the node and its neighbors from the graph copy
+        neighbors = list(G_for_independent_set.neighbors(node))
+        G_for_independent_set.remove_node(node)
+        G_for_independent_set.remove_nodes_from(neighbors)
+    return independent_set
 
 def priority(node, G, n, s):
     """

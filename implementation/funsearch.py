@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from logging.handlers import RotatingFileHandler
+from logging import FileHandler
 import json
 import aio_pika
 from yarl import URL
@@ -90,12 +91,16 @@ class TaskManager:
         logger = logging.getLogger('main_logger')
         logger.setLevel(logging.DEBUG)
         log_file_path = os.path.join(os.getcwd(), 'funsearch.log')
-        handler = RotatingFileHandler(log_file_path, maxBytes=100 * 1024 * 1024, backupCount=3)
+        # Use FileHandler instead of RotatingFileHandler
+        handler = FileHandler(log_file_path)
+        # Optional: If you want to set a file mode to append to the log instead of overwriting it
+        # handler = FileHandler(log_file_path, mode='a')  # 'a' for append new log messages, 'w' for overwrite new log messages when the logger is newely initialized
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.propagate = False
         return logger
+
 
     async def scaling_controller(self, template, function_to_evolve, amqp_url):
         amqp_url = str(amqp_url)
@@ -103,18 +108,18 @@ class TaskManager:
         current_thread = threading.current_thread().name
         thread_id = threading.get_ident()
         check_interval_eval = 120  # seconds
-        check_interval_sam = 100
+        check_interval_sam = 120
         check_interval_db= 1080
-        max_evaluators = 25
+        max_evaluators = 15
         min_evaluators = 1
         max_samplers = 4
         min_samplers = 1
         max_databases = 5
         min_databases = 0
         evaluator_threshold = 5
-        sampler_threshold = 5
+        sampler_threshold = 15
         database_threshold = 20
-        initial_sleep_duration = 60  # seconds
+        initial_sleep_duration = 300  # seconds
         await asyncio.sleep(initial_sleep_duration)
 
         # Create a connection and channels for getting queue metrics
@@ -229,34 +234,43 @@ class TaskManager:
             # Create a mapping of host-visible GPU IDs (integers in visible_devices) to container-visible device indices
             id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
 
-            # Initialize GPU memory usage tracking (host-visible GPU IDs)
-            gpu_memory_usage = {gpu.id: gpu.memoryFree for gpu in gpus if gpu.id in visible_devices}
+            # Initialize GPU memory usage and utilization tracking (host-visible GPU IDs)
+            gpu_memory_info = {gpu.id: (gpu.memoryFree, gpu.memoryUtil * 100) for gpu in gpus if gpu.id in visible_devices}
 
-            # Find a suitable GPU with enough free memory
             suitable_gpu_id = None
-            for gpu_id, free_memory in gpu_memory_usage.items():
-                if free_memory > 1000:  # Check if more than 1000 MIB is available
+            combined_memory = 0
+            combined_gpus = []
+
+            # Check if any single GPU has >= 20 GiB of memory free and < 50% utilization
+            for gpu_id, (free_memory, utilization) in gpu_memory_info.items():
+                if free_memory > 20000 and utilization < 50:  # Check for at least 20 GiB and < 50% utilization
                     suitable_gpu_id = gpu_id
                     break
+                elif utilization < 50:
+                    combined_memory += free_memory
+                    combined_gpus.append(gpu_id)
 
-            # Map to container-visible device (like cuda:0 or cuda:1)
+            # If a single GPU was found with sufficient memory
             if suitable_gpu_id is not None:
-                container_index = id_to_container_index[suitable_gpu_id]  # Get container-visible index
+                container_index = id_to_container_index[suitable_gpu_id]
                 device = f"cuda:{container_index}"
-                # Adjust memory tracking (simplistic estimation)
-                gpu_memory_usage[suitable_gpu_id] -= 17000
+                gpu_memory_info[suitable_gpu_id] = (gpu_memory_info[suitable_gpu_id][0] - 20000, gpu_memory_info[suitable_gpu_id][1])  # Reduce available memory by 20 GiB
+            elif combined_memory >= 20000:  # If combined memory from multiple GPUs is >= 20 GiB
+                device = None  # Use None to indicate that multiple GPUs will be used, possibly via data parallelism
+                self.logger.info(f"Using combination of GPUs: {combined_gpus} with total memory: {combined_memory} MiB")
             else:
                 self.logger.error(f"Cannot start {process_name}: Not enough available GPU memory.")
-                return  # Skip this process if no GPU has sufficient memory
+                return
 
-            self.logger.info(f"Assigning {process_name} to device {device}")
-            args += (device,)  # Append the GPU device to args
+            self.logger.info(f"Assigning {process_name} to device {device if device else 'combined GPUs (None)'}")
+            args += (device,)  # Append the device (either specific GPU or None) to args
 
         # Start the process
         proc = mp.Process(target=target_fnc, args=args, name=f"{process_name}-{len(processes)}")
         proc.start()
         processes.append(proc)
         self.logger.info(f"Started {process_name} process with PID: {proc.pid} on device {args[-1]}")
+
 
 
     def get_process_with_zero_or_lowest_cpu(self, processes):
@@ -323,78 +337,136 @@ class TaskManager:
             save_checkpoint(main_database)
             self.logger.info("Checkpoint has been saved.")
 
+    async def publish_initial_program_with_retry(self, amqp_url, initial_program_data, max_retries=5, delay=5):
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                sampler_connection = await aio_pika.connect_robust(
+                    amqp_url,
+                    timeout=300,
+                )
+                sampler_channel = await sampler_connection.channel()
+
+                # Ensure the evaluator_queue is declared
+                await sampler_channel.declare_queue(
+                    "evaluator_queue", durable=False, auto_delete=False,
+                    arguments={'x-consumer-timeout': 360000000}
+                )
+
+                await sampler_channel.default_exchange.publish(
+                    aio_pika.Message(body=initial_program_data.encode()),
+                    routing_key='evaluator_queue'
+                )
+                self.logger.debug("Published initial program")
+                await sampler_channel.close()
+                await sampler_connection.close()
+                return  # Exit the function after successful publish
+            except Exception as e:
+                attempt += 1
+                self.logger.error(f"Attempt {attempt} failed to publish initial program: {e}")
+                if attempt < max_retries:
+                    self.logger.info(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                else:
+                    self.logger.error("Max retries reached. Failed to publish initial program.")
+                    raise e  # Re-raise the exception after max retries
+
+
     async def main_task(self):
         amqp_url = URL(
             f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/'
         ).update_query(heartbeat=180000)
         pid = os.getpid()
         self.logger.info(f"Main_task is running in process with PID: {pid}")
+
+        # Initialize the template and initial program data
+        template = code_manipulation.text_to_program(self.specification)
+        function_to_evolve = 'priority'
+        initial_program_data = json.dumps({
+            "sample": template.get_function(function_to_evolve).body,
+            "island_id": None,
+            "version_generated": None,
+            "expected_version": 0
+        })
+
         try:
-            # Create connections for the samplers and database
+            # Create connections and declare queues
             sampler_connection = await aio_pika.connect_robust(
                 amqp_url,
                 timeout=300,
             )
+            self.sampler_channel = await sampler_connection.channel()
 
             database_connection = await aio_pika.connect_robust(
                 amqp_url,
                 timeout=300,
             )
-
-            # Channels on separate connections
-            self.sampler_channel = await sampler_connection.channel()
             self.database_channel = await database_connection.channel()
 
+            # Declare queues before starting consumers
             evaluator_queue = await self.sampler_channel.declare_queue(
-                "evaluator_queue", durable=False, auto_delete=True,
+                "evaluator_queue", durable=False, auto_delete=False,
                 arguments={'x-consumer-timeout': 360000000}
             )
             sampler_queue = await self.sampler_channel.declare_queue(
-                "sampler_queue", durable=False, auto_delete=True,
+                "sampler_queue", durable=False, auto_delete=False,
                 arguments={'x-consumer-timeout': 360000000}
             )
             database_queue = await self.database_channel.declare_queue(
-                "database_queue", durable=False, auto_delete=True,
+                "database_queue", durable=False, auto_delete=False,
                 arguments={'x-consumer-timeout': 360000000}
             )
 
-            template = code_manipulation.text_to_program(self.specification)
-            function_to_evolve = 'priority'
+            # Start consumers before publishing
+            try:
+                self.start_initial_processes(template, function_to_evolve, amqp_url)
+                self.logger.info("Initial processes started successfully.")
+            except Exception as e:
+                self.logger.error(f"Failed to start initial processes: {e}")
 
-            # Initialize the designated ProgramsDatabase instance for checkpointing
-            main_database = programs_database.ProgramsDatabase(
-                self.manager, self.mang, database_connection, self.database_channel, database_queue,
-                sampler_queue, evaluator_queue, self.config.programs_database, template, function_to_evolve
-            )
+            # Publish the initial program with retry logic
+            await self.publish_initial_program_with_retry(amqp_url, initial_program_data)
 
+            # Initialize the main database with retry logic
+            try:
+                main_database = programs_database.ProgramsDatabase(
+                    self.manager, self.mang, database_connection, self.database_channel, database_queue,
+                    sampler_queue, evaluator_queue, self.config.programs_database, template, function_to_evolve
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to initialize main database: {e}")
+                # Retry logic for main database initialization
+                max_retries = 5
+                for attempt in range(max_retries):
+                    try:
+                        self.logger.info(f"Retrying main database initialization (Attempt {attempt + 1})...")
+                        main_database = programs_database.ProgramsDatabase(
+                            self.manager, self.mang, database_connection, self.database_channel, database_queue,
+                            sampler_queue, evaluator_queue, self.config.programs_database, template, function_to_evolve
+                        )
+                        self.logger.info("Main database initialized successfully.")
+                        break  # Exit the loop if successful
+                    except Exception as e:
+                        self.logger.error(f"Attempt {attempt + 1} failed: {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(5)  # Wait before retrying
+                        else:
+                            self.logger.error("Max retries reached. Could not initialize main database.")
+                            raise e  # Re-raise the exception after max retries
+
+            # Create tasks after components are initialized
             main_database_task = asyncio.create_task(main_database.consume_and_process())
-            # Schedule periodic_checkpoint and scaling_controller as async tasks
             periodic_checkpoint_task = asyncio.create_task(self.periodic_checkpoint(main_database))
             scaling_controller_task = asyncio.create_task(self.scaling_controller(template, function_to_evolve, amqp_url))
 
-            # Start initial processes
-            self.start_initial_processes(template, function_to_evolve, amqp_url)
             self.tasks = [main_database_task, periodic_checkpoint_task, scaling_controller_task]
             self.channels = [self.database_channel, self.sampler_channel]
             self.queues = [["database_queue"], ["sampler_queue"], ["evaluator_queue"]]
-
-            initial_program_data = json.dumps({
-                "sample": template.get_function(function_to_evolve).body,
-                "island_id": None,
-                "version_generated": None,
-                "expected_version": 0
-            })
-            await self.sampler_channel.default_exchange.publish(
-                aio_pika.Message(body=initial_program_data.encode()),
-                routing_key='evaluator_queue'
-            )
-            self.logger.debug("Published initial program")
 
             await asyncio.gather(*self.tasks)
 
         except Exception as e:
             self.logger.error(f"Exception occurred in main_task: {e}")
-            main_database.shutdown()
 
 
     def start_initial_processes(self, template, function_to_evolve, amqp_url):
@@ -409,49 +481,60 @@ class TaskManager:
         # Create a mapping of host-visible GPU IDs (integers in visible_devices) to container-visible device indices
         id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
 
-        # Initialize GPU memory usage tracking (host-visible GPU IDs)
-        gpu_memory_usage = {gpu.id: gpu.memoryFree for gpu in gpus if gpu.id in visible_devices}
+        # Initialize GPU memory usage and utilization tracking (host-visible GPU IDs)
+        gpu_memory_info = {gpu.id: (gpu.memoryFree, gpu.memoryUtil * 100) for gpu in gpus if gpu.id in visible_devices}
 
-        self.logger.info(f"Found visible GPUs with initial free memory: {gpu_memory_usage}")
+        self.logger.info(f"Found visible GPUs with initial free memory and utilization: {gpu_memory_info}")
 
         # Start initial sampler processes
         for i in range(self.config.num_samplers):
-            # Find a suitable GPU with enough free memory
             suitable_gpu_id = None
-            for gpu_id, free_memory in gpu_memory_usage.items():
-                if free_memory > 17000:  # Check if more than 17000MiB is available
+            combined_memory = 0
+            combined_gpus = []
+
+            # Check if any single GPU has >= 20 GiB of memory free and < 50% utilization
+            for gpu_id, (free_memory, utilization) in gpu_memory_info.items():
+                if free_memory > 17000 and utilization < 50:  # Check for at least 20 GiB and < 50% utilization
                     suitable_gpu_id = gpu_id
                     break
+                elif utilization < 50:
+                    combined_memory += free_memory
+                    combined_gpus.append(gpu_id)
 
-            # Map to container-visible device (like cuda:0 or cuda:1)
+            # If a single GPU was found with sufficient memory
             if suitable_gpu_id is not None:
-                container_index = id_to_container_index[suitable_gpu_id]  # Get container-visible index
+                container_index = id_to_container_index[suitable_gpu_id]
                 device = f"cuda:{container_index}"
                 # Adjust memory tracking (simplistic estimation)
-                gpu_memory_usage[suitable_gpu_id] -= 17000
+                gpu_memory_info[suitable_gpu_id] = (gpu_memory_info[suitable_gpu_id][0] - 17000, gpu_memory_info[suitable_gpu_id][1])
+            elif combined_memory >= 17000:  # If combined memory from multiple GPUs is >= 20 GiB
+                device = None  # Use None to indicate that multiple GPUs will be used
+                self.logger.info(f"Using combination of GPUs: {combined_gpus} with total memory: {combined_memory} MiB")
             else:
                 self.logger.error(f"Cannot start sampler {i}: Not enough available GPU memory.")
                 continue  # Skip this sampler if no GPU has sufficient memory
 
-            self.logger.info(f"Assigning sampler {i} to device {device}")
+            self.logger.info(f"Assigning sampler {i} to device {device if device else 'combined GPUs (None)'}")
 
             proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
             proc.start()
             self.logger.info(f"Started Sampler Process {i} on {device} with PID: {proc.pid}")
             self.sampler_processes.append(proc)
 
-        # Start initial evaluator and database processes as previously done
+        # Start initial evaluator processes
         for i in range(self.config.num_evaluators):
             proc = mp.Process(target=self.evaluator_process, args=(template, self.inputs, amqp_url), name=f"Evaluator-{i}")
             proc.start()
             self.logger.info(f"Started Evaluator Process {i} with PID: {proc.pid}")
             self.evaluator_processes.append(proc)
 
+        # Start initial database processes
         for i in range(self.config.num_pdb - 1):
             proc = mp.Process(target=self.database_process, args=(self.config.programs_database, template, function_to_evolve, amqp_url), name=f"Database-{i}")
             proc.start()
             self.logger.info(f"Started Database Process {i} with PID: {proc.pid}")
             self.database_processes.append(proc)
+
 
     def sampler_process(self, amqp_url, device):
 
@@ -504,13 +587,13 @@ class TaskManager:
                 self.logger.debug(f"Sampler {local_id}: Channel established.")
 
                 sampler_queue = await channel.declare_queue(
-                    "sampler_queue", durable=False, auto_delete=True,
+                    "sampler_queue", durable=False, auto_delete=False,
                     arguments={'x-consumer-timeout': 360000000}
                 )
                 self.logger.debug(f"Sampler {local_id}: Declared sampler_queue.")
 
                 evaluator_queue = await channel.declare_queue(
-                    "evaluator_queue", durable=False, auto_delete=True,
+                    "evaluator_queue", durable=False, auto_delete=False,
                     arguments={'x-consumer-timeout': 360000000}
                 )
                 self.logger.debug(f"Sampler {local_id}: Declared evaluator_queue.")
@@ -587,9 +670,9 @@ class TaskManager:
                     client_properties={"connection_attempts": 1, "retry_delay": 0}
                 )
                 channel = await connection.channel()
-                database_queue = await channel.declare_queue("database_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
-                sampler_queue = await channel.declare_queue("sampler_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
-                evaluator_queue = await channel.declare_queue("evaluator_queue", durable=False, auto_delete=True, arguments={'x-consumer-timeout': 360000000})
+                database_queue = await channel.declare_queue("database_queue", durable=False, auto_delete=False, arguments={'x-consumer-timeout': 360000000})
+                sampler_queue = await channel.declare_queue("sampler_queue", durable=False, auto_delete=False, arguments={'x-consumer-timeout': 360000000})
+                evaluator_queue = await channel.declare_queue("evaluator_queue", durable=False, auto_delete=False, arguments={'x-consumer-timeout': 360000000})
 
                 database_instance = programs_database.ProgramsDatabase(
                     self.manager, self.mang, connection, channel, database_queue, sampler_queue, evaluator_queue, config, template, function_to_evolve
@@ -658,18 +741,18 @@ class TaskManager:
                 )
                 channel = await connection.channel()
                 evaluator_queue = await channel.declare_queue(
-                    "evaluator_queue", durable=False, auto_delete=True,
+                    "evaluator_queue", durable=False, auto_delete=False,
                     arguments={'x-consumer-timeout': 360000000}
                 )
                 database_queue = await channel.declare_queue(
-                    "database_queue", durable=False, auto_delete=True,
+                    "database_queue", durable=False, auto_delete=False,
                     arguments={'x-consumer-timeout': 360000000}
                 )
 
                 evaluator_instance = evaluator.Evaluator(
                     connection, channel, evaluator_queue, database_queue, 
                     template, 'priority', 'evaluate', inputs, 'sandboxstorage', 
-                    timeout_seconds=600, local_id=local_id
+                    timeout_seconds=800, local_id=local_id
                 )
                 evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
                 await evaluator_task

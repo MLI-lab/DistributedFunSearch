@@ -1,40 +1,2288 @@
-Fri Sep 27 04:27:01 PM CEST 2024 - Restarting Docker containers on remote servers...
-Fri Sep 27 04:27:01 PM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Sun Oct  6 08:51:29 PM CEST 2024 - Restarting Docker containers on remote servers...
+Sun Oct  6 08:51:29 PM CEST 2024 - Killing all Python processes on the main server...
+Sun Oct  6 08:51:29 PM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Sun Oct  6 08:51:29 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 1 of 5.
 pytorchFW
-Fri Sep 27 04:27:02 PM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
-Fri Sep 27 04:27:02 PM CEST 2024 - Restarting Docker container on gpumlp2.msv.ei.tum.de...
+Sun Oct  6 08:51:30 PM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Sun Oct  6 08:51:30 PM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+Sun Oct  6 08:51:31 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 2 of 5.
 pytorchFW
-Fri Sep 27 04:27:14 PM CEST 2024 - Docker container on gpumlp2.msv.ei.tum.de restarted successfully.
-Fri Sep 27 04:27:14 PM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+Sun Oct  6 08:51:31 PM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Sun Oct  6 08:51:31 PM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+Sun Oct  6 08:51:33 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 3 of 5.
+Sun Oct  6 08:51:35 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 4 of 5.
+Sun Oct  6 08:51:37 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 5 of 5.
+Sun Oct  6 08:51:39 PM CEST 2024 - Failed to kill Python processes on the main server after 5 attempts.
 pytorchFW
-Fri Sep 27 04:27:25 PM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
-Fri Sep 27 04:27:25 PM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+Sun Oct  6 08:51:43 PM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Sun Oct  6 08:51:43 PM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
 pytorchFW
-Fri Sep 27 04:27:26 PM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
-Fri Sep 27 04:27:26 PM CEST 2024 - Remote Docker containers restarted.
-Fri Sep 27 04:27:26 PM CEST 2024 - Killing all Python processes on the main server...
-Fri Sep 27 04:27:26 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 1 of 5.
-Fri Sep 27 04:27:29 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 2 of 5.
-Fri Sep 27 04:27:31 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 3 of 5.
-Fri Sep 27 04:27:33 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 4 of 5.
-Fri Sep 27 04:27:35 PM CEST 2024 - Failed to kill Python processes on the main server. Attempt 5 of 5.
-Fri Sep 27 04:27:37 PM CEST 2024 - Failed to kill Python processes on the main server after 5 attempts.
-Fri Sep 27 04:27:37 PM CEST 2024 - Checking for leftover RabbitMQ resources...
+Sun Oct  6 08:51:54 PM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Sun Oct  6 08:51:54 PM CEST 2024 - Remote Docker containers restarted.
+Sun Oct  6 08:51:54 PM CEST 2024 - Checking for leftover RabbitMQ resources...
 Fetching queues...
 Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
 Fetching connections...
 Fetching channels...
-Fri Sep 27 04:27:37 PM CEST 2024 - RabbitMQ resources cleaned up.
-Fri Sep 27 04:27:47 PM CEST 2024 - Starting grid search...
-Starting Python script on sequoia.mli.ei.tum.de using Docker container pytorchFW
-Starting Python script on gpumlp2.msv.ei.tum.de using Docker container pytorchFW
-Starting Python script on zion.msv.ei.tum.de using Docker container pytorchFW
-Starting Python script on bigsur.mli.ei.tum.de using Docker container pytorchFW
-Fri Sep 27 04:27:47 PM CEST 2024 - Sleeping for 3630 seconds...
+Sun Oct  6 08:51:54 PM CEST 2024 - RabbitMQ resources cleaned up.
+Sun Oct  6 08:52:04 PM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.70it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.79it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.80it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  2.37it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  2.11it/s]
+Sun Oct  6 08:52:34 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 08:52:35 PM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Sun Oct  6 08:52:35 PM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.03s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.11s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:07<00:02,  2.47s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.80s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.97s/it]
+Sun Oct  6 09:02:35 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 09:02:35 PM CEST 2024 - Sampler queue size: 117, Consumers: 2
+Sun Oct  6 09:02:35 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 09:02:35 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.17s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.17s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.13s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.49s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.73s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.23it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.14it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.23it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.71it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.48it/s]
+Sun Oct  6 09:18:37 PM CEST 2024 - Failed to query GPU information on sequoia.mli.ei.tum.de.
+Sun Oct  6 09:18:37 PM CEST 2024 - Checking GPU resources on bigsur.mli.ei.tum.de...
+Sun Oct  6 09:18:38 PM CEST 2024 - GPU info on bigsur.mli.ei.tum.de: 45478, 0
+6721, 100
+5399, 100
+45478, 0
+Sun Oct  6 09:18:38 PM CEST 2024 - Total available GPU memory on bigsur.mli.ei.tum.de: 90956 MiB
+Sun Oct  6 09:18:38 PM CEST 2024 - Starting funsearch_s.py on bigsur.mli.ei.tum.de with GPUs: 0,3
+Sun Oct  6 09:18:38 PM CEST 2024 - Updating remote config on bigsur.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on bigsur.mli.ei.tum.de
+Sun Oct  6 09:18:39 PM CEST 2024 - Successfully updated temperature=0.8 on bigsur.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on bigsur.mli.ei.tum.de
+Sun Oct  6 09:18:39 PM CEST 2024 - Successfully updated top_p=0.8 on bigsur.mli.ei.tum.de
+Sun Oct  6 09:18:44 PM CEST 2024 - Successfully initiated funsearch_s.py on bigsur.mli.ei.tum.de.
+Activating Conda environment on bigsur.mli.ei.tum.de
+Sun Oct  6 09:28:44 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 09:28:44 PM CEST 2024 - Sampler queue size: 1141, Consumers: 4
+Sun Oct  6 09:28:44 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 09:28:44 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 09:28:45 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Sun Oct  6 09:28:45 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Sun Oct  6 09:28:45 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Sun Oct  6 09:28:45 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 09:28:46 PM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 09:28:46 PM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Sun Oct  6 09:28:51 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Sun Oct  6 09:38:51 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 09:38:51 PM CEST 2024 - Sampler queue size: 1353, Consumers: 5
+Sun Oct  6 09:38:51 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 09:38:51 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 09:38:52 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27531, 100
+45382, 0
+45382, 0
+45382, 0
+Sun Oct  6 09:38:52 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Sun Oct  6 09:38:52 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Sun Oct  6 09:38:52 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 09:38:52 PM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 09:38:53 PM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Sun Oct  6 09:38:58 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Sun Oct  6 09:48:58 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 09:48:58 PM CEST 2024 - Sampler queue size: 1120, Consumers: 6
+Sun Oct  6 09:48:58 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 09:48:58 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 09:48:58 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 26505, 100
+25793, 98
+45382, 0
+45382, 0
+Sun Oct  6 09:48:58 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Sun Oct  6 09:48:58 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Sun Oct  6 09:48:58 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 09:48:59 PM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 09:48:59 PM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Sun Oct  6 09:49:04 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Sun Oct  6 09:59:04 PM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Sun Oct  6 09:59:04 PM CEST 2024 - Timeout reached. Terminating processes...
+Sun Oct  6 09:59:04 PM CEST 2024 - Restarting Docker containers on remote servers...
+Sun Oct  6 09:59:04 PM CEST 2024 - Killing all Python processes on the main server...
+Sun Oct  6 09:59:04 PM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Sun Oct  6 09:59:04 PM CEST 2024 - All Python processes on the main server killed successfully.
+Connection closed by 10.162.243.3 port 22
+Sun Oct  6 10:13:10 PM CEST 2024 - Failed to restart Docker container on sequoia.mli.ei.tum.de. SSH exit status: 255
+Sun Oct  6 10:13:10 PM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Sun Oct  6 10:13:12 PM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Sun Oct  6 10:13:12 PM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Sun Oct  6 10:13:26 PM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Sun Oct  6 10:13:26 PM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Sun Oct  6 10:13:38 PM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Sun Oct  6 10:13:38 PM CEST 2024 - Remote Docker containers restarted.
+Sun Oct  6 10:13:38 PM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.1:33450 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:33450 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:33956 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:33956 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:34342 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:34342 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:34426 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:34426 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:34588 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:34588 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:35536 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:35536 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:36162 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:36162 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:37702 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:37702 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39918 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39918 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39934 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39934 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39940 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39940 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39954 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39954 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39968 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39968 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39980 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39980 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39984 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39984 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:39996 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:39996 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40006 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40006 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40012 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40012 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40018 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40018 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40028 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40028 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40044 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40044 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40060 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40060 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40076 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40076 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40084 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40084 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40096 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40096 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40112 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40112 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40122 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40122 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40130 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40130 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40140 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40140 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40150 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40150 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40156 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40156 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40158 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40158 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40174 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40174 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:40580 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:40580 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:42314 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:42314 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:44550 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:44550 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:44982 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:44982 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:45506 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:45506 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:47386 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:47386 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:47634 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:47634 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:47774 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:47774 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:47790 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:47790 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:48822 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:48822 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:48982 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:48982 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:49700 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:49700 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:53268 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:53268 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:53274 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:53274 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:53608 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:53608 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:53888 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:53888 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:54200 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:54200 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:55000 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:55000 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:55006 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:55006 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:55174 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:55174 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:55722 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:55722 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:56412 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:56412 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:56700 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:56700 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:58802 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:58802 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:59952 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:59952 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:60420 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:60420 -> 172.21.0.2:5672
+Closing connection: 172.21.0.1:60866 -> 172.21.0.2:5672
+Closed connection: 172.21.0.1:60866 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49612 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49612 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49628 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49628 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49654 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49654 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49670 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49670 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49680 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49680 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49694 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49694 -> 172.21.0.2:5672
+Fetching channels...
+Sun Oct  6 10:13:42 PM CEST 2024 - RabbitMQ resources cleaned up.
+Sun Oct  6 10:13:52 PM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.05s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.07s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.04s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.42s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.65s/it]
+Sun Oct  6 10:14:22 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 10:14:22 PM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Sun Oct  6 10:14:22 PM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.25it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.29it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.32it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.81it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.58it/s]
+Sun Oct  6 10:24:22 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 10:24:22 PM CEST 2024 - Sampler queue size: 99, Consumers: 3
+Sun Oct  6 10:24:22 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 10:24:22 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 10:24:23 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45382, 0
+45382, 0
+28179, 96
+45382, 0
+Sun Oct  6 10:24:23 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Sun Oct  6 10:24:23 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,3
+Sun Oct  6 10:24:23 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.3 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 10:24:23 PM CEST 2024 - Successfully updated temperature=1.3 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 10:24:23 PM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Sun Oct  6 10:24:28 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.42it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.48it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.54it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.09it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.82it/s]
+<unknown>:3: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.38it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.46it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.53it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.08it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.81it/s]
+Sun Oct  6 10:34:28 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 10:34:28 PM CEST 2024 - Sampler queue size: 44, Consumers: 5
+Sun Oct  6 10:34:28 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 10:34:28 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 10:34:29 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 28495, 94
+28501, 96
+28543, 95
+45382, 0
+Sun Oct  6 10:34:29 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 45382 MiB
+Sun Oct  6 10:34:29 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 3
+Sun Oct  6 10:34:29 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.3 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 10:34:30 PM CEST 2024 - Successfully updated temperature=1.3 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 10:34:30 PM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Sun Oct  6 10:34:35 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:08,  2.85s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:05<00:05,  2.89s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:08<00:02,  2.77s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  1.90s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  2.24s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.18it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.18it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.10s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.02it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.03it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.05s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.09s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.06s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.50s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.71s/it]
+Sun Oct  6 10:44:35 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 10:44:35 PM CEST 2024 - Sampler queue size: 68, Consumers: 6
+Sun Oct  6 10:44:35 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 10:44:35 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 10:44:36 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 28519, 95
+28447, 96
+28465, 96
+45382, 0
+Sun Oct  6 10:44:36 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 45382 MiB
+Sun Oct  6 10:44:36 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 3
+Sun Oct  6 10:44:36 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.3 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 10:44:36 PM CEST 2024 - Successfully updated temperature=1.3 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 10:44:37 PM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Sun Oct  6 10:44:42 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.33s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.28s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:07<00:02,  2.58s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  1.78s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  2.02s/it]
+<unknown>:3: SyntaxWarning: invalid decimal literal
+<unknown>:3: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:13: SyntaxWarning: invalid decimal literal
+<unknown>:13: SyntaxWarning: invalid decimal literal
+Sun Oct  6 10:54:42 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 10:54:42 PM CEST 2024 - Sampler queue size: 75, Consumers: 9
+Sun Oct  6 10:54:42 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 10:54:42 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 10:54:43 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 11010, 83
+28325, 58
+28465, 95
+11248, 100
+Sun Oct  6 10:54:43 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 0 MiB
+Sun Oct  6 10:54:43 PM CEST 2024 - Not enough combined GPU memory available on sequoia.mli.ei.tum.de. Skipping...
+Sun Oct  6 10:54:43 PM CEST 2024 - Checking GPU resources on bigsur.mli.ei.tum.de...
+Sun Oct  6 10:54:43 PM CEST 2024 - GPU info on bigsur.mli.ei.tum.de: 45478, 0
+6721, 100
+5399, 100
+45478, 0
+Sun Oct  6 10:54:43 PM CEST 2024 - Total available GPU memory on bigsur.mli.ei.tum.de: 90956 MiB
+Sun Oct  6 10:54:43 PM CEST 2024 - Starting funsearch_s.py on bigsur.mli.ei.tum.de with GPUs: 0,3
+Sun Oct  6 10:54:43 PM CEST 2024 - Updating remote config on bigsur.mli.ei.tum.de
+Successfully updated temperature=1.3 in config.py on bigsur.mli.ei.tum.de
+Sun Oct  6 10:54:44 PM CEST 2024 - Successfully updated temperature=1.3 on bigsur.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on bigsur.mli.ei.tum.de
+Sun Oct  6 10:54:44 PM CEST 2024 - Successfully updated top_p=1 on bigsur.mli.ei.tum.de
+Sun Oct  6 10:54:49 PM CEST 2024 - Successfully initiated funsearch_s.py on bigsur.mli.ei.tum.de.
+Activating Conda environment on bigsur.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.02s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.06s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.03s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.42s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.64s/it]
+<unknown>:3: SyntaxWarning: invalid decimal literal
+<unknown>:3: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+Sun Oct  6 11:04:49 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 11:04:49 PM CEST 2024 - Sampler queue size: 336, Consumers: 8
+Sun Oct  6 11:04:49 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 11:04:49 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 11:04:50 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 11686, 100
+28519, 95
+28097, 94
+11452, 99
+Sun Oct  6 11:04:50 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 0 MiB
+Sun Oct  6 11:04:50 PM CEST 2024 - Not enough combined GPU memory available on sequoia.mli.ei.tum.de. Skipping...
+Sun Oct  6 11:04:50 PM CEST 2024 - Checking GPU resources on bigsur.mli.ei.tum.de...
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Sun Oct  6 11:04:50 PM CEST 2024 - GPU info on bigsur.mli.ei.tum.de: 45478, 0
+6721, 100
+5399, 100
+45478, 0
+Sun Oct  6 11:04:50 PM CEST 2024 - Total available GPU memory on bigsur.mli.ei.tum.de: 90956 MiB
+Sun Oct  6 11:04:50 PM CEST 2024 - Starting funsearch_s.py on bigsur.mli.ei.tum.de with GPUs: 0,3
+Sun Oct  6 11:04:50 PM CEST 2024 - Updating remote config on bigsur.mli.ei.tum.de
+Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.21it/s]Successfully updated temperature=1.3 in config.py on bigsur.mli.ei.tum.de
+Sun Oct  6 11:04:51 PM CEST 2024 - Successfully updated temperature=1.3 on bigsur.mli.ei.tum.de
+Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.23it/s]Successfully updated top_p=1 in config.py on bigsur.mli.ei.tum.de
+Sun Oct  6 11:04:52 PM CEST 2024 - Successfully updated top_p=1 on bigsur.mli.ei.tum.de
+Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.26it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.74it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.51it/s]
+Sun Oct  6 11:04:57 PM CEST 2024 - Successfully initiated funsearch_s.py on bigsur.mli.ei.tum.de.
+Activating Conda environment on bigsur.mli.ei.tum.de
+<unknown>:15: SyntaxWarning: invalid decimal literal
+<unknown>:15: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.43it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.50it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.55it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.11it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.84it/s]
+<unknown>:4: SyntaxWarning: invalid decimal literal
+Sun Oct  6 11:14:57 PM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Sun Oct  6 11:14:57 PM CEST 2024 - Timeout reached. Terminating processes...
+Sun Oct  6 11:14:57 PM CEST 2024 - Restarting Docker containers on remote servers...
+Sun Oct  6 11:14:57 PM CEST 2024 - Killing all Python processes on the main server...
+Sun Oct  6 11:14:57 PM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Sun Oct  6 11:14:57 PM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Sun Oct  6 11:15:01 PM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Sun Oct  6 11:15:01 PM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Sun Oct  6 11:15:02 PM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Sun Oct  6 11:15:02 PM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Sun Oct  6 11:15:15 PM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Sun Oct  6 11:15:15 PM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Sun Oct  6 11:15:27 PM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Sun Oct  6 11:15:27 PM CEST 2024 - Remote Docker containers restarted.
+Sun Oct  6 11:15:27 PM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:32842 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:32842 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:33178 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:33178 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34744 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34744 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34756 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34756 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34772 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34772 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34782 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34782 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34786 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34786 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34792 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34792 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34798 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34798 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34810 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34810 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34818 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34818 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34822 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34822 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34836 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34836 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:34846 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:34846 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:35842 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:35842 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39378 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39378 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:41464 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:41464 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42892 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42892 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48214 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48214 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:53642 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:53642 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54574 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54574 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60596 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60596 -> 172.21.0.2:5672
+Fetching channels...
+Sun Oct  6 11:15:28 PM CEST 2024 - RabbitMQ resources cleaned up.
+Sun Oct  6 11:15:38 PM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.95s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:03<00:03,  1.98s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.30s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.58s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.78s/it]
+Sun Oct  6 11:16:08 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 11:16:08 PM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Sun Oct  6 11:16:09 PM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.06s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.05s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.05s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.44s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.66s/it]
+Sun Oct  6 11:26:09 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 11:26:09 PM CEST 2024 - Sampler queue size: 94, Consumers: 2
+Sun Oct  6 11:26:09 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 11:26:09 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 11:26:09 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Sun Oct  6 11:26:09 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Sun Oct  6 11:26:09 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Sun Oct  6 11:26:09 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 11:26:10 PM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 11:26:10 PM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Sun Oct  6 11:26:15 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<ast>:83: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+Sun Oct  6 11:36:15 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 11:36:15 PM CEST 2024 - Sampler queue size: 73, Consumers: 1
+Sun Oct  6 11:36:15 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 11:36:15 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Sun Oct  6 11:36:16 PM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Sun Oct  6 11:36:16 PM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Sun Oct  6 11:36:16 PM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Sun Oct  6 11:36:16 PM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 11:36:16 PM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Sun Oct  6 11:36:17 PM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Sun Oct  6 11:36:22 PM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.14s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.24s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.24s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.57s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.81s/it]
+Sun Oct  6 11:46:22 PM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Sun Oct  6 11:46:22 PM CEST 2024 - Sampler queue size: 179, Consumers: 4
+Sun Oct  6 11:46:22 PM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Sun Oct  6 11:46:22 PM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 12:02:36 AM CEST 2024 - Failed to query GPU information on sequoia.mli.ei.tum.de.
+Mon Oct  7 12:02:36 AM CEST 2024 - Checking GPU resources on bigsur.mli.ei.tum.de...
+Mon Oct  7 12:02:36 AM CEST 2024 - GPU info on bigsur.mli.ei.tum.de: 45478, 0
+6721, 100
+5399, 100
+45478, 0
+Mon Oct  7 12:02:36 AM CEST 2024 - Total available GPU memory on bigsur.mli.ei.tum.de: 90956 MiB
+Mon Oct  7 12:02:36 AM CEST 2024 - Starting funsearch_s.py on bigsur.mli.ei.tum.de with GPUs: 0,3
+Mon Oct  7 12:02:36 AM CEST 2024 - Updating remote config on bigsur.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on bigsur.mli.ei.tum.de
+Mon Oct  7 12:02:37 AM CEST 2024 - Successfully updated temperature=1 on bigsur.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on bigsur.mli.ei.tum.de
+Mon Oct  7 12:02:37 AM CEST 2024 - Successfully updated top_p=0.8 on bigsur.mli.ei.tum.de
+Mon Oct  7 12:02:42 AM CEST 2024 - Successfully initiated funsearch_s.py on bigsur.mli.ei.tum.de.
+Activating Conda environment on bigsur.mli.ei.tum.de
+<unknown>:13: SyntaxWarning: invalid decimal literal
+<unknown>:13: SyntaxWarning: invalid decimal literal
+<unknown>:93: SyntaxWarning: invalid decimal literal
+<unknown>:93: SyntaxWarning: invalid decimal literal
+<unknown>:93: SyntaxWarning: invalid decimal literal
+<unknown>:93: SyntaxWarning: invalid decimal literal
+<unknown>:93: SyntaxWarning: invalid decimal literal
+<unknown>:93: SyntaxWarning: invalid decimal literal
+<ast>:85: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:85: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:85: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:85: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:85: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+<ast>:85: SyntaxWarning: 'generator' object is not subscriptable; perhaps you missed a comma?
+Mon Oct  7 12:12:42 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 12:12:42 AM CEST 2024 - Sampler queue size: 1006, Consumers: 4
+Mon Oct  7 12:12:42 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 12:12:42 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 12:12:43 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 8892, 100
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 12:12:43 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 12:12:43 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 12:12:43 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:12:43 AM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:12:44 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 12:12:49 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:9: SyntaxWarning: invalid decimal literal
+Mon Oct  7 12:22:49 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 12:22:49 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 12:22:49 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 12:22:49 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 12:22:49 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 12:22:49 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 12:22:56 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 12:22:56 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 12:22:57 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 12:22:57 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 12:23:10 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 12:23:10 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 12:23:22 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 12:23:22 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 12:23:22 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:38392 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38392 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39448 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39448 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39560 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39560 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39570 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39570 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39586 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39586 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39598 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39598 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39606 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39606 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39622 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39622 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39636 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39636 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39648 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39648 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39662 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39662 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39678 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39678 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39694 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39694 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39724 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39724 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40400 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40400 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:44286 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:44286 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:45738 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:45738 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:46018 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:46018 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:46440 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:46440 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49102 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49102 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49110 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49110 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50890 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50890 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:53658 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:53658 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 12:23:23 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 12:23:33 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
 Activating Conda environment on sequoia.mli.ei.tum.de
 Activating Conda environment on bigsur.mli.ei.tum.de
 Activating Conda environment on zion.msv.ei.tum.de
-Activating Conda environment on gpumlp2.msv.ei.tum.de
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.64it/s]Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.34it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.24it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.38it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.18it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.87it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.65it/s]
-Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.41it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.97it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.66it/s]
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.55it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.60it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.63it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.17it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.92it/s]
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.02s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.02s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.01s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.40s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.63s/it]
+Mon Oct  7 12:24:03 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 12:24:04 AM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Mon Oct  7 12:24:04 AM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.17it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.28it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.34it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.84it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.58it/s]
+Mon Oct  7 12:34:04 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 12:34:04 AM CEST 2024 - Sampler queue size: 112, Consumers: 2
+Mon Oct  7 12:34:04 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 12:34:04 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 12:34:04 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 12:34:04 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 12:34:04 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 12:34:04 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:34:05 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:34:05 AM CEST 2024 - Successfully updated top_p=0.9 on sequoia.mli.ei.tum.de
+Mon Oct  7 12:34:10 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.43it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.51it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.57it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.15it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.87it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.47it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.56it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.63it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.22it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.93it/s]
+Mon Oct  7 12:44:10 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 12:44:10 AM CEST 2024 - Sampler queue size: 220, Consumers: 4
+Mon Oct  7 12:44:10 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 12:44:10 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 12:44:11 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27565, 96
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 12:44:11 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 12:44:11 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 12:44:11 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:44:11 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:44:12 AM CEST 2024 - Successfully updated top_p=0.9 on sequoia.mli.ei.tum.de
+Mon Oct  7 12:44:17 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.31it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.37it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.42it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.94it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.69it/s]
+Mon Oct  7 12:54:17 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 12:54:17 AM CEST 2024 - Sampler queue size: 211, Consumers: 3
+Mon Oct  7 12:54:17 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 12:54:17 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 12:54:17 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45355, 0
+44953, 1
+45382, 0
+45382, 0
+Mon Oct  7 12:54:17 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181072 MiB
+Mon Oct  7 12:54:17 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 12:54:18 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:54:18 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 12:54:18 AM CEST 2024 - Successfully updated top_p=0.9 on sequoia.mli.ei.tum.de
+Mon Oct  7 12:54:23 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.26it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.33it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.38it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.87it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.63it/s]
+Mon Oct  7 01:04:23 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 01:04:23 AM CEST 2024 - Sampler queue size: 308, Consumers: 6
+Mon Oct  7 01:04:23 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 01:04:23 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 01:04:24 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 10110, 100
+27973, 97
+45382, 0
+45382, 0
+Mon Oct  7 01:04:24 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 01:04:24 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 01:04:24 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:04:25 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:04:25 AM CEST 2024 - Successfully updated top_p=0.9 on sequoia.mli.ei.tum.de
+Mon Oct  7 01:04:30 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:04,  1.58s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:03<00:03,  1.62s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:04<00:01,  1.60s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:05<00:00,  1.08s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:05<00:00,  1.27s/it]
+Mon Oct  7 01:14:30 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 01:14:30 AM CEST 2024 - Sampler queue size: 91, Consumers: 4
+Mon Oct  7 01:14:30 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 01:14:30 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 01:14:31 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 26971, 97
+27047, 97
+45382, 0
+45382, 0
+Mon Oct  7 01:14:31 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 01:14:31 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 01:14:31 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:14:31 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:14:32 AM CEST 2024 - Successfully updated top_p=0.9 on sequoia.mli.ei.tum.de
+Mon Oct  7 01:14:37 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.38it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.47it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.52it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.07it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.80it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.14s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.13s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.13s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.49s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.73s/it]
+Mon Oct  7 01:24:37 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 01:24:37 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 01:24:37 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 01:24:37 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 01:24:37 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 01:24:37 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 01:24:43 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 01:24:43 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 01:24:45 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 01:24:45 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 01:24:56 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 01:24:56 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 01:25:09 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 01:25:09 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 01:25:09 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:36846 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:36846 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:37768 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:37768 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38996 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38996 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42952 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42952 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42960 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42960 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42974 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42974 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42988 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42988 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42998 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42998 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:46436 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:46436 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50974 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50974 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:52498 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:52498 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:53356 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:53356 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54066 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54066 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54566 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54566 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54580 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54580 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54592 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54592 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54600 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54600 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54606 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54606 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54610 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54610 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54626 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54626 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:55554 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:55554 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:59058 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:59058 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60810 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60810 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 01:25:11 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 01:25:21 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.01s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.06s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.04s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.42s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.65s/it]
+Mon Oct  7 01:25:51 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 01:25:51 AM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Mon Oct  7 01:25:51 AM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.26s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.28s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.25s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.57s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.82s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.07s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.11s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.09s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.52s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.73s/it]
+Mon Oct  7 01:35:51 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 01:35:51 AM CEST 2024 - Sampler queue size: 187, Consumers: 3
+Mon Oct  7 01:35:51 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 01:35:51 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 01:35:52 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 01:35:52 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 01:35:52 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 01:35:52 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:35:52 AM CEST 2024 - Successfully updated temperature=0.9 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:35:52 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 01:35:57 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Mon Oct  7 01:45:57 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 01:45:58 AM CEST 2024 - Sampler queue size: 410, Consumers: 4
+Mon Oct  7 01:45:58 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 01:45:58 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 01:45:58 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27997, 97
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 01:45:58 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 01:45:58 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 01:45:58 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:45:59 AM CEST 2024 - Successfully updated temperature=0.9 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:45:59 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 01:46:04 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:84: SyntaxWarning: invalid decimal literal
+<unknown>:84: SyntaxWarning: invalid decimal literal
+<unknown>:84: SyntaxWarning: invalid decimal literal
+<unknown>:84: SyntaxWarning: invalid decimal literal
+<unknown>:84: SyntaxWarning: invalid decimal literal
+<unknown>:84: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+Mon Oct  7 01:56:04 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 01:56:04 AM CEST 2024 - Sampler queue size: 151, Consumers: 5
+Mon Oct  7 01:56:04 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 01:56:04 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 01:56:05 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27997, 96
+27489, 97
+45382, 0
+45382, 0
+Mon Oct  7 01:56:05 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 01:56:05 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 01:56:05 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:56:05 AM CEST 2024 - Successfully updated temperature=0.9 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 01:56:06 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 01:56:11 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.23s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.25s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.37s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.65s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.89s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:08,  2.86s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:05<00:05,  2.74s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:07<00:02,  2.44s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  1.69s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  2.03s/it]
+Mon Oct  7 02:06:11 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 02:06:11 AM CEST 2024 - Sampler queue size: 133, Consumers: 6
+Mon Oct  7 02:06:11 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 02:06:11 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 02:06:12 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27629, 97
+28187, 96
+27505, 97
+45382, 0
+Mon Oct  7 02:06:12 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 45382 MiB
+Mon Oct  7 02:06:12 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 3
+Mon Oct  7 02:06:12 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:06:12 AM CEST 2024 - Successfully updated temperature=0.9 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:06:13 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 02:06:18 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.21s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.31s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.27s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.58s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.83s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.29it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.28it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.32it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.73it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.54it/s]
+Mon Oct  7 02:16:18 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 02:16:18 AM CEST 2024 - Sampler queue size: 363, Consumers: 3
+Mon Oct  7 02:16:18 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 02:16:18 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 02:16:18 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45382, 0
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 02:16:18 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181528 MiB
+Mon Oct  7 02:16:18 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 02:16:18 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.9 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:18:05 AM CEST 2024 - Successfully updated temperature=0.9 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:18:05 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 02:18:10 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+save_checkpoint: Process ID: 1559457, Thread: MainThread, Thread ID: 139832087672640
+Checkpoint saved at: /franziska/implementation/Checkpoints/checkpoint_2024-10-07_02-25-24.pkl
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:03<00:09,  3.12s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:05<00:05,  2.75s/it]Mon Oct  7 02:28:10 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 02:28:10 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 02:28:10 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 02:28:10 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 02:28:10 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 02:28:10 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 02:28:15 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 02:28:15 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 02:28:17 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 02:28:17 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 02:28:32 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 02:28:32 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 02:28:43 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 02:28:43 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 02:28:43 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:33444 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:33444 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:44856 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:44856 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:45548 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:45548 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:45818 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:45818 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:47594 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:47594 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49760 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49760 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49954 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49954 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49964 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49964 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49990 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49990 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49992 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49992 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49994 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49994 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50002 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50002 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50004 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50004 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50020 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50020 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50024 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50024 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50038 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50038 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50044 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50044 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50050 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50050 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:52122 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:52122 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:58510 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:58510 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60214 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60214 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60312 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60312 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 02:28:45 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 02:28:55 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.01s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.04s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.02s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.41s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.64s/it]
+Mon Oct  7 02:29:25 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 02:29:25 AM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Mon Oct  7 02:29:25 AM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.26it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.32it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.38it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.90it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.64it/s]
+Mon Oct  7 02:39:25 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 02:39:25 AM CEST 2024 - Sampler queue size: 133, Consumers: 2
+Mon Oct  7 02:39:25 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 02:39:25 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 02:39:26 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 02:39:26 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 02:39:26 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 02:39:26 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.2 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:39:27 AM CEST 2024 - Successfully updated temperature=1.2 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:39:27 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 02:39:32 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.97s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:03<00:03,  1.99s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.15s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.55s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.74s/it]
+Mon Oct  7 02:49:32 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 02:49:32 AM CEST 2024 - Sampler queue size: 251, Consumers: 4
+Mon Oct  7 02:49:32 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 02:49:32 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 02:49:33 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27973, 97
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 02:49:33 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 02:49:33 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 02:49:33 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.2 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:49:33 AM CEST 2024 - Successfully updated temperature=1.2 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:49:34 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 02:49:39 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Mon Oct  7 02:59:39 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 02:59:39 AM CEST 2024 - Sampler queue size: 215, Consumers: 5
+Mon Oct  7 02:59:39 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 02:59:39 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 02:59:39 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27973, 97
+27635, 100
+45382, 0
+45382, 0
+Mon Oct  7 02:59:39 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 02:59:39 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 02:59:39 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.2 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:59:40 AM CEST 2024 - Successfully updated temperature=1.2 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 02:59:40 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 02:59:45 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Mon Oct  7 03:09:45 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 03:09:45 AM CEST 2024 - Sampler queue size: 33, Consumers: 2
+Mon Oct  7 03:09:45 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 03:09:45 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 03:09:46 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 03:09:46 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 03:09:46 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 03:09:46 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.2 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:09:46 AM CEST 2024 - Successfully updated temperature=1.2 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:09:47 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 03:09:52 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.02s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.02s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.00s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.40s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.62s/it]
+Mon Oct  7 03:19:52 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 03:19:52 AM CEST 2024 - Sampler queue size: 45, Consumers: 1
+Mon Oct  7 03:19:52 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 03:19:52 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 03:19:52 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 03:19:52 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 03:19:52 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 03:19:52 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1.2 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:19:53 AM CEST 2024 - Successfully updated temperature=1.2 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:19:53 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 03:19:58 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.28it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.34it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.39it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.91it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.66it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:07,  2.44s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:05<00:05,  2.52s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:07<00:02,  2.47s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.72s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  2.00s/it]
+Mon Oct  7 03:29:58 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 03:29:58 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 03:29:58 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 03:29:58 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 03:29:58 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 03:29:58 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 03:30:01 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 03:30:01 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 03:30:02 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 03:30:02 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 03:30:14 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 03:30:14 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 03:30:25 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 03:30:25 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 03:30:25 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:35776 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:35776 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:37528 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:37528 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38972 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38972 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40032 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40032 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40724 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40724 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40738 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40738 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40758 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40758 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40766 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40766 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40774 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40774 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40784 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40784 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40800 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40800 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40806 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40806 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40814 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40814 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40820 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40820 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40834 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40834 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40842 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40842 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 03:30:26 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 03:30:36 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.34it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.33it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.39it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.90it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.66it/s]
+Mon Oct  7 03:31:06 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 03:31:06 AM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Mon Oct  7 03:31:06 AM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+<unknown>:14: SyntaxWarning: invalid decimal literal
+<unknown>:14: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.62it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.58it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.67it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.26it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.97it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.59it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.55it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.63it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.23it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.94it/s]
+<unknown>:10: SyntaxWarning: invalid decimal literal
+<unknown>:11: SyntaxWarning: invalid decimal literal
+<unknown>:10: SyntaxWarning: invalid decimal literal
+<unknown>:90: SyntaxWarning: invalid decimal literal
+<unknown>:90: SyntaxWarning: invalid decimal literal
+<unknown>:90: SyntaxWarning: invalid decimal literal
+<unknown>:90: SyntaxWarning: invalid decimal literal
+<unknown>:90: SyntaxWarning: invalid decimal literal
+<unknown>:90: SyntaxWarning: invalid decimal literal
+Mon Oct  7 03:41:06 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 03:41:06 AM CEST 2024 - Sampler queue size: 256, Consumers: 3
+Mon Oct  7 03:41:06 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 03:41:06 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 03:41:07 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 03:41:07 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 03:41:07 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 03:41:07 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:41:08 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:41:08 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 03:41:13 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Mon Oct  7 03:51:13 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 03:51:13 AM CEST 2024 - Sampler queue size: 333, Consumers: 4
+Mon Oct  7 03:51:13 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 03:51:13 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 03:51:14 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27219, 97
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 03:51:14 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 03:51:14 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 03:51:14 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:51:15 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 03:51:16 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 03:51:21 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Mon Oct  7 04:01:21 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 04:01:21 AM CEST 2024 - Sampler queue size: 110, Consumers: 1
+Mon Oct  7 04:01:21 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 04:01:21 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 04:01:22 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 04:01:22 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 04:01:22 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 04:01:22 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:01:22 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:01:22 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 04:01:27 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.13s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.08s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.03s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.42s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.66s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.15it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.28s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:04<00:01,  1.67s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.12s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.22s/it]
+<unknown>:7: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:08,  2.73s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:06<00:06,  3.05s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:08<00:02,  2.95s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:09<00:00,  1.99s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:09<00:00,  2.34s/it]
+Mon Oct  7 04:11:27 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 04:11:27 AM CEST 2024 - Sampler queue size: 262, Consumers: 3
+Mon Oct  7 04:11:27 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 04:11:27 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 04:11:28 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 43951, 3
+43951, 1
+45382, 0
+45382, 0
+Mon Oct  7 04:11:28 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 178666 MiB
+Mon Oct  7 04:11:28 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 04:11:28 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:11:29 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:11:29 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 04:11:34 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Mon Oct  7 04:21:34 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 04:21:34 AM CEST 2024 - Sampler queue size: 64, Consumers: 2
+Mon Oct  7 04:21:34 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 04:21:34 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 04:21:35 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+27649, 96
+45382, 0
+45382, 0
+Mon Oct  7 04:21:35 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136149 MiB
+Mon Oct  7 04:21:35 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,2,3
+Mon Oct  7 04:21:35 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:21:35 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:21:36 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 04:21:41 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:7: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.99s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.08s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:07<00:02,  2.52s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.79s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.96s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.05s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.07s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.07s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.45s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.67s/it]
+<unknown>:7: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.16it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.19it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.23it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.70it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.47it/s]
+Mon Oct  7 04:31:41 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 04:31:41 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 04:31:41 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 04:31:41 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 04:31:41 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 04:31:41 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 04:31:46 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 04:31:46 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 04:31:48 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 04:31:48 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 04:32:02 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 04:32:02 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 04:32:17 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 04:32:17 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 04:32:17 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:33832 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:33832 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:35654 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:35654 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:47778 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:47778 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:47828 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:47828 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51340 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51340 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51354 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51354 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51374 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51374 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51382 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51382 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51398 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51398 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51410 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51410 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51414 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51414 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51416 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51416 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51432 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51432 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51434 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51434 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51446 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51446 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51456 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51456 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:52116 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:52116 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:52720 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:52720 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:53158 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:53158 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:58672 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:58672 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:58844 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:58844 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60358 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60358 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60860 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60860 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 04:32:19 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 04:32:29 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Mon Oct  7 04:32:59 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 04:32:59 AM CEST 2024 - Sampler queue size: 0, Consumers: 0
+Mon Oct  7 04:32:59 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 04:32:59 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 04:32:59 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 04:32:59 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 04:32:59 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 04:32:59 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:33:00 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:33:00 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 04:33:05 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.04s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.04s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.03s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.42s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.64s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.97s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.01s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:05<00:01,  1.99s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.39s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.61s/it]
+Mon Oct  7 04:43:05 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 04:43:05 AM CEST 2024 - Sampler queue size: 145, Consumers: 3
+Mon Oct  7 04:43:05 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 04:43:05 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 04:43:06 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27857, 96
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 04:43:06 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 04:43:06 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 04:43:06 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:43:06 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:43:07 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 04:43:12 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.28it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.31it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.35it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.84it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.61it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.55it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.58it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.62it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.20it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.93it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.60it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.60it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.66it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.21it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.95it/s]
+Mon Oct  7 04:53:12 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 04:53:12 AM CEST 2024 - Sampler queue size: 39, Consumers: 5
+Mon Oct  7 04:53:12 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 04:53:12 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 04:53:12 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27155, 97
+27171, 96
+45382, 0
+45382, 0
+Mon Oct  7 04:53:12 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 04:53:12 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 04:53:12 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:53:13 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 04:53:13 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 04:53:18 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.53it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.46it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.54it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.11it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.84it/s]
+Mon Oct  7 05:03:18 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 05:03:18 AM CEST 2024 - Sampler queue size: 57, Consumers: 2
+Mon Oct  7 05:03:18 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 05:03:18 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 05:03:19 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27375, 96
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 05:03:19 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 05:03:19 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 05:03:19 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:03:19 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:03:20 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 05:03:25 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.51it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.57it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.32it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.58it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.52it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.28s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:03<00:02,  1.40s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.03s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.42it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.03it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.44it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.52it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.61it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.17it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.89it/s]
+Mon Oct  7 05:13:25 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 05:13:25 AM CEST 2024 - Sampler queue size: 229, Consumers: 6
+Mon Oct  7 05:13:25 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 05:13:25 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 05:13:26 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27377, 96
+10896, 100
+27853, 97
+45382, 0
+Mon Oct  7 05:13:26 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 45382 MiB
+Mon Oct  7 05:13:26 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 3
+Mon Oct  7 05:13:26 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:13:26 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:13:26 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 05:13:31 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.09s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:06<00:06,  3.21s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:08<00:02,  2.69s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  1.83s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  2.16s/it]
+Mon Oct  7 05:23:31 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 05:23:31 AM CEST 2024 - Sampler queue size: 104, Consumers: 2
+Mon Oct  7 05:23:31 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 05:23:32 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 05:23:32 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 28363, 96
+11556, 96
+45382, 0
+28159, 95
+Mon Oct  7 05:23:32 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 45382 MiB
+Mon Oct  7 05:23:32 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2
+Mon Oct  7 05:23:32 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:23:33 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:23:33 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 05:23:38 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.99s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.01s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.01s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.40s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.62s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:03<00:11,  3.70s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:07<00:07,  3.62s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:10<00:03,  3.57s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:11<00:00,  2.38s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:11<00:00,  2.83s/it]
+Mon Oct  7 05:33:38 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 05:33:38 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 05:33:38 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 05:33:38 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 05:33:38 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 05:33:38 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 05:33:43 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 05:33:43 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 05:33:45 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 05:33:45 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 05:33:58 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 05:33:58 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 05:34:11 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 05:34:11 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 05:34:11 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:39178 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39178 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42916 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42916 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48506 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48506 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48522 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48522 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48524 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48524 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48536 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48536 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48540 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48540 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48542 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48542 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48550 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48550 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48558 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48558 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48572 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48572 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48580 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48580 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48582 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48582 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:48594 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:48594 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49360 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49360 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50434 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50434 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:50450 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:50450 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51198 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51198 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51326 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51326 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:56120 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:56120 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 05:34:12 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 05:34:22 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.99s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.04s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:05<00:01,  1.72s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:05<00:00,  1.14s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:05<00:00,  1.41s/it]
+Mon Oct  7 05:34:52 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 05:34:53 AM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Mon Oct  7 05:34:53 AM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.29it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.32it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.39it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.91it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.65it/s]
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.55it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.59it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.60it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.15it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.90it/s]
+Mon Oct  7 05:44:53 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 05:44:53 AM CEST 2024 - Sampler queue size: 155, Consumers: 3
+Mon Oct  7 05:44:53 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 05:44:53 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 05:44:53 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 05:44:53 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 05:44:53 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 05:44:53 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:44:53 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:44:54 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 05:44:59 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.57it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.59it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.60it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.15it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.91it/s]
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:8: SyntaxWarning: invalid decimal literal
+<unknown>:8: SyntaxWarning: invalid decimal literal
+<unknown>:8: SyntaxWarning: invalid decimal literal
+<unknown>:8: SyntaxWarning: invalid decimal literal
+<unknown>:8: SyntaxWarning: invalid decimal literal
+<unknown>:8: SyntaxWarning: invalid decimal literal
+<unknown>:88: SyntaxWarning: invalid decimal literal
+<unknown>:88: SyntaxWarning: invalid decimal literal
+<unknown>:88: SyntaxWarning: invalid decimal literal
+<unknown>:88: SyntaxWarning: invalid decimal literal
+<unknown>:88: SyntaxWarning: invalid decimal literal
+<unknown>:88: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Mon Oct  7 05:54:59 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 05:54:59 AM CEST 2024 - Sampler queue size: 242, Consumers: 5
+Mon Oct  7 05:54:59 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 05:54:59 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 05:54:59 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27449, 97
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 05:54:59 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 05:54:59 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 05:54:59 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:55:00 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 05:55:00 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Mon Oct  7 05:55:05 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.40it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.46it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.47it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.99it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.75it/s]
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Mon Oct  7 06:05:05 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 06:05:05 AM CEST 2024 - Sampler queue size: 275, Consumers: 4
+Mon Oct  7 06:05:05 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 06:05:05 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 06:05:06 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 28377, 96
+28237, 97
+45382, 0
+45382, 0
+Mon Oct  7 06:05:06 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 06:05:06 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 06:05:06 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:05:06 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:05:07 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 06:05:12 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.53it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.54it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.52it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.06it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.83it/s]
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Mon Oct  7 06:15:12 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 06:15:12 AM CEST 2024 - Sampler queue size: 259, Consumers: 7
+Mon Oct  7 06:15:12 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 06:15:12 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 06:15:13 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27307, 95
+27609, 97
+27293, 97
+45382, 0
+Mon Oct  7 06:15:13 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 45382 MiB
+Mon Oct  7 06:15:13 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 3
+Mon Oct  7 06:15:13 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:15:13 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:15:13 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 06:15:18 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.46it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.51it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.52it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.06it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.81it/s]
+Mon Oct  7 06:25:18 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 06:25:19 AM CEST 2024 - Sampler queue size: 88, Consumers: 3
+Mon Oct  7 06:25:19 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 06:25:19 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 06:25:19 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 06:25:19 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 06:25:19 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 06:25:19 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:25:20 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:25:20 AM CEST 2024 - Successfully updated top_p=1 on sequoia.mli.ei.tum.de
+Mon Oct  7 06:25:25 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<unknown>:4: SyntaxWarning: invalid decimal literal
+<ast>:84: SyntaxWarning: 'set' object is not subscriptable; perhaps you missed a comma?
+<ast>:84: SyntaxWarning: 'set' object is not subscriptable; perhaps you missed a comma?
+<ast>:84: SyntaxWarning: 'set' object is not subscriptable; perhaps you missed a comma?
+<ast>:84: SyntaxWarning: 'set' object is not subscriptable; perhaps you missed a comma?
+<ast>:84: SyntaxWarning: 'set' object is not subscriptable; perhaps you missed a comma?
+<ast>:84: SyntaxWarning: 'set' object is not subscriptable; perhaps you missed a comma?
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:9: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.47it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.41it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.43it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.95it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.72it/s]
+save_checkpoint: Process ID: 2770564, Thread: MainThread, Thread ID: 140136619403072
+Checkpoint saved at: /franziska/implementation/Checkpoints/checkpoint_2024-10-07_06-34-26.pkl
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.53it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.55it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.55it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.09it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.85it/s]
+Mon Oct  7 06:35:25 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 06:35:25 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 06:35:25 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 06:35:25 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 06:35:25 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 06:35:25 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 06:35:30 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 06:35:30 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 06:35:32 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 06:35:32 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 06:35:46 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 06:35:46 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 06:35:57 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 06:35:57 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 06:35:57 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:35984 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:35984 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:36530 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:36530 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:37152 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:37152 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38146 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38146 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38152 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38152 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38164 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38164 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38176 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38176 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38190 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38190 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38200 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38200 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38202 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38202 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38216 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38216 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38222 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38222 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38238 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38238 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38246 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38246 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38262 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38262 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:43614 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:43614 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:46126 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:46126 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:53046 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:53046 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:53424 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:53424 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:55448 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:55448 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:55750 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:55750 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:58514 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:58514 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:58676 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:58676 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60202 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60202 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 06:35:59 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 06:36:09 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.60it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.63it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.62it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.18it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.93it/s]
+Mon Oct  7 06:36:39 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 06:36:39 AM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Mon Oct  7 06:36:39 AM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+<ast>:83: SyntaxWarning: list indices must be integers or slices, not str; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: list indices must be integers or slices, not str; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: list indices must be integers or slices, not str; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: list indices must be integers or slices, not str; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: list indices must be integers or slices, not str; perhaps you missed a comma?
+<ast>:83: SyntaxWarning: list indices must be integers or slices, not str; perhaps you missed a comma?
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.01s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.03s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.00s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.40s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.63s/it]
+Mon Oct  7 06:46:39 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 06:46:39 AM CEST 2024 - Sampler queue size: 107, Consumers: 2
+Mon Oct  7 06:46:39 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 06:46:39 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 06:46:40 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 06:46:40 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 06:46:40 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 06:46:40 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:46:40 AM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:46:40 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 06:46:45 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.29it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.34it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.39it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.90it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.65it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.49it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.57it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.64it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.22it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.93it/s]
+Mon Oct  7 06:56:45 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 06:56:46 AM CEST 2024 - Sampler queue size: 141, Consumers: 5
+Mon Oct  7 06:56:46 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 06:56:46 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 06:56:46 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 26465, 97
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 06:56:46 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 06:56:46 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 06:56:46 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:56:47 AM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 06:56:47 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 06:56:52 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:3: SyntaxWarning: invalid decimal literal
+<unknown>:3: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+<unknown>:83: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:07,  2.46s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:05<00:05,  2.51s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:07<00:02,  2.52s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  1.76s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:08<00:00,  2.03s/it]
+Mon Oct  7 07:06:52 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 07:06:52 AM CEST 2024 - Sampler queue size: 89, Consumers: 3
+Mon Oct  7 07:06:52 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 07:06:52 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 07:06:53 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 07:06:53 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 07:06:53 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 07:06:53 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:06:54 AM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:06:54 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 07:06:59 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.15s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.20s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.14s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.50s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.74s/it]
+Mon Oct  7 07:16:59 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 07:16:59 AM CEST 2024 - Sampler queue size: 137, Consumers: 6
+Mon Oct  7 07:16:59 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 07:16:59 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 07:17:00 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 10874, 100
+27797, 97
+45382, 0
+45382, 0
+Mon Oct  7 07:17:00 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 07:17:00 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 07:17:00 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:17:01 AM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:17:01 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 07:17:06 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:08,  2.78s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:05<00:05,  2.95s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:08<00:02,  2.91s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:09<00:00,  1.96s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:09<00:00,  2.30s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:03<00:09,  3.20s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:07<00:07,  3.74s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:10<00:03,  3.37s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:10<00:00,  2.26s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:10<00:00,  2.70s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.13s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:03<00:03,  1.78s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:04<00:01,  1.33s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.11it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.18s/it]
+Mon Oct  7 07:27:06 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 07:27:06 AM CEST 2024 - Sampler queue size: 92, Consumers: 7
+Mon Oct  7 07:27:06 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 07:27:06 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 07:27:07 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 10078, 100
+27365, 0
+27555, 95
+45382, 0
+Mon Oct  7 07:27:07 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 72747 MiB
+Mon Oct  7 07:27:07 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,3
+Mon Oct  7 07:27:07 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=1 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:27:07 AM CEST 2024 - Successfully updated temperature=1 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:27:08 AM CEST 2024 - Successfully updated top_p=0.8 on sequoia.mli.ei.tum.de
+Mon Oct  7 07:27:13 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+<unknown>:5: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:5: SyntaxWarning: invalid decimal literal
+<unknown>:6: SyntaxWarning: invalid decimal literal
+<unknown>:5: SyntaxWarning: invalid decimal literal
+<unknown>:85: SyntaxWarning: invalid decimal literal
+<unknown>:85: SyntaxWarning: invalid decimal literal
+<unknown>:85: SyntaxWarning: invalid decimal literal
+<unknown>:85: SyntaxWarning: invalid decimal literal
+<unknown>:85: SyntaxWarning: invalid decimal literal
+<unknown>:85: SyntaxWarning: invalid decimal literal
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.33it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.06it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.29s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.05it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.01it/s]
+Mon Oct  7 07:37:13 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 07:37:13 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 07:37:13 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 07:37:13 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 07:37:13 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 07:37:13 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 07:37:20 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 07:37:20 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 07:37:22 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 07:37:22 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 07:37:33 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 07:37:33 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 07:37:45 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 07:37:45 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 07:37:45 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:33222 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:33222 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:37448 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:37448 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:37696 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:37696 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38614 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38614 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:38996 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:38996 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39282 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39282 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39440 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39440 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39454 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39454 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39458 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39458 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39472 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39472 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39486 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39486 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39500 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39500 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39502 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39502 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39508 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39508 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39514 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39514 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39516 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39516 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39528 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39528 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39532 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39532 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:39552 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:39552 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:42854 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:42854 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:57300 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:57300 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:58672 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:58672 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:59244 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:59244 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:60706 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:60706 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 07:37:47 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 07:37:57 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Mon Oct  7 07:38:27 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 07:38:27 AM CEST 2024 - Sampler queue size: 0, Consumers: 0
+Mon Oct  7 07:38:27 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 07:38:27 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 07:38:28 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 07:38:28 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 07:38:28 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 07:38:28 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:38:28 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:38:28 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 07:38:33 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:07,  2.52s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:05<00:05,  2.58s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:07<00:02,  2.42s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.67s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:07<00:00,  1.97s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.32it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.34it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.38it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.87it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.64it/s]
+Mon Oct  7 07:48:33 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 07:48:33 AM CEST 2024 - Sampler queue size: 163, Consumers: 3
+Mon Oct  7 07:48:33 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 07:48:33 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 07:48:34 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27751, 100
+45382, 0
+45382, 0
+45382, 0
+Mon Oct  7 07:48:34 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 136146 MiB
+Mon Oct  7 07:48:34 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,2,3
+Mon Oct  7 07:48:34 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:48:34 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:48:35 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 07:48:40 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.57it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.58it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.61it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.17it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.91it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.60it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.60it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.62it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.20it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.94it/s]
+Mon Oct  7 07:58:40 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 07:58:40 AM CEST 2024 - Sampler queue size: 83, Consumers: 4
+Mon Oct  7 07:58:40 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 07:58:40 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 07:58:41 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27403, 97
+28213, 97
+45382, 0
+45382, 0
+Mon Oct  7 07:58:41 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 90764 MiB
+Mon Oct  7 07:58:41 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 2,3
+Mon Oct  7 07:58:41 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:58:41 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 07:58:41 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 07:58:46 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.58it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.58it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.64it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.22it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.94it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.54it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.55it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.60it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.18it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.91it/s]
+Mon Oct  7 08:08:46 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 08:08:47 AM CEST 2024 - Sampler queue size: 47, Consumers: 5
+Mon Oct  7 08:08:47 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 08:08:47 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 08:08:47 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27659, 96
+28455, 0
+28167, 100
+45382, 0
+Mon Oct  7 08:08:47 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 73837 MiB
+Mon Oct  7 08:08:47 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 1,3
+Mon Oct  7 08:08:47 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:08:48 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:08:48 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 08:08:53 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:02<00:06,  2.01s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:04<00:04,  2.07s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:06<00:02,  2.05s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.51s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:06<00:00,  1.71s/it]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.98s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.29s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.02s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.39it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.07it/s]
+Mon Oct  7 08:18:53 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 08:18:53 AM CEST 2024 - Sampler queue size: 75, Consumers: 6
+Mon Oct  7 08:18:53 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 08:18:53 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 08:18:55 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 27995, 96
+11172, 100
+27853, 95
+45382, 0
+Mon Oct  7 08:18:55 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 45382 MiB
+Mon Oct  7 08:18:55 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 3
+Mon Oct  7 08:18:55 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:18:55 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:18:55 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 08:19:00 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.29it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.47it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.60it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.16it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.85it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.43it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.51it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.58it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.12it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.85it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.54it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.58it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.24it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.49it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.45it/s]
+Mon Oct  7 08:29:00 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 08:29:01 AM CEST 2024 - Sampler queue size: 243, Consumers: 4
+Mon Oct  7 08:29:01 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 08:29:01 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 08:29:01 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45382, 0
+45382, 0
+45382, 0
+28279, 0
+Mon Oct  7 08:29:01 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 164425 MiB
+Mon Oct  7 08:29:01 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 08:29:01 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.5 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:29:17 AM CEST 2024 - Successfully updated temperature=0.5 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:29:18 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 08:29:23 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de
+Mon Oct  7 08:39:23 AM CEST 2024 - Timeout reached. Proceeding to terminate and restart processes.
+Mon Oct  7 08:39:23 AM CEST 2024 - Timeout reached. Terminating processes...
+Mon Oct  7 08:39:23 AM CEST 2024 - Killing all Python processes on the main server...
+Mon Oct  7 08:39:23 AM CEST 2024 - Restarting Docker containers on remote servers...
+Mon Oct  7 08:39:23 AM CEST 2024 - Restarting Docker container on sequoia.mli.ei.tum.de...
+Mon Oct  7 08:39:23 AM CEST 2024 - All Python processes on the main server killed successfully.
+pytorchFW
+Mon Oct  7 08:39:26 AM CEST 2024 - Docker container on sequoia.mli.ei.tum.de restarted successfully.
+Mon Oct  7 08:39:26 AM CEST 2024 - Restarting Docker container on bigsur.mli.ei.tum.de...
+pytorchFW
+Mon Oct  7 08:39:28 AM CEST 2024 - Docker container on bigsur.mli.ei.tum.de restarted successfully.
+Mon Oct  7 08:39:28 AM CEST 2024 - Restarting Docker container on gpumlp.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 08:39:40 AM CEST 2024 - Docker container on gpumlp.msv.ei.tum.de restarted successfully.
+Mon Oct  7 08:39:40 AM CEST 2024 - Restarting Docker container on zion.msv.ei.tum.de...
+pytorchFW
+Mon Oct  7 08:39:51 AM CEST 2024 - Docker container on zion.msv.ei.tum.de restarted successfully.
+Mon Oct  7 08:39:51 AM CEST 2024 - Remote Docker containers restarted.
+Mon Oct  7 08:39:51 AM CEST 2024 - Checking for leftover RabbitMQ resources...
+Fetching queues...
+Fetched queues:
+Deleting queue: database_queue
+Deleted queue: database_queue
+Deleting queue: evaluator_queue
+Deleted queue: evaluator_queue
+Deleting queue: sampler_queue
+Deleted queue: sampler_queue
+Fetching connections...
+Closing connection: 172.21.0.3:33676 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:33676 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:35694 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:35694 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40562 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40562 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:40566 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:40566 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:47106 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:47106 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:49368 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:49368 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:51334 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:51334 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54858 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54858 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54860 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54860 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54874 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54874 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54878 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54878 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54888 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54888 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54898 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54898 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54908 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54908 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54910 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54910 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54918 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54918 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54922 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54922 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54930 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54930 -> 172.21.0.2:5672
+Closing connection: 172.21.0.3:54946 -> 172.21.0.2:5672
+Closed connection: 172.21.0.3:54946 -> 172.21.0.2:5672
+Fetching channels...
+Mon Oct  7 08:39:53 AM CEST 2024 - RabbitMQ resources cleaned up.
+Mon Oct  7 08:40:03 AM CEST 2024 - Starting grid search...
+Starting Evaluator script on sequoia.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on bigsur.mli.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on gpumlp.msv.ei.tum.de using Docker container pytorchFW
+Starting Evaluator script on zion.msv.ei.tum.de using Docker container pytorchFW
+Activating Conda environment on sequoia.mli.ei.tum.de
+Activating Conda environment on gpumlp.msv.ei.tum.de
+Activating Conda environment on bigsur.mli.ei.tum.de
+Activating Conda environment on zion.msv.ei.tum.de
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.54it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.47s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.11s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.33it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.12it/s]
+Mon Oct  7 08:40:33 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 08:40:33 AM CEST 2024 - Sampler queue size: 0, Consumers: 1
+Mon Oct  7 08:40:33 AM CEST 2024 - Sampler queue has less than 30 messages. Skipping execution.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.63it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.71it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.82it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  2.43it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  2.12it/s]
+Mon Oct  7 08:50:33 AM CEST 2024 - Checking sampler queue and GPU resources on remote servers...
+Mon Oct  7 08:50:33 AM CEST 2024 - Sampler queue size: 89, Consumers: 2
+Mon Oct  7 08:50:33 AM CEST 2024 - More than 30 messages in the sampler queue. Checking GPU resources...
+Mon Oct  7 08:50:33 AM CEST 2024 - Checking GPU resources on sequoia.mli.ei.tum.de...
+Mon Oct  7 08:50:34 AM CEST 2024 - GPU info on sequoia.mli.ei.tum.de: 45385, 0
+45385, 0
+45385, 0
+45385, 0
+Mon Oct  7 08:50:34 AM CEST 2024 - Total available GPU memory on sequoia.mli.ei.tum.de: 181540 MiB
+Mon Oct  7 08:50:34 AM CEST 2024 - Starting funsearch_s.py on sequoia.mli.ei.tum.de with GPUs: 0,1,2,3
+Mon Oct  7 08:50:34 AM CEST 2024 - Updating remote config on sequoia.mli.ei.tum.de
+Successfully updated temperature=0.8 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:50:34 AM CEST 2024 - Successfully updated temperature=0.8 on sequoia.mli.ei.tum.de
+Successfully updated top_p=0.6 in config.py on sequoia.mli.ei.tum.de
+Mon Oct  7 08:50:34 AM CEST 2024 - Successfully updated top_p=0.6 on sequoia.mli.ei.tum.de
+Mon Oct  7 08:50:39 AM CEST 2024 - Successfully initiated funsearch_s.py on sequoia.mli.ei.tum.de.
+Activating Conda environment on sequoia.mli.ei.tum.de

@@ -77,6 +77,7 @@ class LLM_model:
             repetition_penalty=self.repetition_penalty,
             do_sample=True,
         )
+        logger.info(f"Initializing LLM with temperature {self.temperature}, top_p {self.top_p}, max_new_tokens {self.max_new_tokens} and rep penalty {self.repetition_penalty}.")
 
 
     def draw_batch_samples(self, prompts: list) -> list:

@@ -22,6 +22,8 @@ import re
 from profiling import async_time_execution, async_track_memory
 from logging.handlers import RotatingFileHandler
 import psutil
+from logging import FileHandler
+
 
 
 
@@ -522,7 +524,10 @@ class Island:
         logger = logging.getLogger('main_logger')
         logger.setLevel(logging.DEBUG)
         log_file_path = os.path.join(os.getcwd(), 'Island.log')
-        handler = RotatingFileHandler(log_file_path, maxBytes=100 * 1024 * 1024, backupCount=3)
+        # Use FileHandler instead of RotatingFileHandler
+        handler = FileHandler(log_file_path)
+        # Optional: If you want to set a file mode to append to the log instead of overwriting it
+        # handler = FileHandler(log_file_path, mode='a')  # 'a' for append new log messages, 'w' for overwrite new log messages when the logger is newely initialized
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)

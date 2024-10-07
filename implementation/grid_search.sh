@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # List of remote servers
-REMOTE_SERVERS=("sequoia.mli.ei.tum.de" "gpumlp2.msv.ei.tum.de" "zion.msv.ei.tum.de" "bigsur.mli.ei.tum.de")
+#REMOTE_SERVERS=("sequoia.mli.ei.tum.de" "gpumlp2.msv.ei.tum.de" "gpumlp.msv.ei.tum.de" "zion.msv.ei.tum.de" "bigsur.mli.ei.tum.de")
+REMOTE_SERVERS=("zion.msv.ei.tum.de" )
 
 # Docker container name
 CONTAINER_NAME="pytorchFW"
