@@ -453,7 +453,7 @@ def load_checkpoint(timestamp_index):
     timestamps = get_checkpoint_timestamps()
     if timestamp_index < len(timestamps):
         timestamp = timestamps[timestamp_index]
-        filepath = os.path.join("Checkpoints", f"checkpoint_{timestamp}.pkl")
+        filepath = os.path.join("Checkpoints_old", f"checkpoint_{timestamp}.pkl")
         if os.path.exists(filepath):
             with open(filepath, "rb") as f:
                 return pickle.load(f)
