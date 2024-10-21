@@ -278,7 +278,7 @@ class TaskManager:
             for dev_id in visible_devices:
                 try:
                     handle = None
-                    if dev_id.isdigit():  # Check if dev_id is an integer (regular GPU)
+                    if isinstance(dev_id, int):  # Check if dev_id is an integer (regular GPU)
                         dev_int = int(dev_id)
                         handle = pynvml.nvmlDeviceGetHandleByIndex(dev_int)
                         # Create mapping for regular GPU device indices

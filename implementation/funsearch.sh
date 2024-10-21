@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # List of remote servers
-REMOTE_SERVERS=("sequoia.mli.ei.tum.de" "bigsur.mli.ei.tum.de" "gpumlp.msv.ei.tum.de" "zion.msv.ei.tum.de")
+REMOTE_SERVERS=("sequoia.mli.ei.tum.de" "gpumlp.msv.ei.tum.de" "zion.msv.ei.tum.de" "gpumlp2.msv.ei.tum.de")
 
 # Corresponding memory limits and CPU limits for each server
 memory_limits=("120G" "75G" "75G" "75G")
@@ -35,10 +35,12 @@ if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
 fi
 
 # Activate Conda environment and run Python script locally with the selected GPUs
-echo "Activating Conda environment and running starcoder.py locally"
-source conda activate fw2  # Adjust this path if necessary
+echo "Activating Conda environment and running funsearch.py locally"
+source /opt/conda/etc/profile.d/conda.sh  # Ensure the Conda environment can be activated
+conda activate fw2
 export CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES
-python /franziska/implementation/starcoder.py &
+python /franziska/implementation/funsearch.py &
+echo "funsearch.py started locally."
 
 # Function to configure and run scripts on a remote server
 run_remote_container() {
@@ -48,15 +50,16 @@ run_remote_container() {
 
     echo "Starting on remote server: $server"
 
-    ssh "$server" << EOF
-        # Update the memory and CPU limits in the Docker configuration
-        docker update --memory $memory_limit --cpus $cpu_limit pytorchFW
+    ssh "franziska@$server" << EOF
+        # Update the memory and CPU limits in the Docker configuration separately
+        docker update --memory $memory_limit pytorchFW
+        docker update --cpus $cpu_limit pytorchFW
 
         # Check GPUs again on the remote server
         GPU_INFO=\$(nvidia-smi --query-gpu=index,memory.free,utilization.gpu --format=csv,noheader,nounits)
         CUDA_VISIBLE_DEVICES=""
         while IFS=, read -r gpu_id free_memory gpu_utilization; do
-            if [[ \$free_memory -gt 32768 && \$gpu_utilization -lt 50 ]]; then
+            if [[ \$free_memory -gt 20480 && \$gpu_utilization -lt 50 ]]; then
                 if [ -z "\$CUDA_VISIBLE_DEVICES" ]; then
                     CUDA_VISIBLE_DEVICES="\$gpu_id"
                 else
@@ -68,12 +71,14 @@ run_remote_container() {
         echo "CUDA_VISIBLE_DEVICES found on $server: \$CUDA_VISIBLE_DEVICES"
 
         # Enter the container and run the scripts
-        docker exec -it pytorchFW bash -c "
-            cd .. 
+        docker exec pytorchFW bash -c "
+            source /opt/conda/etc/profile.d/conda.sh
             conda activate fw2
             cd /franziska/Funsearch/implementation/
             CUDA_VISIBLE_DEVICES=\$CUDA_VISIBLE_DEVICES python funsearch_s.py &
+            echo 'funsearch_s.py started on $server.'
             python funsearch_e.py
+            echo 'funsearch_e.py started on $server.'
         "
 EOF
 }
