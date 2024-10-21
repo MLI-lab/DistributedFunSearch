@@ -254,9 +254,6 @@ class Evaluator:
 
         except Exception as e:
             logger.error(f"Error in process_message: {e}")
-
-        except Exception as e:
-            logger.error(f"Error in process_message: {e}")
         
         finally: 
             # Cleanup call folders
