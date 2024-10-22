@@ -1,31 +1,42 @@
-"""This file will be used as an executable script by the ExternalProcessSandbox.
- Designed to run in an isolated environment and execute a function that has been serialized (saved) with pickle.
-"""
 import logging
 import pickle
 import sys
+import traceback
 
+# Redirect all output (stdout and stderr) to a log file
+#log_file_path = "container_main.log"
 
+# Open the log file in write mode and redirect stdout and stderr
+#sys.stdout = open(log_file_path, 'w')
+#sys.stderr = sys.stdout  # Redirect stderr to the same file as stdout
 
 def main(prog_file: str, input_file: str, output_file: str):
-  """The method takes executable function as a cloudpickle file, then executes it with input data, and writes the output data to another file."""
+    """Executes a deserialized function with input and writes output to file."""
+    try:
+        # Load the function from the prog_file
+        with open(prog_file, "rb") as f:
+            func = pickle.load(f)
 
-  with open(prog_file, "rb") as f:
-    func = pickle.load(f)
+        # Load the input data from the input_file
+        with open(input_file, "rb") as input_f:
+            input_data = pickle.load(input_f)
 
-    with open(input_file, "rb") as input_f:
-      input_data = pickle.load(input_f)
+        # Execute the function with the input data
+        ret = func(input_data)
 
-      #The deserialized function is then called with the deserialized input data, and the result is stored in ret.
-      ret = func(input_data)
-      #Serialize and write to output file 
-      with open(output_file, "wb") as of:
-        pickle.dump(ret, of)
+        # Serialize and write the output to output_file
+        with open(output_file, "wb") as of:
+            pickle.dump(ret, of)
 
-# Using if __name__ == '__main__': allows to design scripts that can be run standalone to perform a specific task or imported as modules by other scripts without executing the main part of the script immediately.    
+    except Exception as e:
+        # Print the full error traceback to stderr (which is redirected to the log file)
+        print(f"Error occurred: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)  # Exit with error code 1 to indicate failure
+
 if __name__ == '__main__':
-  # When a Python script is executed from the command line, sys.argv is a list that contains the command-line arguments passed to the script.
-  # The first item in this list, sys.argv[0], is always the script's filename itself. 
-  if len(sys.argv) != 4:
-    sys.exit(-1)
-  main(sys.argv[1], sys.argv[2], sys.argv[3])
+    if len(sys.argv) != 4:
+        print("Incorrect number of arguments. Expected 3 arguments.", file=sys.stderr)
+        sys.exit(-1)
+
+    main(sys.argv[1], sys.argv[2], sys.argv[3])

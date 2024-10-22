@@ -7,23 +7,44 @@ from typing import Any
 import time
 import subprocess
 import cloudpickle
+import warnings
 
-
+# Set up the main logger for sandbox operations
 log_file_path = pathlib.Path(__file__).parent / "sandbox.log"
-logging.basicConfig(
-    filename=log_file_path, 
-    filemode='w',  # Overwrite the file each time the script runs
-    level=logging.INFO,  
-    format="%(asctime)s [%(levelname)s] %(message)s"  
-)
+logger = logging.getLogger('sandbox_logger')
+logger.setLevel(logging.INFO)  # Set the log level
 
-logger = logging.getLogger('logger')
+# Create file handler for main sandbox log
+file_handler = logging.FileHandler(log_file_path)
+file_handler.setLevel(logging.INFO)
 
-#main_logger = logging.getLogger('my_logger')
+# Create formatter and add it to the handler
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+file_handler.setFormatter(formatter)
 
+# Add the handler to the logger
+logger.addHandler(file_handler)
+
+
+# Set up a separate logger for warnings within the sandbox
+warning_logger_sandbox = logging.getLogger('warning_logger_sandbox')
+warning_handler_sandbox = logging.FileHandler('sandbox_warnings.log')
+warning_handler_sandbox.setLevel(logging.WARNING)
+warning_logger_sandbox.addHandler(warning_handler_sandbox)
+
+# Custom handler that redirects warnings to the sandbox warning logger
+def custom_warning_handler_sandbox(message, category, filename, lineno, file=None, line=None):
+    warning_logger_sandbox.warning(f'{category.__name__}: {message} in {filename}, line {lineno}')
+
+# Redirect warnings to the sandbox warning logger
+warnings.showwarning = custom_warning_handler_sandbox
+
+# Optionally, make sure all warnings are caught and not ignored
+warnings.simplefilter("always")  # Ensure all warnings are caught
 
 
 CONTAINER_MAIN = (pathlib.Path(__file__).parent / "container" / "container_main.py").absolute()
+
 
 
 class DummySandbox():

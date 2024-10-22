@@ -22,21 +22,21 @@ class LLM_model:
         self.repetition_penalty = repetition_penalty
         self.max_new_tokens = max_new_tokens
 
-        # Check if CUDA is available and validate the device
-        if torch.cuda.is_available():
-            available_devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
-            logger.info(f"Available devices: {available_devices}")
+        available_devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
+        logger.info(f"Available devices: {available_devices}")
 
-            # Assign the device based on user input
-            self.device = device if isinstance(device, str) else f"cuda:{device}"  # Ensuring it's a valid string like 'cuda:0'
-            logger.info(f"Attempting to load model on device: {self.device}")
-
-            # Verify the device exists in available devices
+        if device == "cuda":
+            # Use all available GPUs with device_map="auto"
+            self.device_map = "auto"
+            self.device = device
+            logger.info(f"Using all available GPUs with device_map='auto'.")
+        else:
+            # Use the specified single GPU
+            self.device = device if isinstance(device, str) else f"cuda:{device}"
+            self.device_map = None
             if self.device not in available_devices:
                 raise ValueError(f"Invalid device specified: {self.device}. Available devices are: {available_devices}")
-        else:
-            self.device = "cpu"  # Fallback to CPU if no GPU is available
-            logger.warning("CUDA is not available. Falling back to CPU.")
+            logger.info(f"Attempting to load model on device: {self.device}")
 
         self.checkpoint = checkpoint
         current_directory = os.getcwd()
@@ -45,29 +45,27 @@ class LLM_model:
 
         # Load the tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint, cache_dir=self.cache_dir)
-        
+
         # Add padding token to process prompts in batches
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({'pad_token': self.tokenizer.eos_token})  # Set EOS token as padding token
-        
+
         try:
-            # Load the model and move it to the specified device
+            # Load the model with the appropriate device map and move it to the specified device
             self.model = AutoModelForCausalLM.from_pretrained(
-                self.checkpoint, 
+                self.checkpoint,
                 cache_dir=self.cache_dir,
                 torch_dtype=torch.float16  # Use FP16 precision for faster performance on GPUs
-            ).to(self.device)  # Move the model to the specified device
-            
+            ).to(self.device) if self.device_map is None else AutoModelForCausalLM.from_pretrained(
+                self.checkpoint,
+                cache_dir=self.cache_dir,
+                torch_dtype=torch.float16,  # Use FP16 precision for faster performance on GPUs
+                device_map="auto"
+            )
+            logger.info(f"Model loaded successfully on {self.device if self.device_map is None else 'all available GPUs with device_map=auto'}")
         except Exception as e:
             logger.error(f"Could not load model because: {e}")
-            self.device="cuda"
-            # Load the model and move it to the specified device
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.checkpoint, 
-                cache_dir=self.cache_dir,
-                device_map="auto",
-                torch_dtype=torch.float16  # Use FP16 precision for faster performance on GPUs
-            )
+            return #Stop executing if model loading fails
 
         # Setup generation parameters
         self.generate_kwargs = dict(
@@ -84,7 +82,7 @@ class LLM_model:
         """Returns multiple predicted continuations for each prompt in a list of prompts."""
         try:
             self.tokenizer.padding_side = 'left'
-            
+
             # Tokenize prompts with truncation and padding
             inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=False).to(self.device)
             input_length = inputs.input_ids.shape[1]
@@ -100,8 +98,9 @@ class LLM_model:
                     outputs = self.model.generate(**inputs, **self.generate_kwargs, pad_token_id=self.tokenizer.eos_token_id)  # [batch_size, generated_length]
                 except Exception as e:
                     logger.error(f"Could not generate prompts because {e}")
+                    continue  # Skip to the next iteration if generation fails
                 logger.debug(f"LLM: output dims is {outputs.shape}")
-                
+
                 try:
                     generated_tokens = outputs[:, input_length:]  # Extract only the new tokens
                     decoded_texts = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
@@ -117,6 +116,7 @@ class LLM_model:
         except Exception as e:
             logger.error(f"Error during batch generation: {e}")
             return []
+
 
 
 

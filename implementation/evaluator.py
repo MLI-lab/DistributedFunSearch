@@ -11,12 +11,33 @@ import aio_pika
 import sys
 import asyncio
 import concurrent.futures  
-from concurrent.futures import ProcessPoolExecutor, as_completed #try pathos for multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed # Try pathos for multiprocessing
 from torch.multiprocessing import Manager
 import gc
 from profiling import async_time_execution, async_track_memory
 import psutil
 import shutil
+import warnings
+
+# Set up a separate logger for warnings in the evaluator
+warning_logger_eval = logging.getLogger('warning_logger_eval')
+warning_handler_eval = logging.FileHandler('warnings_eval.log')
+warning_handler_eval.setLevel(logging.WARNING)
+warning_logger_eval.addHandler(warning_handler_eval)
+
+# Custom handler that redirects warnings to the evaluator's warning log file
+def custom_warning_handler_eval(message, category, filename, lineno, file=None, line=None):
+    warning_logger_eval.warning(f'{category.__name__}: {message} in {filename}, line {lineno}')
+
+# Redirect warnings using the custom handler for evaluator warnings
+warnings.showwarning = custom_warning_handler_eval
+
+# Optionally, make sure all warnings are caught and not ignored
+warnings.simplefilter("always")  # Ensure all warnings are caught
+
+# Main logger for general logging in the evaluator
+logger = logging.getLogger('main_logger')
+
 
 
 logger = logging.getLogger('main_logger')

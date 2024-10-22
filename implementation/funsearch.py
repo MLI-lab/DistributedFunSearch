@@ -311,10 +311,10 @@ class TaskManager:
                 if free_memory is None and utilization is None:
                     self.logger.warning(f"Memory information could not be queried for device {dev_id}. Skipping this device.")
                     continue  # Skip this device and continue checking others
-                if free_memory > 32768 and utilization < 90: #need more than 32 GiB for starcoder too fit
+                if free_memory > 32768 and utilization < 200: #need more than 32 GiB for starcoder too fit
                     suitable_gpu_id = dev_id
                     break
-                elif utilization < 90:
+                elif utilization < 200:
                     combined_memory += free_memory if free_memory else 0
                     combined_gpus.append(dev_id)
 
@@ -552,10 +552,10 @@ class TaskManager:
 
             # Check if any single GPU has >= 20 GiB of memory free and < 50% utilization
             for gpu_id, (free_memory, utilization) in gpu_memory_info.items():
-                if free_memory > 17000 and utilization < 50:  # Check for at least 20 GiB and < 50% utilization
+                if free_memory > 17000 and utilization < 200:  # Check for at least 20 GiB and < 50% utilization
                     suitable_gpu_id = gpu_id
                     break
-                elif utilization < 50:
+                elif utilization < 200:
                     combined_memory += free_memory
                     combined_gpus.append(gpu_id)
 
@@ -789,7 +789,7 @@ if __name__ == "__main__":
         task_manager = TaskManager(specification=specification, inputs=inputs, config=config)
 
         # Start the main task
-        task = asyncio.create_task(task_manager.main_task())  # Provide checkpoint file if needed
+        task = asyncio.create_task(task_manager.main_task('/franziska/implementation/Checkpoints/checkpoint_2024-10-22_08-05-11.pkl'))  # Provide checkpoint file if needed
 
         # Await the task to run it
         await task

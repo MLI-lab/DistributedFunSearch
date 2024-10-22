@@ -22,6 +22,19 @@ class LLM_model:
         current_directory = os.getcwd()
         sub_dir = "ChachingFace"
         self.cache_dir = os.path.join(current_directory, sub_dir)
+
+        if device == "cuda":
+            # Use all available GPUs with device_map="auto"
+            self.device_map = "auto"
+            self.device = device
+            logger.info(f"Using all available GPUs with device_map='auto'.")
+        else:
+            # Use the specified single GPU
+            self.device = device if isinstance(device, str) else f"cuda:{device}"
+            self.device_map = None
+            if self.device not in available_devices:
+                raise ValueError(f"Invalid device specified: {self.device}. Available devices are: {available_devices}")
+            logger.info(f"Attempting to load model on device: {self.device}")
         
         # Login to Hugging Face Hub (only when LLM_model is instantiated)
         huggingface_token = "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"  # Replace with your Hugging Face token
@@ -53,15 +66,21 @@ class LLM_model:
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({'pad_token': self.tokenizer.eos_token})  # sets the EOS token as padding token
         
-        try: 
+        try:
+            # Load the model with the appropriate device map and move it to the specified device
             self.model = AutoModelForCausalLM.from_pretrained(
-                self.checkpoint, 
+                self.checkpoint,
                 cache_dir=self.cache_dir,
-                device_map="auto", 
-                torch_dtype=torch.float16  # FP16 for memory efficiency
+                torch_dtype=torch.float16  # Use FP16 precision for faster performance on GPUs
+            ).to(self.device) if self.device_map is None else AutoModelForCausalLM.from_pretrained(
+                self.checkpoint,
+                cache_dir=self.cache_dir,
+                torch_dtype=torch.float16,  # Use FP16 precision for faster performance on GPUs
+                device_map="auto"
             )
         except Exception as e: 
             logger.error(f"Could not download model because: {e}")
+            return #Stop executing if model loading fails
 
         self.generate_kwargs = dict(
             temperature=self.temperature,  # Lower values (<0.5) make outputs more deterministic, higher values increase diversity.
@@ -91,6 +110,7 @@ class LLM_model:
                     outputs = self.model.generate(**inputs, **self.generate_kwargs, pad_token_id=self.tokenizer.eos_token_id)  # [batch_size, generated_length]
                 except Exception as e:
                     logger.error(f"Could not generate prompts because {e}")
+                    continue  # Skip to the next iteration if generation fails
                 logger.debug(f"LLM: output dims is {outputs.shape}")
                 try:
                     generated_tokens = outputs[:, input_length:]  # Extract only the new tokens
