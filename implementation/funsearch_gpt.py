@@ -20,7 +20,6 @@ from multiprocessing import Manager
 import copy
 import psutil
 import GPUtil
-import pynvml
 from typing import Sequence, Any
 import datetime
 import evaluator
@@ -49,13 +48,6 @@ class TaskManager:
         self.channels = []
         self.queues = []
         self.connection = None
-        # Initialize pynvml only once during TaskManager initialization
-        try:
-            pynvml.nvmlInit()
-            self.logger.info("Successfully initialized NVML for GPU monitoring.")
-        except pynvml.NVMLError as e:
-            self.logger.error(f"Failed to initialize NVML: {e}")
-            raise
 
     async def log_resource_stats_periodically(self, interval=300):
         """Log available CPU and GPU memory/utilization every `interval` seconds."""
@@ -68,22 +60,8 @@ class TaskManager:
                 avg_cpu_usage = sum(available_cpu_usage) / len(available_cpu_usage)  # Calculate the average CPU usage
                 self.logger.info(f"Available CPUs: {len(cpu_affinity)}, Average CPU Usage: {avg_cpu_usage:.2f}%")
 
-                # Log GPU usage
-                device_count = pynvml.nvmlDeviceGetCount()  # Get the number of available GPUs
-                for i in range(device_count):
-                    handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                    memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                    utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-
-                    free_memory_mib = memory_info.free / 1024**2  # Convert bytes to MiB
-                    total_memory_mib = memory_info.total / 1024**2
-                    gpu_utilization = utilization.gpu  # GPU utilization percentage
-                    self.logger.info(f"GPU {i}: Free Memory = {free_memory_mib:.2f} MiB / {total_memory_mib:.2f} MiB, GPU Utilization = {gpu_utilization}%")
-
             except psutil.Error as e:
                 self.logger.error(f"Failed to query CPU information: {e}")
-            except pynvml.NVMLError as e:
-                self.logger.error(f"Failed to query GPU information: {e}")
             finally:
                 await asyncio.sleep(interval)  # Wait for the specified interval before checking again
 
@@ -409,9 +387,9 @@ class TaskManager:
 
         # Start initial sampler processes
         for i in range(self.config.num_samplers):
-            proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
+            proc = mp.Process(target=self.sampler_process, args=(amqp_url), name=f"Sampler-{i}")
             proc.start()
-            self.logger.debug(f"Started Sampler Process {i} on {device} with PID: {proc.pid}")
+            self.logger.debug(f"Started Sampler Process {i} with PID: {proc.pid}")
             self.sampler_processes.append(proc)
 
         # Start initial evaluator processes
@@ -422,7 +400,7 @@ class TaskManager:
             self.evaluator_processes.append(proc)
 
 
-    def sampler_process(self, amqp_url, device):
+    def sampler_process(self, amqp_url):
 
         local_id = current_process().pid  # Use process ID as a local identifier
         loop = asyncio.new_event_loop()
@@ -484,7 +462,7 @@ class TaskManager:
                 self.logger.debug(f"Sampler {local_id}: Declared evaluator_queue.")
                 try: 
                     sampler_instance = sampler.Sampler(
-                        connection, channel, sampler_queue, evaluator_queue, self.config, device
+                        connection, channel, sampler_queue, evaluator_queue, self.config
                     )
                 except Exception as e: 
                     self.logger.error(f"Could not initialize sampler instance because {e}.")

@@ -106,13 +106,12 @@ class LLM_model:
 
 
 class Sampler:
-    def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, device):
+    def __init__(self, connection, channel, sampler_queue, evaluator_queue, config):
         self.connection = connection
         self.channel = channel
         self.sampler_queue = sampler_queue
         self.evaluator_queue = evaluator_queue
         self.config = config
-        self.device=device
         self._llm = LLM_model(samples_per_prompt=self.config.samples_per_prompt)
 
     async def consume_and_process(self):
