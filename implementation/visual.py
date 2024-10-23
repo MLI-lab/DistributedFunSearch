@@ -14,20 +14,49 @@ from sim import compare_one_code_similarity_with_protection
 app = dash.Dash(__name__)
 
 # Directory to store precomputed heatmaps
-HEATMAP_DIR = os.path.join(os.getcwd(), "PrecomputedHeatmaps")
+HEATMAP_DIR = os.path.join(os.getcwd(), "PrecomputedHeatmaps_temp1")
 if not os.path.exists(HEATMAP_DIR):
     os.makedirs(HEATMAP_DIR)
+
+
+def get_checkpoint_timestamps():
+    checkpoint_dir = os.path.join(os.getcwd(), "Checkpoints_temp1")
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
+    files = [f for f in os.listdir(checkpoint_dir) if f.startswith("checkpoint_")]
+    timestamps = [f.replace("checkpoint_", "").replace(".pkl", "") for f in files]
+    return sorted(timestamps)
+
 
 #####################Function to show only last 8 checkpoints as default for cluster over times plots##################
 
 def generate_default_dropdown_options():
     timestamps = get_checkpoint_timestamps()
-    default_timestamps_count = 6
-    if len(timestamps) > default_timestamps_count:
-        timestamps = timestamps[-default_timestamps_count:]
 
-    return [{'label': datetime.strptime(ts, "%Y-%m-%d_%H-%M-%S").strftime("%m-%d %H:%M"), 'value': i}
-            for i, ts in enumerate(timestamps)], len(timestamps) - 1
+    # Generate options for all timestamps
+    all_options = [{'label': datetime.strptime(ts, "%Y-%m-%d_%H-%M-%S").strftime("%m-%d %H:%M"), 'value': i}
+                   for i, ts in enumerate(timestamps)]
+
+    # Show only the last 6 timestamps by default
+    default_timestamps_count = 6
+    default_options = all_options[-default_timestamps_count:] if len(timestamps) > default_timestamps_count else all_options
+
+    return all_options, default_options, len(timestamps) - 1
+
+
+# Modify the Dropdown component
+html.Div([
+    html.Label("Select Start Time", style={'font-weight': 'bold', 'font-family': 'Arial'}),
+    dcc.Dropdown(
+        id='start-time-dropdown',
+        options=generate_default_dropdown_options()[0],  # All available options
+        value=generate_default_dropdown_options()[1][0]['value'],  # Default to the latest 6th time
+        clearable=False,
+        style={'font-size': '14px', 'margin-top': '10px', 'font-family': 'Arial'}
+    )
+])
+
+
 
 #################### load and safe for between cluster that only saved the firgure data not the Dash component ###################
 
@@ -455,7 +484,7 @@ def generate_slider_marks():
 
 
 def get_checkpoint_timestamps():
-    checkpoint_dir = os.path.join(os.getcwd(), "Checkpoints")
+    checkpoint_dir = os.path.join(os.getcwd(), "Checkpoints_temp1")
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
     files = [f for f in os.listdir(checkpoint_dir) if f.startswith("checkpoint_")]
@@ -739,35 +768,35 @@ app.layout = html.Div([
         )
     ], style={'border': '1px solid black', 'padding': '10px', 'width': '81.5%', 'margin-right': '0px','margin-left': '97px'}),
 
+
     # New section for Cluster Scores + Size Over Time
     html.Div([
         html.H2("Cluster Scores + Size Over Time", 
             style={'text-align': 'center', 'font-weight': 'bold', 'padding': '0px', 'font-size': '28px', 'font-family': 'Arial'}), 
-
         html.Div([
             # Dropdown for selecting start time
             html.Div([
                 html.Label("Select Start Time", style={'font-weight': 'bold', 'font-family': 'Arial'}),
                 dcc.Dropdown(
                     id='start-time-dropdown',
-                    options=generate_default_dropdown_options()[0],
-                    value=0,  # Default to the earliest time
+                    options=generate_default_dropdown_options()[0],  # All available options
+                    value=generate_default_dropdown_options()[1][0]['value'],  # Default to the latest 6th time
                     clearable=False,
                     style={'font-size': '14px', 'margin-top': '10px', 'font-family': 'Arial'}
                 )
             ], style={'width': '45%', 'display': 'inline-block', 'margin-right': '5%','margin-top': '0px', 'margin-bottom': '25px'}),
 
-            # Dropdown for selecting end time
             html.Div([
                 html.Label("Select End Time", style={'font-weight': 'bold', 'font-family': 'Arial'}),
                 dcc.Dropdown(
                     id='end-time-dropdown',
-                    options=generate_default_dropdown_options()[0],
-                    value=generate_default_dropdown_options()[1],  # Default to the latest time in the last 8 checkpoints
+                    options=generate_default_dropdown_options()[0],  # All available options
+                    value=generate_default_dropdown_options()[1][-1]['value'],  # Default to the latest timestamp (last of the default options)
                     clearable=False,
                     style={'font-size': '14px', 'margin-top': '10px', 'font-family': 'Arial'}
                 )
             ], style={'width': '45%', 'display': 'inline-block'})
+
         ], style={'margin-top': '10px', 'text-align': 'center'}),
 
 
@@ -877,7 +906,7 @@ def load_checkpoint(timestamp_index):
     timestamps = get_checkpoint_timestamps()
     if timestamp_index < len(timestamps):
         timestamp = timestamps[timestamp_index]
-        filepath = os.path.join("Checkpoints", f"checkpoint_{timestamp}.pkl")
+        filepath = os.path.join("Checkpoints_temp1", f"checkpoint_{timestamp}.pkl")
         if os.path.exists(filepath):
             with open(filepath, "rb") as f:
                 return pickle.load(f)
@@ -895,14 +924,9 @@ def update_cluster_subplots(start_time_idx, end_time_idx):
     # Get all available timestamps
     timestamps = get_checkpoint_timestamps()
 
-    # Show only the last 8 timestamps by default
-    default_timestamps_count = 6
-    if len(timestamps) > default_timestamps_count:
-        timestamps = timestamps[-default_timestamps_count:]
-
     # Handle the case where start_time_idx or end_time_idx might be None
     if start_time_idx is None:
-        start_time_idx = 0  # Default to the earliest index
+        start_time_idx = len(timestamps) - 6  # Default to the 6th latest index
     if end_time_idx is None:
         end_time_idx = len(timestamps) - 1  # Default to the latest index
 
