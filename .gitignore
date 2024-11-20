@@ -18,6 +18,7 @@ implementation/ChachingFace/.locks
 devcontainer/docker-compose.yml
 implementation/GridSearch/
 implementation/Checkpoints/
+implementation/Checkpoints_GPT/
 implementation/Checkpoints_old/
 implementation/remote.log
 # Ignore all .log files
