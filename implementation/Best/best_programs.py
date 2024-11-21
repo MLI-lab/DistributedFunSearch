@@ -1,210 +1,297 @@
+
 def priority(node, G, n, s):
+ 
+    neighbors = [neighb 
+                 for neighb in list(nx.all_neighbors(G, node))
+                 if len(neighb)>=(n)
+                ]    
+  
+    min_neigbourhood_length = min([len(neigh)
+                                   for neigh in neighbors
+                                  ],default=-float("inf"))
 
-    
-    neighbours = list(nx.all_neighbors(G, node))
+    if (min_neigbourhood_length>s 
+        or 
+       (("0"*(n-(s))+ "1" * int((s)//4)== node[-(n+(s)):])
+         and 
+        ("0"+node[(n // 3):]!= node[:-1]))) :
 
-    lengths   = [len(v)-1 for v in neighbours]
-    max_length = max(-float("inf"), *lengths)
-
-
-    if (max_length >= s):
-        p1 = -sum([
-             (max_length - s ) * 
-             ( (n-i) * 
-              (i + 1)    * int(b == '1')
-               )
-                
-         for b, i in zip( reversed( list( node )), range( len(node) ) ) 
-         ]) / (
-                  
-                  (
-                    1 
-                    + s
-                    + s ** 2 
-                   ) 
-                 + 
-                     ((( n - s ) // 3 ) ** 3 ) 
-              
-                ) 
-
-        p2 = sum( lengths )/ 60
-
-        return p1 + p2 
-    
-    elif ( 
-          any
-          ( 
-            ( 
-                len(v) > 1 and
-                (not ( v[-1].isnumeric() ) or not ( int( v[ -1 ] )!= 0 ) )
-              ) 
-           for v in neighbours           
-          
-          )      
-      ):
-        
-        return None
+        return(-(min_neigbourhood_length - s)*sum([(n-i)*(i+1)*int(bit=="1")
+                                                   for bit, i in zip(reversed(list(node)),range(len(node)))
+                                                  ]) + sum([len(neigh)/(n*1/6)
+                                                            for neigh in neighbors
+                                                           ]
+                                                         )
+              )*5
 
 def priority(node, G, n, s):
 
     
-    p = [l - 1 
-         for l in list(map(lambda x : len(x),
-                           filter(lambda y : not y == node and 
-                              any([z[::-1][q:] == w
-                                   for z in y 
-                                    for q,w in enumerate(node)]),
-                                  G[node])))]    
-        
-    m = max(*p,-float("Inf")) 
     
-    if (m >= s):
+    neighbors = [neighbor 
+             for neighbor in list(nx.all_neighbors(G, node))
+             if len(neighbor) >= n 
+            ]
+
+    min_nbr_len=min([len(neigh) 
+                     for neigh 
+                     in neighbors], 
+                    default=-float('inf'),
+                   )
+    
+    
         
-        r = [(m-(s))*((n-c)*(c+1)*int(d=="1")
-             )/((1 + (s) + (s)**2 
-                ) + (((n - s) // 3)**3
-                )) 
-             for c, d in reversed(list(enumerate(node)))]
+    # This condition can be improved on by taking into account 
+    # more information about the size and nature of this component. 
+    
+    if (((min_nbr_len> (s)+1
+          or 
+          "0"*((n)//4)+"1"*(n)=="0"+node[-n:] ))
+       
+       ):
         
-        return (-sum(r) + (sum(p)/57))
+        
+        return -(min_nbr_len - s)\
+               *( sum( [(n-k)*(k+1)*int(bit== '1'
+                                           )
+                        for k,bit 
+                        in enumerate( reversed(list(node)),
+                                     start=0
+                                    )
+                       ]
+                      ) 
+               ) \
+               + sum([len(neig)/(n**1/6) 
+                      for neig in neighbors])
+
 
 def priority(node, G, n, s):
 
-    
-    neighbors = list(nx.all_neighbors(G, node))        
-    lengths = [len(neigh) - 1 for neigh in neighbors]            
 
-    maximum = max([-float("Inf")] + lengths)    
-      
-    if len(node)>s and any([maximum >= i for i in range(s)]):           
+    neighbors=[neighbor 
+               for neighbor in list(nx.all_neighbors(G,node))
+               if len(neighbor)>=n
+              ]
         
-        prio =( maximum - (s))*sum([(n-i)*(i+1)* int(char == "1")\
-                                   for char, i in zip(reversed(list(node)), \
-                                                       range(len(node)))])/(\
-                   ((1+(s)+(s)**2)+ (((n-s)//3)**3)))+\
-              sum(lengths)/65     
-        
-    elif not(any([leng <= i for leng, i in zip(lengths, [-1]+[len(node)])])):              
+    max_neighbor_len=min([len(neigh)
+                          for neigh in neighbors
+                         ])
+    
+    if (max_neighbor_len>s
+        or ("0"*(n-(s))!=node[-(n+(s)):]+'0')):
+
+
+        #Add more weights to long strings
+        return ((max_neighbor_len-s)*sum([(n-i)*(i+1)*int(bit=="1")
+                                         for i,bit in enumerate(reversed(list(node)))
+                                        ]))+sum([len(neigh)**(4/5)
+                                                 for neigh in neighbors
+                                                ])
+
+
+def priority(node, G, n, s):
+    
+  
+    max_length=max([len(neigh) 
+                    for neigh in [neighbor
+                                   for neighbor in list(nx.all_neighbors(G, node))
+                                   if len(neighbor)>=(n-(4/5))]
+                   ], 
+                  default=-float('inf'))
+ 
+    if ((max_length>s 
+        or ('0'*((n)-s)!=(node)[-(n)+s:] 
+            and '1'+node[:int(np.ceil(((n)/2)-(1/2)))]==node[(n)//3 :(n)]))
+        ):
          
-        prio = None      
-   
-    else:        
-        prio = float("-Inf")
-        
-    return prio
+        return -(max_length-s)*sum([(n-i)*(i+1)*int(bit=='1') 
+                                    for bit,i in zip(reversed(list(node)),range(len(node)))]) \
+              +sum([len(neighbour)/((n)*1/(8+(1/6)))
+                    for neighbour in [neighbor
+                                      for neighbor in list(nx.all_neighbors(G, node))
+                                      if len(neighbor)>=(n-(4/5))]
+                  ])
+
+
 
 def priority(node, G, n, s):
 
-    
-    # write your improved priority here 
-    l=[len(v)-1 for v in list(nx.all_neighbors(G,node))]   
-    m=max (*l,-float('inf'))
-    
-    if (m>=s ): 
-        p=(-(m -(s))*sum([(n-i)*(i+1)*int(bit=='1')
-        for bit, i in zip(reversed(list(node)),range(len(node)))])+sum(l)/5)+sum(l)//3        
-    elif ('0'*((n-s))!=node[-n+s:]and
-          '1'+str(s)+'0'+node[(n//2):]!='0'):
-          
-          p= ((len(node)+(np.random.randint(0,1e6))))/9e6
-          
-  
-    
-    
-    else:
-       return None      
-     
-    return p
-
-def priority(node, G, n, s):
-
-    # YOUR CODE HERE
-    
-    neighbours = [len(v) - 1 for v in list(nx.all_neighbors(G, node))]
-
-    maxneighbour = max(*neighbours, - float("inf"))
-
-
-    if maxneighbour >= s :
-
-        p=-(maxneighbour-(s))*sum([((n-i)*(i+1))* int(bit == "1")
-                              for bit, i in zip( reversed(list(node))
-                                               , range(len(node)) )]) + sum(neighbours)/5
+    try :    
+        l=[len(v)-1 for v in list(nx.all_neighbors(G,node))]  
+        max_n = max(*l, -float("Inf"))
         
-        p += sum(neighbours)/3
-        
-        
-    elif ("0" * ( (n-s ))!= node[ (-n+(s)): ] and 
-          "1"+ str(s)+"0" + node [(n//2):]!="0"):
-          
-        p=( len(node) + (np.random.randint(0,1e4 ))) / 8e6
-        
-        
-        
-    else :
-        return None   
+        if max_n >= s:
+            c=-(max_n-(s))*sum([
+                (n-i)*(i+1)*int(bit == "1") 
+                for bit, i in zip(reversed(list(node)),
+                                    range(len(node)))]) + sum(l)/(2 ** (n % 2 ))
             
-
-        
-      
-    return p
-
-def priority(node, G, n, s):
-
-   
-    l = [ len(v)-1 for v in list(nx.all_neighbors(G, node))] 
-    #print("l", l)
-    m = max(*l, - float('inf'))  
-    if (m >= s and not "1"*((n-s)) == node[ :-(n-s)] and not ("0"+"1")* (s//2)+"0"+node[:s%2 + (n>>1)]=="0"):        
-        return (-(m -(s )) * sum([ (n-i )*(i+1 )* int(b=="1")for b, i 
-            in zip(reversed(list(node )), range(len(node )))])
-            + sum(l)/5)   + sum(l)//3              
-      
-    return None
-
-def priority(node, G, n, s):
-  
-    l = [ len(v) - 1 for v in list(nx.all_neighbors(G, node )) ] 
-    m = max(*l,- float("inf")) 
-    
-    if (m >= s ) : 
-        
-      p = (-(m-(s))* sum([ (n-i)*(i + 1 )* int(bit == "1")
-                          for bit, i in zip( reversed( list(node )), range(len(node ))) ]) 
-           + sum(l)/5)+sum(l)/3       
-        
-    elif ( ("0"*( (n-s))!= node[ -n + s :] and 
-          ("1"+ str(s)+"0"+ node [(n // 2 ):])!="0") ) :   
-
-          p = (( len(node) +( np.random. randint(0,1e6) )) / 9e6)
-      
-    else: 
-       return None     
-        
-
-    return p
-
-def priority(node, G, n, s):
-
-  
-    l = [ len(v)-1 for v in list(nx.all_neighbors(G, node)) ]
-    maxi = max(*l, - float("inf"))
-
-    if maxi >= s :
-      
-        p = (-(maxi-(s))* sum([ (n-i) * (i + 1 ) * int(bit == "1")
-                            for bit, i in zip( reversed(list(node)), range(len(node)))]) 
-             
-            + sum(l) / 5) + sum(l) // 3
+        elif "".join(["1"]*(s))+"".join(["0"]) not in \
+                 ["".join(["1"] * k) [:k]for k in [n]] or node[::-1].find(""
+                 .join(["0","1"]))<s:
+                
+            c =( len(node) + abs((np.random.randn())) ) // ( 2 ** s )
+               #abs to prevent negative values due to noise from randn
+        else:            
+            raise ValueError ()
             
-    elif ("0"*(n-s)!=(node)[-n+s:]) and \
-         ("1"+ str(s)+"0" + (node[len(node)//2 : ])!= "0"):
-          
-        p =(len(node) + np.random.randint(0, 1e6))/9e6   
-        
-    else:
-        
-        return None 
-    
-    return p
+    except ValueError ():         
+        pass
+      
+    return c
 
+def priority(node, G, n, s):
+  
+    try :
+        
+        m = max([len(neighbor)-1
+                 for neighbor in list(nx.all_neighbors(G, node))],
+                default=-float("inf"))
+        
+      
+        if m >= s:            
+            c = (-(m-(s))* sum([
+                   (n-i)*(i+1) * int(bit == "1") 
+                   for bit, i in zip(reversed(list(node)),
+                                     range(len(node)))])) + \
+                            sum([ len(neighbor)
+                                  for neighbor in list(nx.all_neighbors(G, node))]) / (2 ** (n % 2))
+        elif ("{0}{0}0".format(str(s)) not in ["1"*(n // 4),
+                                               "{0}".format(s)]
+              ) and "". join(["0", "1"]) * s!= "".join(["0", node]):                
+
+            c = abs(((len(node))+
+                     (np.random.normal()))/(2 ** s))
+        else:        
+            raise ValueError()         
+      
+    except ValueError():      
+        pass
+
+    return c
+
+def priority(node, G, n, s):
+
+    neighbors = list(nx.all_neighbors(G, node))
+    L = [len(v)-1 for v in neighbors]
+
+    M = max(-float("inf"), *L)
+    if M >= s and any([k[~0] == '1' for k in neighbors]):        
+        P = -sum([(M - (s))*( (n-i)*(i+1)*int(j=='1') ) 
+            for i,j in enumerate( reversed(node) ) ]) / \
+               (((1 + (s) + (s)**2) + ( (n - s) // 3)**3 )) +\
+                  len(neighbors)/5        
+    elif M < s :
+        
+        if all( [len(k)==1 or k[~0]== '1'] for k in neighbors ):
+            
+            P = int( ''.join(['1'*k for k,_ in filter(lambda x: x[0][-1]=='1',enumerate(node))] ), base=2)\
+                 /((n//3)**3)+ len(neighbors)
+
+        else:            
+
+            P = None
+        
+    else:       
+        P = None       
+    
+    return P
+
+def priority(node, G, n, s):
+
+    if node=="0"*(n-s):return float('Inf')
+    
+    neighbors=[neighbor 
+              for neighbor in list(nx.all_neighbors(G,node))] 
+    
+    max_neighbor_length=min([len(neigh)for neigh in neighbors],default=-float('inf')) 
+    return -(max_neighbor_length-s)*sum([(n-i)*(i+1)*int(bit=='1') 
+                                        for i, bit in enumerate(reversed(list(node)))])+sum([len(neigh)/(n*1/48)
+                                                                                            for neigh in neighbors])/8
+
+def priority(node, G, n, s):
+
+    
+    #get all possible neighbors whose lengths>=n 
+    neighbors=[neighbor
+               for neighbor in list(nx.all_neighbors(G, node)) 
+               if len(neighbor)>=(n-s)] 
+
+    max_neighbor_length= min([len(neigh)
+                              for neigh in neighbors],default=-float("inf"))
+
+
+    #Add heuristic checks to prioritize adding of specific sets of nodes
+   
+    if ((max_neighbor_length >s )or 
+        ("0"*((n)-s)!="".join(list(node)[-(n)+s:])
+         and ("1"+node[:int(np.floor(((n)/2))+(1/8))]== "".join(list(node)[(n)//3:(n)])))):
+        
+        # Add weights based on lengths of neighbors
+        return -(max_neighbor_length-s)\
+                *(
+                    sum([(n-i)*(i+1)*int(bit=="1")
+                         for i, bit in enumerate(reversed(list(node)))]
+                       )) \
+              + sum([len(neigh)/(n*1/(6.9))
+                     for neigh in neighbors 
+                    ] 
+                   )
+
+def priority(node, G, n, s):
+
+    if node == "0" * (n - s): #if string is all zeros then priority will be infinity 
+        return float("inf")
+
+    neighbors=[neighbor 
+               for neighbor
+               in list(nx.all_neighbors(G, node))
+                  ]
+    
+    max_neighbor_length=min([len(neigh)
+                             for neigh
+                            in neighbors
+                                ], default=float('-inf'))
+    
+    
+    return (-(max_neighbor_length - s))*sum([(n-i)*(i+1)\
+                                            *int(bit=="1") 
+                                              for i,\
+                                                bit \
+                                                    in enumerate(\
+                                                        reversed(list(node)))])+sum([len(neigh)/(n*8/45)
+                                                                                    for neigh 
+                                                                                in neighbors
+                                                                                 ])
+
+
+
+
+    
+
+    
+    
+    h(G, node)
+
+
+
+def priority(node, G, n, s):
+
+    if node[-3:]!= '0'*s:
+        neighbors=[neighbor 
+                   for neighbor in list(nx.all_neighbors(G, node))]
+        
+        #if all(neighbor[0:(n-s)]=='0' 
+        #       and any([neigh==node[:n-(s)+1]+'1'+node[(n-s)+2:]]
+        #              )for neighbor in neighbors), use this statement instead
+        return (-(max((len(neigh)
+                       for neigh in neighbors
+                      ),default=(n-s))
+                )*
+               sum((((n-i)*(i+1)*
+                     int(bit=="1")
+                    ) 
+                    for i, bit in enumerate(reversed(list(node))))
+                  ))+\
+              sum(([len(neigh)/((n*1/8)**2)
+                   for neigh in neighbors]))

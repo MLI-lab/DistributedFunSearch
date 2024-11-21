@@ -1,0 +1,90 @@
+"""
+Finds large independent set in graph G where nodes are binary strings of length n.
+Nodes in G are connected if they share a subsequence of length at least length n-s. 
+"""
+
+import itertools
+import hashlib
+import numpy as np
+import networkx as nx
+
+def generate_graph(n, s):
+    G = nx.Graph()
+    sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]  # Generate all binary strings of length n
+    # Adding nodes
+    for seq in sequences:
+        G.add_node(seq)
+    # Adding edges
+    for i in range(len(sequences)):
+        for j in range(i + 1, len(sequences)):
+            if has_common_subsequence(sequences[i], sequences[j], n, s):
+                G.add_edge(sequences[i], sequences[j])
+    return G
+
+def has_common_subsequence(seq1, seq2, n, s):
+    threshold = n - s
+    if threshold <= 0:
+        return True  # Trivial case where subsequence length is 0 or negative
+    # Initialize two rows for DP
+    prev = [0] * (n + 1)
+    current = [0] * (n + 1)
+    # Fill the DP table row by row
+    for i in range(1, n + 1):
+        for j in range(1, n + 1):
+            if seq1[i - 1] == seq2[j - 1]:
+                current[j] = prev[j - 1] + 1
+            else:
+                current[j] = max(prev[j], current[j - 1])
+            if current[j] >= threshold:
+                return True
+        prev, current = current, prev
+    return False  # No LCS of adequate length was found
+
+def hash_priority_scores(scores):
+    """Generate a hash from the priority scores."""
+    score_str = ",".join(map(str, scores))
+    return hashlib.sha256(score_str.encode()).hexdigest()
+
+def evaluate(params):
+    n, s = params
+    independent_set, hash_value = solve(n, s)
+    return (len(independent_set), hash_value)
+
+def solve(n, s):
+    # Generate the original graph
+    G_original = generate_graph(n, s)
+    # Create copies of the graph for priority calculation and independent set construction
+    G_for_priority = G_original.copy()
+    G_for_independent_set = G_original.copy()
+
+    # Compute priorities (pass a copy to prevent modification of the original graph)
+    priorities = {node: priority(node, G_for_priority, n, s) for node in G_original.nodes}
+    # Sort nodes based on priority (highest priority first)
+    nodes_sorted = sorted(G_original.nodes, key=lambda x: priorities[x], reverse=True)
+
+    independent_set = set()
+    # Build the independent set using the unmodified graph
+    for node in nodes_sorted:
+        if node not in G_for_independent_set:
+            continue  # Node has already been removed
+        # Add the node to the independent set
+        independent_set.add(node)
+        # Remove the node and its neighbors from the graph copy
+        neighbors = list(G_for_independent_set.neighbors(node))
+        G_for_independent_set.remove_node(node)
+        G_for_independent_set.remove_nodes_from(neighbors)
+
+    # Compute hash only for n = 6
+    hash_value = None
+    if n == 6:
+        test_sequences = [''.join(seq) for seq in itertools.product('01', repeat=6)]
+        priority_scores = [priorities[seq] for seq in test_sequences]
+        hash_value = hash_priority_scores(priority_scores)
+
+    return independent_set, hash_value
+
+def priority(node, G, n, s):
+    """
+    Returns the priority with which we want to add `node` to independent set.
+    """
+    return 0.0

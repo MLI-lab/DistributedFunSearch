@@ -14,7 +14,7 @@ import sys
 import pickle
 import config as config_lib
 import programs_database
-import gpt
+import sampler
 import code_manipulation
 from multiprocessing import Manager
 import copy
@@ -34,10 +34,10 @@ import glob
 import os
 import datetime
 
+# Backup function
 def backup_python_files(src, dest, exclude_dirs=[]):
     """
-    Recursively copies all Python files in src to dest.
-    If dest or any subdirectory does not exist, they are created.
+    Recursively copies all Python files in src to dest. If dest or any subdirectory does not exist, they are created. This has saved my life quite a few times.
     """
     for file_path in glob.glob(os.path.join(src, '**', '*.py'), recursive=True):
         if "/code_backup/" in file_path:
@@ -49,6 +49,7 @@ def backup_python_files(src, dest, exclude_dirs=[]):
         if not os.path.exists(dirname):
             os.makedirs(dirname)
         shutil.copy(file_path, new_path)
+
 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -289,7 +290,7 @@ class TaskManager:
                 device = 'cuda'
                 self.logger.warning(f"Proceeding with device=cuda for {process_name}.")
                 args += (device,)
-                try: 
+                try:
                     # Start the process
                     proc = mp.Process(target=target_fnc, args=args, name=f"{process_name}-{len(processes)}")
                     proc.start()
@@ -333,11 +334,11 @@ class TaskManager:
                 if free_memory is None and utilization is None:
                     self.logger.warning(f"Memory information could not be queried for device {dev_id}. Skipping this device.")
                     continue  # Skip this device and continue checking others
-                if free_memory > 32768 and utilization < 100: #need more than 32 GiB for starcoder too fit
+                if free_memory > 32768 and utilization < 200: #need more than 32 GiB for starcoder too fit
                     suitable_gpu_id = dev_id
                     self.logger.warning(f"Device {dev_id} has free memory {free_memory} and utilization {utilization}. Attemption to load model on device. ")
                     break
-                elif utilization < 100:
+                elif utilization < 200:
                     combined_memory += free_memory if free_memory else 0
                     combined_gpus.append(dev_id)
 
@@ -352,7 +353,7 @@ class TaskManager:
                 device='cuda'
                 self.logger.warning(f"Memory information could not be queried for device {dev_id}.")
             else:
-                self.logger.warning(f"Not enough GPU memory available for {process_name}, no scaling.")
+                self.logger.warning(f"Not enough GPU memory available: {free_memory} for {process_name}, no scaling.")
                 return
 
             self.logger.info(f"Assigning {process_name} to device {device if device else 'combined GPUs (cuda)'}")
@@ -471,7 +472,7 @@ class TaskManager:
     async def main_task(self, checkpoint_file=None):
         #logger_coroutine = asyncio.create_task(self.log_tasks())
         amqp_url = URL(
-            f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/'
+            f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}'
         ).update_query(heartbeat=180000)
         pid = os.getpid()
         self.logger.info(f"Main_task is running in process with PID: {pid}")
@@ -530,6 +531,7 @@ class TaskManager:
             except Exception as e:
                 self.logger.error(f"Failed to start initial processes: {e}")
 
+
             # Publish the initial program with retry logic
             while True: 
                 sampler_queue = await self.sampler_channel.declare_queue("sampler_queue", passive=True)
@@ -586,7 +588,7 @@ class TaskManager:
 
             # Check if any single GPU has >= 20 GiB of memory free and < 50% utilization
             for gpu_id, (free_memory, utilization) in gpu_memory_info.items():
-                if free_memory > 17000 and utilization < 200:  # Check for at least 20 GiB and < 50% utilization
+                if free_memory > 32768 and utilization < 200:  # Check for at least 20 GiB and < 50% utilization
                     suitable_gpu_id = gpu_id
                     break
                 elif utilization < 200:
@@ -598,8 +600,8 @@ class TaskManager:
                 container_index = id_to_container_index[suitable_gpu_id]
                 device = f"cuda:{container_index}"
                 # Adjust memory tracking (simplistic estimation)
-                gpu_memory_info[suitable_gpu_id] = (gpu_memory_info[suitable_gpu_id][0] - 17000, gpu_memory_info[suitable_gpu_id][1])
-            elif combined_memory >= 17000:  # If combined memory from multiple GPUs is >= 20 GiB
+                gpu_memory_info[suitable_gpu_id] = (gpu_memory_info[suitable_gpu_id][0] - 32768, gpu_memory_info[suitable_gpu_id][1])
+            elif combined_memory >= 32768:  # If combined memory from multiple GPUs is >= 20 GiB
                 device = None  # Use None to indicate that multiple GPUs will be used
                 self.logger.info(f"Using combination of GPUs: {combined_gpus} with total memory: {combined_memory} MiB")
             else:
@@ -607,7 +609,6 @@ class TaskManager:
                 continue  # Skip this sampler if no GPU has sufficient memory
 
             self.logger.info(f"Assigning sampler {i} to device {device if device else 'combined GPUs (None)'}")
-
             try: 
                 proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
                 proc.start()
@@ -615,7 +616,7 @@ class TaskManager:
                 self.sampler_processes.append(proc)
                 self.process_to_device_map[proc.pid] = device
             except Exception as e: 
-                continue 
+                continue
 
         # Start initial evaluator processes
         for i in range(self.config.num_evaluators):
@@ -685,15 +686,13 @@ class TaskManager:
                     arguments={'x-consumer-timeout': 360000000}
                 )
                 self.logger.debug(f"Sampler {local_id}: Declared evaluator_queue.")
-                try: 
-                    sampler_instance = gpt.Sampler(
-                        connection, channel, sampler_queue, evaluator_queue, self.config, device
-                    )
+                try:
+                    sampler_instance = sampler.Sampler(
+                        connection, channel, sampler_queue, evaluator_queue, self.config, device)
+                    self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
                 except Exception as e: 
-                    self.logger.error(f"Could not initialize sampler instance because {e}.")
-                    raise 
-
-                self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
+                    self.logger.error(f"Could not start Sampler instance")
+                    return 
 
                 sampler_task = asyncio.create_task(sampler_instance.consume_and_process())
                 await sampler_task
@@ -778,7 +777,7 @@ class TaskManager:
 
                 evaluator_instance = evaluator.Evaluator(
                     connection, channel, evaluator_queue, database_queue, 
-                    template, 'priority', 'evaluate', inputs, 'sandboxstorage', 
+                    template, 'priority', 'evaluate', inputs, '/workspace/sandboxstorage/', 
                     timeout_seconds=800, local_id=local_id
                 )
                 evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
@@ -812,12 +811,13 @@ class TaskManager:
             self.logger.debug(f"Evaluator process {local_id} has been closed gracefully.")
 
 
+
 if __name__ == "__main__":
     # Define the source directory (current working directory)
     src_dir = os.getcwd()  # Get the current working directory
 
     # Define the base directory for backups
-    backup_base_dir = '/mnt/hdd_pool/users/franziska/code_backups'
+    backup_base_dir = '/workspace/code_backups'
     os.makedirs(backup_base_dir, exist_ok=True)
 
     # Create a timestamped backup directory
@@ -852,3 +852,7 @@ if __name__ == "__main__":
 
     # Top-level call to asyncio.run() to start the event loop
     asyncio.run(main())
+
+
+
+
