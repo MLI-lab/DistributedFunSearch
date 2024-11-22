@@ -25,6 +25,8 @@ class Function:
     body: str
     return_type: str | None = None
     docstring: str | None = None
+    hash_value: int | None = None  # Add the hash_value attribute
+
 
     def __str__(self) -> str:
         """ Maps Function object to str correctly formatted. """
@@ -44,7 +46,8 @@ class Function:
             "args": self.args,
             "body": self.body,
             "return_type": self.return_type,
-            "docstring": self.docstring
+            "docstring": self.docstring, 
+            "hash_value": self.hash_value 
         }
 
     @staticmethod
@@ -59,7 +62,8 @@ class Function:
             "args": self.args,
             "body": self.body,
             "return_type": self.return_type,
-            "docstring": self.docstring
+            "docstring": self.docstring, 
+            "hash_value": self.hash_value
         }
 
     @staticmethod
@@ -69,7 +73,8 @@ class Function:
             args=data["args"],
             body=data["body"],
             return_type=data.get("return_type", None),
-            docstring=data.get("docstring", None)
+            docstring=data.get("docstring", None), 
+            hash_value=data.get("hash_value", None) 
         )
 
     @staticmethod

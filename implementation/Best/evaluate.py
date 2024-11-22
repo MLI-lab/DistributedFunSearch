@@ -70,10 +70,10 @@ def solve(n, s, num_workers=4, chunk_size=1000):
     return len(independent_set)
 
 def priority(node, G, n, s):
-    neighbors = [neighb for neighb in list(nx.all_neighbors(G, node)) if len(neighb) >= n]
-    min_neigbourhood_length = min([len(neigh) for neigh in neighbors], default=-float('inf'))
-    if min_neigbourhood_length > s or ('0' * (n - s) + '1' * int(s // 4) == node[-(n + s):] and '0' + node[n // 3:] != node[:-1]):
-        return (-(min_neigbourhood_length - s) * sum([(n - i) * (i + 1) * int(bit == '1') for bit, i in zip(reversed(list(node)), range(len(node)))]) + sum([len(neigh) / (n * 1 / 6) for neigh in neighbors])) * 5
+    neighbors = [neighbor for neighbor in list(nx.all_neighbors(G, node)) if len(neighbor) >= n]
+    max_neighbor_len = min([len(neigh) for neigh in neighbors])
+    if max_neighbor_len > s or '0' * (n - s) != node[-(n + s):] + '0':
+        return (max_neighbor_len - s) * sum([(n - i) * (i + 1) * int(bit == '1') for i, bit in enumerate(reversed(list(node)))]) + sum([len(neigh) ** (4 / 5) for neigh in neighbors])
 num_workers = 20
 chunk_size = 1000
 for n in range(14, 17):
