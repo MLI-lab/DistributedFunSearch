@@ -350,28 +350,40 @@ class ProgramsDatabase:
             raise
 
     async def register_program(self, program: code_manipulation.Function, island_id: int, scores_per_test: ScoresPerTest, expected_version: int = None, hash_value: int = None):
-        if (time.time() - self._last_reset_time > self._config.reset_period):
-            all_islands_sufficiently_populated = all(island['num_programs'] >= self._config.reset_programs for island in self._islands)
+        # Check if reset period is defined
+        if self._config.reset_period is not None:
+            # Only check the timing if reset_period is not None
+            if (time.time() - self._last_reset_time > self._config.reset_period):
+                all_islands_sufficiently_populated = all(island['num_programs'] >= self._config.reset_programs for island in self._islands)
 
+                if all_islands_sufficiently_populated:
+                    logger.info(f"Reset period exceeded and islands have {self._config.reset_programs} or more programs, resetting islands.")
+                    self._last_reset_time = time.time()
+                    try:
+                        await self.reset_islands()
+                    except Exception as e:
+                        logger.error(f"Error in reset islands: {e}")
+                else:
+                    logger.warning("Reset period exceeded, but not all islands have enough programs. Skipping reset for now.")
+        else:
+            # If reset_period is None, only check population
+            all_islands_sufficiently_populated = all(island['num_programs'] >= self._config.reset_programs for island in self._islands)
             if all_islands_sufficiently_populated:
-                logger.info(f"Reset period exceeded and islands have {self._config.reset_programs} or more programs, resetting islands.")
-                self._last_reset_time = time.time()
+                logger.info("Reset period not defined, but all islands have enough programs. Proceeding to reset islands.")
                 try:
                     await self.reset_islands()
                 except Exception as e:
                     logger.error(f"Error in reset islands: {e}")
             else:
-                logger.warning("Reset period exceeded, but not all islands have enough programs. Skipping reset for now.")
+                logger.warning("Reset period not defined, but not all islands have enough programs. Skipping reset for now.")
 
-        #cluster_check_threshold = 20
-
+        # Proceed with program registration logic
         island = self._islands[island_id]
-
 
         if program.body is None:
             logger.debug("Program body is None. Skipping registration.")
             return
-        #if len(island['clusters']) < cluster_check_threshold:
+
         if self.function_body_exists(island['clusters'], hash_value):
             logger.debug("Program with identical body already exists in island. Skipping registration.")
             return
@@ -384,6 +396,7 @@ class ProgramsDatabase:
 
         self._register_program_in_island(program, island_id, scores_per_test, hash_value)
         self.registered_programs += 1
+
 
     def _register_program_in_island(self, program: code_manipulation.Function, island_id: int, scores_per_test: ScoresPerTest, hash_value: int = None):
         island = self._islands[island_id]
