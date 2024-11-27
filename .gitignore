@@ -6,8 +6,8 @@ implementation/ChachingFace/models--bigcode--starcoder2-15b
 implementation/ChachingFace/.locks
 implementation/Checkpoints_*
 *.log
-Analysis/Checkpoints_*
+analysis/Checkpoints_*
 /franziska/logs
-/franziska/Analysis/checkpoint_full.txt
-/franziska/Analysis/FilterBest/best_programs.py
+/franziska/analysis/checkpoint_full.txt
+/franziska/analysis/FilterBest/best_programs.py
 *.pdf
