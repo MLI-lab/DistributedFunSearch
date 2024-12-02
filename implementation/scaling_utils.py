@@ -8,8 +8,8 @@ import torch.multiprocessing as mp
 from typing import Sequence, Any
 import logging
 from logging import FileHandler
-
-
+import socket  # Import socket for hostname retrieval
+import datetime
 
 class ResourceManager:
     def __init__(self, log_dir=None, resource_logger=None, cpu_only=False):
@@ -21,6 +21,8 @@ class ResourceManager:
             resource_logger (logging.Logger): Existing logger instance. If None, a new one is created.
             cpu_only (bool): If True, operate in CPU-only mode and skip all GPU-related initialization and operations.
         """
+        self.hostname = socket.gethostname()  # Get the hostname of the machine
+
         if resource_logger is None:
             if log_dir is None:
                 raise ValueError("Either resource_logger or log_dir must be provided")
@@ -35,25 +37,9 @@ class ResourceManager:
             try:
                 self._initialize_nvml()
             except Exception as e:
-                self.resource_logger.warning(f"Failed to initialize NVML: {e}")
+                self.resource_logger.warning(f"{self.hostname}: Failed to initialize NVML: {e}")
                 self.cpu_only = True  # Fallback to CPU-only mode if GPU initialization fails
-                self.resource_logger.info("Switching to CPU-only mode.")
-
-    def _initialize_resource_logger(self, log_dir):
-        logger = logging.getLogger('resource_logger')
-        logger.setLevel(logging.DEBUG)
-
-        # Create the log directory for the experiment
-        os.makedirs(log_dir, exist_ok=True)
-
-        log_file_path = os.path.join(log_dir, 'resources.log')
-        handler = FileHandler(log_file_path, mode='w')  # Create a file handler
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.propagate = False
-
-        return logger
+                self.resource_logger.info(f"{self.hostname}: Switching to CPU-only mode.")
 
     def _initialize_nvml(self):
         """
@@ -63,49 +49,76 @@ class ResourceManager:
         pynvml.nvmlInit()
         self.resource_logger.debug("Successfully initialized NVML for GPU monitoring.")
 
-    async def log_resource_stats_periodically(self, interval=300):
+    def _initialize_resource_logger(self, log_dir):
+        """
+        Initialize a logger with a unique log file name for each process.
+        The log file name includes the process ID (PID) or other unique identifiers.
+        """
+        pid = os.getpid()  # Get the current process ID
+        log_file_name = f"resources_{self.hostname}_pid{pid}.log"
+        log_file_path = os.path.join(log_dir, log_file_name)
+
+        logger = logging.getLogger(f'resource_logger_{pid}')
+        logger.setLevel(logging.DEBUG)
+
+        # Create the log directory if it doesn't exist
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Configure file handler with the unique log file
+        handler = FileHandler(log_file_path)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.propagate = False
+
+        logger.info(f"Resource logger initialized for PID {pid}. Log file: {log_file_path}")
+        return logger
+
+
+    async def log_resource_stats_periodically(self, interval=100):
         """Log available CPU, GPU, RAM, and system load/utilization every `interval` seconds."""
         while True:
             try:
                 # Log CPU usage
-                cpu_affinity = os.sched_getaffinity(0)  # Get CPUs available to the current process/container
-                cpu_usage = psutil.cpu_percent(interval=None, percpu=True)  # Get usage for all system CPUs
-                available_cpu_usage = [cpu_usage[i] for i in cpu_affinity]  # Filter for CPUs available to the process
-                avg_cpu_usage = sum(available_cpu_usage) / len(available_cpu_usage)  # Calculate the average CPU usage
-                self.resource_logger.info(f"Available CPUs: {len(cpu_affinity)}, Average CPU Usage: {avg_cpu_usage:.2f}%")
+                cpu_affinity = os.sched_getaffinity(0)
+                cpu_usage = psutil.cpu_percent(interval=None, percpu=True)
+                available_cpu_usage = [cpu_usage[i] for i in cpu_affinity]
+                avg_cpu_usage = sum(available_cpu_usage) / len(available_cpu_usage)
+                self.resource_logger.info(f"{self.hostname}: Available CPUs: {len(cpu_affinity)}, Average CPU Usage: {avg_cpu_usage:.2f}%")
 
                 if not self.cpu_only:
                     # Log GPU usage
-                    device_count = pynvml.nvmlDeviceGetCount()  # Get the number of available GPUs
+                    device_count = pynvml.nvmlDeviceGetCount()
                     for i in range(device_count):
                         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
                         memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
 
-                        free_memory_mib = memory_info.free / 1024**2  # Convert bytes to MiB
+                        free_memory_mib = memory_info.free / 1024**2
                         total_memory_mib = memory_info.total / 1024**2
-                        gpu_utilization = utilization.gpu  # GPU utilization percentage
-                        self.resource_logger.info(f"GPU {i}: Free Memory = {free_memory_mib:.2f} MiB / {total_memory_mib:.2f} MiB, GPU Utilization = {gpu_utilization}%")
+                        gpu_utilization = utilization.gpu
+                        self.resource_logger.info(f"{self.hostname}: GPU {i}: Free Memory = {free_memory_mib:.2f} MiB / {total_memory_mib:.2f} MiB, GPU Utilization = {gpu_utilization}%")
 
                 # Log RAM usage
-                process = psutil.Process(os.getpid())  # Get current process
+                process = psutil.Process(os.getpid())
                 memory_info = process.memory_info()
-                rss_mib = memory_info.rss / 1024**2  # Resident Set Size in MiB
-                vms_mib = memory_info.vms / 1024**2  # Virtual Memory Size in MiB
-                self.resource_logger.info(f"Memory Usage: RSS = {rss_mib:.2f} MiB, VMS = {vms_mib:.2f} MiB")
+                rss_mib = memory_info.rss / 1024**2
+                vms_mib = memory_info.vms / 1024**2
+                self.resource_logger.info(f"{self.hostname}: Memory Usage: RSS = {rss_mib:.2f} MiB, VMS = {vms_mib:.2f} MiB")
 
                 # Log system load
                 load_avg_1, load_avg_5, load_avg_15 = os.getloadavg()
-                num_cores = len(cpu_affinity)  # Number of CPU cores available to the process
-                self.resource_logger.info(f"System Load (1m, 5m, 15m): {load_avg_1:.2f}, {load_avg_5:.2f}, {load_avg_15:.2f} and Load/Cores Ratio (1m): {load_avg_1:.2f}/{num_cores} ({load_avg_1 / num_cores:.2f})")
+                num_cores = len(cpu_affinity)
+                self.resource_logger.info(f"{self.hostname}: System Load (1m, 5m, 15m): {load_avg_1:.2f}, {load_avg_5:.2f}, {load_avg_15:.2f}, Load/Cores Ratio (1m): {load_avg_1:.2f}/{num_cores} ({load_avg_1 / num_cores:.2f})")
 
             except psutil.Error as e:
-                self.resource_logger.error(f"Failed to query CPU or RAM information: {e}")
+                self.resource_logger.error(f"{self.hostname}: Failed to query CPU or RAM information: {e}")
             except pynvml.NVMLError as e:
                 if not self.cpu_only:
-                    self.resource_logger.error(f"Failed to query GPU information: {e}")
+                    self.resource_logger.error(f"{self.hostname}: Failed to query GPU information: {e}")
             finally:
                 await asyncio.sleep(interval)  # Wait for the specified interval before checking again
+
 
     def start_process(self, target_fnc, args, processes, process_name):
         current_pid = os.getpid()

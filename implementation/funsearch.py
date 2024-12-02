@@ -180,7 +180,7 @@ class TaskManager:
             try:
                 load_avg_1, load_avg_5, _ = os.getloadavg()
                 num_cores = len(os.sched_getaffinity(0))  # Available CPU cores
-                if load_avg_5 > num_cores:
+                if load_avg_1 > num_cores or load_avg_5 > num_cores:
                     self.logger.warning(f"5-minute average load ({load_avg_5:.2f}) exceeds available cores ({num_cores}). Scaling down processes.")
     
                     # Continue terminating processes until load is below threshold
@@ -227,7 +227,7 @@ class TaskManager:
     async def main_task(self, save_checkpoints_path, enable_scaling=True, checkpoint_file=None):
         amqp_url = URL(
             f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' # Add virtual host for LRZ {self.config.rabbitmq.vhost}'
-        ).update_query(heartbeat=180000)
+        ).update_query(heartbeat=480000)
         pid = os.getpid()
 
         self.logger.info(f"Main_task is running in process with PID: {pid}")

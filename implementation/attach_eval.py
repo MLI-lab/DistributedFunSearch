@@ -94,7 +94,7 @@ class TaskManager:
             try:
                 load_avg_1, load_avg_5, _ = os.getloadavg()
                 num_cores = len(os.sched_getaffinity(0))  # Available CPU cores
-                if load_avg_5 > num_cores:
+                if load_avg_5 > num_cores or load_avg_1 > num_cores:
                     self.logger.warning(f"5-minute average load ({load_avg_5:.2f}) exceeds available cores ({num_cores}). Scaling down processes.")
     
                     # Continue terminating processes until load is below threshold
@@ -133,7 +133,7 @@ class TaskManager:
     async def main_task(self,  enable_scaling=True):
         amqp_url = URL(
             f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}'
-        ).update_query(heartbeat=180000)
+        ).update_query(heartbeat=480000)
         pid = os.getpid()
         self.logger.info(f"Main_task is running in process with PID: {pid}.")
         try:
@@ -143,7 +143,9 @@ class TaskManager:
 
             # Start initial processes
             self.start_initial_processes(self.template, function_to_evolve, amqp_url)
-            self.tasks = []
+            resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=200))
+
+            self.tasks = [resource_logging_task]
             if enable_scaling:
                 scaling_task = asyncio.create_task(self.scaling_controller(function_to_evolve, amqp_url))
                 self.tasks.append(scaling_task)

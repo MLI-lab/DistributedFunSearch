@@ -27,7 +27,7 @@ class LLM_model:
         # Set the cache directory
         self.cache_dir = "/workspace/models/"
         os.environ["TRANSFORMERS_CACHE"] = self.cache_dir
-        if device == "cuda":
+        if device == "cuda" or device is None:
             self.device_map = "auto"
             self.device = device
             logger.info(f"Using all available GPUs with device_map='auto'.")

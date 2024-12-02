@@ -109,7 +109,7 @@ class TaskManager:
     async def main_task(self,  enable_scaling=True):
         amqp_url = URL(
             f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}'
-        ).update_query(heartbeat=180000)
+        ).update_query(heartbeat=480000)
         pid = os.getpid()
         self.logger.info(f"Main_task is running in process with PID: {pid}")
         try:
@@ -117,9 +117,10 @@ class TaskManager:
             self.template = code_manipulation.text_to_program(self.specification)
             function_to_evolve = 'priority'
 
-            self.start_initial_processes(self.template, function_to_evolve, amqp_url)
+            self.start_initial_processes(function_to_evolve, amqp_url)
+            resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=200))
 
-            self.tasks = []
+            self.tasks = [resource_logging_task]
             if enable_scaling:
                 scaling_task = asyncio.create_task(self.scaling_controller(function_to_evolve, amqp_url))
                 self.tasks.append(scaling_task)
@@ -129,8 +130,7 @@ class TaskManager:
         except Exception as e:
             self.logger.error(f"Exception occurred in main_task: {e}")
 
-
-    def start_initial_processes(self, template, function_to_evolve, amqp_url):
+    def start_initial_processes(self, function_to_evolve, amqp_url):
         amqp_url = str(amqp_url)
 
         # Get a list of visible GPUs as remapped by CUDA_VISIBLE_DEVICES (inside the container)
@@ -142,40 +142,49 @@ class TaskManager:
         # Create a mapping of host-visible GPU IDs (integers in visible_devices) to container-visible device indices
         id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
 
-        # Initialize GPU memory usage tracking (host-visible GPU IDs)
-        gpu_memory_usage = {gpu.id: gpu.memoryFree for gpu in gpus if gpu.id in visible_devices}
+        # Initialize GPU memory usage and utilization tracking (host-visible GPU IDs)
+        gpu_memory_info = {gpu.id: (gpu.memoryFree, gpu.memoryUtil * 100) for gpu in gpus if gpu.id in visible_devices}
 
-        self.logger.info(f"Found visible GPUs with initial free memory: {gpu_memory_usage}")
+        self.logger.info(f"Found visible GPUs with initial free memory and utilization: {gpu_memory_info}")
 
         # Start initial sampler processes
         for i in range(self.config.num_samplers):
-            # Find a suitable GPU with enough free memory
             suitable_gpu_id = None
-            for gpu_id, free_memory in gpu_memory_usage.items():
-                if free_memory > 32768:  # Check if more than 17000MiB is available
+            combined_memory = 0
+            combined_gpus = []
+
+            # Check if any single GPU has >= 32 GiB of memory free and < 50% utilization
+            for gpu_id, (free_memory, utilization) in gpu_memory_info.items():
+                if free_memory > 30000 and utilization < 110: 
                     suitable_gpu_id = gpu_id
                     break
+                elif utilization < 100:
+                    combined_memory += free_memory
+                    combined_gpus.append(gpu_id)
 
-            # Map to container-visible device (like cuda:0 or cuda:1)
+            # If a single GPU was found with sufficient memory
             if suitable_gpu_id is not None:
-                container_index = id_to_container_index[suitable_gpu_id]  # Get container-visible index
+                container_index = id_to_container_index[suitable_gpu_id]
                 device = f"cuda:{container_index}"
                 # Adjust memory tracking (simplistic estimation)
-                gpu_memory_usage[suitable_gpu_id] -= 32768
+                gpu_memory_info[suitable_gpu_id] = (gpu_memory_info[suitable_gpu_id][0] - 32768, gpu_memory_info[suitable_gpu_id][1])
+            elif combined_memory >= 32768:  # If combined memory from multiple GPUs is >= 20 GiB
+                device = None  # Use None to indicate that multiple GPUs will be used
+                self.logger.info(f"Using combination of GPUs: {combined_gpus} with total memory: {combined_memory} MiB")
             else:
                 self.logger.error(f"Cannot start sampler {i}: Not enough available GPU memory.")
                 continue  # Skip this sampler if no GPU has sufficient memory
 
-            self.logger.info(f"Assigning sampler {i} to device {device}")
+            self.logger.info(f"Assigning sampler {i} to device {device if device else 'combined GPUs (None)'}")
             try: 
                 proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
                 proc.start()
-                self.logger.info(f"Started Sampler Process {i} on {device} with PID: {proc.pid}")
+                self.logger.debug(f"Started Sampler Process {i} on {device} with PID: {proc.pid}")
                 self.sampler_processes.append(proc)
-                # Store the process PID and device in the process_to_device_map
                 self.process_to_device_map[proc.pid] = device
             except Exception as e: 
                 continue
+
 
 
     def sampler_process(self, amqp_url, device):

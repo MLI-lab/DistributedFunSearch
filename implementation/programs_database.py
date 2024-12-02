@@ -517,7 +517,7 @@ class ProgramsDatabase:
             return None, 0
 
         chosen_signatures = [valid_signatures[i] for i in idx]
-        implementations = [clusters[signature]['programs'][0] for signature in chosen_signatures]  # Simplified
+        implementations = [self.sample_program(clusters[signature]) for signature in chosen_signatures]  # Simplified
         scores = [clusters[signature]['score'] for signature in chosen_signatures]
 
         sorted_implementations = [implementations[i] for i in np.argsort(scores)]
@@ -632,3 +632,28 @@ class ProgramsDatabase:
         if all(isinstance(k, str) for k in scores_per_test.keys()):
             scores_per_test = {eval(k): v for k, v in scores_per_test.items()}
         return tuple(scores_per_test[k] for k in sorted(scores_per_test.keys()))
+
+    def sample_program(self, cluster_data, temperature=1.0):
+        """Samples a program from the cluster, favoring shorter programs."""
+        programs = cluster_data['programs']
+        if not programs:
+            raise ValueError("Cluster contains no programs to sample.")
+
+        lengths = np.array([len(str(program)) for program in programs])  # Program lengths
+        if lengths.max() == lengths.min():
+            probabilities = np.ones(len(programs)) / len(programs)  # Uniform sampling if all lengths are identical
+        else:
+            # Normalize lengths as negative values to favor shorter programs
+            normalized_lengths = (lengths - lengths.min()) / (lengths.max() - lengths.min() + 1e-6)
+            probabilities = self._softmax(-normalized_lengths, temperature=temperature)  # Softmax over negative lengths
+
+        # Sample a program based on the probabilities
+        sampled_index = np.random.choice(len(programs), p=probabilities)
+        return programs[sampled_index]
+
+
+    def _softmax(self, logits: np.ndarray, temperature: float) -> np.ndarray:
+        """Tempered softmax for sampling."""
+        logits = np.array(logits, dtype=np.float32)
+        exp_logits = np.exp(logits / temperature)
+        return exp_logits / exp_logits.sum()
