@@ -182,13 +182,13 @@ class ExternalProcessSandbox(DummySandbox):
             retcode = self._exec(call_data_folder, input_path, error_file)
 
             if not retcode:
-                return None, False, call_data_folder, input_path, error_file
+                return None, False, self.output_path, input_path, error_file
 
             output_file = call_data_folder / f"output.pickle"
             with open(output_file, "rb") as f:
                 out = cloudpickle.load(f)
-                return out, True, call_data_folder, input_path, error_file  # Return the call_data_folder as part of the result
+                return out, True, self.output_path, input_path, error_file  # Return the call_data_folder as part of the result
         except Exception as e:
-            return None, False, call_data_folder, input_path, error_file # Ensure the folder is returned even on failure
+            return None, False, self.output_path, input_path, error_file # Ensure the folder is returned even on failure
 
     

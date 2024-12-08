@@ -16,6 +16,10 @@ from yarl import URL
 import code_manipulation
 import sampler
 import importlib
+import socket
+import time  # Ensure this is imported at the top of the file
+
+
 
 def load_config(config_path):
     """
@@ -53,7 +57,9 @@ class TaskManager:
         self.queues = []
         self.connection = None
         self.resource_manager = ResourceManager(log_dir=log_dir)
-
+        # Initialize process-to-device map
+        self.process_to_device_map = {}
+        
     def initialize_logger(self, log_dir):
         logger = logging.getLogger('main_logger')
         logger.setLevel(logging.INFO)
@@ -109,6 +115,8 @@ class TaskManager:
             except Exception as e:
                 self.logger.error(f"Scaling controller encountered an error: {e}")
             await asyncio.sleep(120)  # Non-blocking sleep
+
+
 
 
     async def main_task(self,  enable_scaling=True):
@@ -184,10 +192,13 @@ class TaskManager:
             try: 
                 proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
                 proc.start()
-                self.logger.debug(f"Started Sampler Process {i} on {device} with PID: {proc.pid}")
                 self.sampler_processes.append(proc)
                 self.process_to_device_map[proc.pid] = device
+                time.sleep(60)
+                self.logger.info(f"self.process_to_device_map is {self.process_to_device_map}")
+
             except Exception as e: 
+                self.logger.error(f"ERROR in loading samplers {e}")
                 continue
 
 

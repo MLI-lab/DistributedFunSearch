@@ -31,6 +31,7 @@ import glob
 import shutil
 from scaling_utils import ResourceManager
 import importlib.util
+import time 
 
 def load_config(config_path):
     """
@@ -75,6 +76,8 @@ class TaskManager:
         self.queues = []
         self.connection = None
         self.resource_manager = ResourceManager(log_dir=log_dir)
+        # Initialize process-to-device map
+        self.process_to_device_map = {}
 
     def initialize_logger(self, log_dir):
         logger = logging.getLogger('main_logger')
@@ -290,12 +293,13 @@ class TaskManager:
             while True: 
                 sampler_queue = await self.sampler_channel.declare_queue("sampler_queue", passive=True)
                 consumer_count = sampler_queue.declaration_result.consumer_count
+                self.logger.info(f"consumer_count is {consumer_count} while config number of samples is {self.config.num_samplers} ")
 
                 # Check if there is a consumer attached
-                if consumer_count > 0 and checkpoint_file is None:
+                if consumer_count > self.config.num_samplers-1 and checkpoint_file is None:
                     await self.publish_initial_program_with_retry(amqp_url, initial_program_data)
                     break  # Exit the loop once the program is published
-                elif consumer_count > 0:
+                elif consumer_count > self.config.num_samplers-1:
                     await database.get_prompt()
                     self.logger.info(f"Loading from checkpoint: {checkpoint_file}")
                     break  # Exit the loop once the prompt is retrieved
@@ -348,9 +352,11 @@ class TaskManager:
             # Check if any single GPU has >= 32 GiB of memory free and < 50% utilization
             for gpu_id, (free_memory, utilization) in gpu_memory_info.items():
                 if free_memory > 30000 and utilization < 110: 
+                    self.logger.info(f"Found suitable GPU id: {gpu_id}")
                     suitable_gpu_id = gpu_id
                     break
                 elif utilization < 100:
+                    self.logger.debug(f"Adding to combined memory: GPU {gpu_id}: Free memory = {free_memory}, utilization = {utilization}")
                     combined_memory += free_memory
                     combined_gpus.append(gpu_id)
 
@@ -360,6 +366,7 @@ class TaskManager:
                 device = f"cuda:{container_index}"
                 # Adjust memory tracking (simplistic estimation)
                 gpu_memory_info[suitable_gpu_id] = (gpu_memory_info[suitable_gpu_id][0] - 32768, gpu_memory_info[suitable_gpu_id][1])
+                self.logger.info(f"Subtracting from assigned gpu: {gpu_memory_info[suitable_gpu_id]}")
             elif combined_memory >= 32768:  # If combined memory from multiple GPUs is >= 20 GiB
                 device = None  # Use None to indicate that multiple GPUs will be used
                 self.logger.info(f"Using combination of GPUs: {combined_gpus} with total memory: {combined_memory} MiB")
@@ -369,12 +376,20 @@ class TaskManager:
 
             self.logger.info(f"Assigning sampler {i} to device {device if device else 'combined GPUs (None)'}")
             try: 
+                #proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
+                #proc.start()
+                #self.logger.debug(f"Started Sampler Process {i} on {device} with PID: {proc.pid}")
+                #self.sampler_processes.append(proc)
+                #self.process_to_device_map[proc.pid] = device
                 proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
                 proc.start()
-                self.logger.debug(f"Started Sampler Process {i} on {device} with PID: {proc.pid}")
+                #proc.join()  # Wait for each sampler to finish initialization
                 self.sampler_processes.append(proc)
                 self.process_to_device_map[proc.pid] = device
-            except Exception as e: 
+                time.sleep(60)
+                self.logger.info(f"self.process_to_device_map is {self.process_to_device_map}")
+            except Exception as e:
+                self.logger.error(f"Could not start all processes because {e}") 
                 continue
 
         # Start initial evaluator processes

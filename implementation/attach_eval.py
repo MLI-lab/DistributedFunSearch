@@ -15,6 +15,8 @@ from scaling_utils import ResourceManager
 from yarl import URL
 import code_manipulation
 import importlib
+import socket
+
 
 def load_config(config_path):
     """
@@ -87,7 +89,7 @@ class TaskManager:
         try:
             connection = await aio_pika.connect_robust(
                 amqp_url,
-                timeout=300,
+                timeout=80,
             )
             channel = await connection.channel()
         except Exception as e:
@@ -134,10 +136,12 @@ class TaskManager:
                 self.logger.error(f"Scaling controller encountered an error: {e}")
             await asyncio.sleep(self.check_interval_eval)  # Non-blocking sleep
 
+
+
     async def main_task(self,  enable_scaling=True):
         amqp_url = URL(
             f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}'
-        ).update_query(heartbeat=480000)
+        ).update_query(heartbeat=480000)        
         pid = os.getpid()
         self.logger.info(f"Main_task is running in process with PID: {pid}.")
         try:
@@ -215,8 +219,7 @@ class TaskManager:
             try:
                 connection = await aio_pika.connect_robust(
                     amqp_url,
-                    timeout=300,
-                    client_properties={"connection_attempts": 1, "retry_delay": 0}
+                    timeout=80,
                 )
                 channel = await connection.channel()
                 evaluator_queue = await channel.declare_queue(

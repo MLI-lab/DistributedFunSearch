@@ -162,11 +162,13 @@ class ProgramsDatabase:
             for program in checkpoint_data["best_program_per_island"]
         ]
 
+
         self._best_scores_per_test_per_island = checkpoint_data["best_scores_per_test_per_island"]
         self._last_reset_time = checkpoint_data["last_reset_time"]
 
         # Restore islands
         for island_id, island_state in enumerate(checkpoint_data["islands_state"]):
+            logger.debug(f"Loading state fpr island id {island_id}")
             island = self._islands[island_id]
             self._load_island_state(island, island_state)
         logger.info("Checkpoint loaded successfully.")
@@ -186,6 +188,7 @@ class ProgramsDatabase:
                 for prog_dict in cluster_state['programs']
             ]
             island['clusters'][signature] = cluster_data
+
 
         island['version'] = island_state['version']
         island['num_programs'] = island_state['num_programs']
@@ -464,7 +467,9 @@ class ProgramsDatabase:
             logger.error(f"Error during island reset: {e}")
 
     async def get_prompt(self) -> None:
+        logger.debug(f"len(self._islands) {len(self._islands)}")
         island_id = np.random.randint(len(self._islands))
+        logger.debug(f"Island id is {island_id}")
         island = self._islands[island_id]
 
         code, version_generated = self._generate_prompt_for_island(island)
@@ -481,9 +486,14 @@ class ProgramsDatabase:
         except Exception as e:
             logger.error(f"Database: Error during prompt preparation or message sending: {e}")
 
-    def _generate_prompt_for_island(self, island) -> tuple[str, int]:
+    def _generate_prompt_for_island(self, island) -> tuple[Optional[str], int]:
         clusters = island['clusters']
         signatures = list(clusters.keys())
+        logger.debug(f"Island {island}. Cluster signitures are {list(clusters.keys())} ")
+        if not signatures:
+            logger.warning(f"No clusters found in island {island}. Skipping prompt generation.")
+            return None, 0
+
         cluster_scores = np.array([clusters[signature]['score'] for signature in signatures])
         period = self._config.cluster_sampling_temperature_period
         temperature = self._config.cluster_sampling_temperature_init * (1 - (island['num_programs'] % period) / period)
@@ -492,20 +502,29 @@ class ProgramsDatabase:
         while True:
             try:
                 probabilities = _softmax(cluster_scores, temperature)
+                logger.debug(f"probabilities are {probabilities}")
             except Exception as e:
                 logger.error(f"Cannot compute softmax: {e}")
-                return None, 0
+                break  # Fall back to uniform sampling below
 
             valid_indices = np.where(probabilities > threshold)[0]
             valid_probabilities = probabilities[valid_indices]
             valid_signatures = [signatures[i] for i in valid_indices]
 
             if len(valid_signatures) > 0:
-                break
+                break  # Proceed with valid probabilities and signatures
 
+            # Reduce temperature if no valid signatures are found
             temperature *= 0.9
             if temperature < 1e-6:
-                return None, 0
+                logger.warning("Temperature reduced below threshold. Falling back to uniform sampling.")
+                break
+
+        # Fallback: uniform sampling if no valid probabilities
+        if not valid_signatures:
+            logger.warning("Using uniform sampling as fallback.")
+            valid_signatures = signatures
+            valid_probabilities = np.ones(len(signatures)) / len(signatures)
 
         valid_probabilities /= valid_probabilities.sum()
         functions_per_prompt = min(len(valid_signatures), self._config.functions_per_prompt)

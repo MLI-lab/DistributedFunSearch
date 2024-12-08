@@ -128,6 +128,7 @@ class Sampler:
     """Node that samples program continuations and sends them for analysis."""
 
     def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, device):
+        print(f"In Sampler with device {device}")
         self.device=device
         self.connection = connection
         self.channel = channel
