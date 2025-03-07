@@ -8,7 +8,7 @@
 
 This repository provides a **distributed implementation of FunSearch** (Romera et al., 2024) using RabbitMQ for parallelization via asynchronous message passing. The code accompanies the paper *"LLM-Guided Search for Deletion-Correcting Codes"* and is designed for discovering large deletion-correcting codes for any code length and deletion correction capacity.
 
-FunSearch iteratively refines a **priority function** using **evolutionary search** guided by a pretrained **LLM** (default: **Starcoder2**, with support for **GPT-4o Mini via API**). 
+FunSearch iteratively refines a **priority function** using **evolutionary search** guided by a pretrained **LLM** (default: Starcoder2, with support for GPT-4o Mini via API). 
 
 In each iteration:
 - A few-shot prompt is constructed by sampling from the program database.
@@ -16,7 +16,7 @@ In each iteration:
 - The function is evaluated by greedily constructing deletion-correcting codes for various code lengths, with a fixed or variable number of deletions.
 - If the function is executable and unique, it is stored in the database.
 
-## Modifications for Other Applications
+#### Modifications for Other Applications
 FunSearch can be adapted to different applications with minimal changes:
 - **Input format & specification script:** Modify these to adjust the application-specific input format and evaluation logic.
 - **LLM model:** The sampler script allows modifying the `checkpoint` parameter to use any open-source LLM that can be loaded from Hugging Face via `transformers.AutoModelForCausalLM`.
