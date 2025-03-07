@@ -141,7 +141,7 @@ To launch the search, run:
 python funsearch.py --config-path experiments/experimentX/config.py 
 ```
 
-General settings, resource management, and termination criteria are specified via command-line arguments:
+General settings, resource management, and termination criteria are specified via **command-line arguments**:
 
 #### General Settings
 
