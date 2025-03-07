@@ -43,6 +43,23 @@ FunSearch can be run in different environments, with or without GPU/API-based LL
 - **Local Execution** – (Without Docker)
 - **SLURM with Enroot** – (For cluster-based execution)
 
+### **1. Clone the Repository**
+
+Clone the FunSearch repository and navigate into the project directory:
+
+```sh
+git clone https://github.com/your-username/funsearch.git
+cd Funsearch
+```
+
+### **2. Choose an Execution Method**
+
+FunSearch can be run in different environments, with or without GPU/API-based LLM inference:
+
+- **Docker Container** – (Recommended for reproducibility and isolation)
+- **Local Execution** – (Without Docker)
+- **SLURM with Enroot** – (For cluster-based execution)
+
 ### **3. Execution with Docker**
 
 FunSearch uses **Docker Compose (v3.8)** to run two containers:
@@ -58,7 +75,7 @@ docker-compose up --build -d
 ```
 
 #### **Docker Networking**
-Both containers run inside a Docker bridge network (`app-network`):
+Both containers run inside a **Docker bridge network** (`app-network`) for internal communication:
 
 - **Internal communication** – The main container connects to RabbitMQ via `rabbitmq:5672` (instead of `localhost`).
 - **External access** – RabbitMQ’s interface is available at:
@@ -66,7 +83,6 @@ Both containers run inside a Docker bridge network (`app-network`):
   http://localhost:15672
   ```
   You can modify `docker-compose.yml` to change ports.
-
 
 #### **3.1. Create and Activate a New Conda Environment (inside Docker)**
 
