@@ -1,8 +1,11 @@
 ## Distributed Implementation of FunSearch
 
-<div align="center" style="margin-bottom: 100px;">
+<div align="center">
   <img src="fig/funsearch_overview.png" alt="FunSearch Overview" width="600">
 </div>
+
+<p>&nbsp;</p>
+<p>&nbsp;</p>
 
 This repository provides a **distributed implementation of FunSearch** (Romera et al., 2024) using RabbitMQ for parallelization via asynchronous message passing. The code accompanies the paper *"LLM-Guided Search for Deletion-Correcting Codes"* and is designed for discovering large deletion-correcting codes for any code length and deletion correction capacity.
 
