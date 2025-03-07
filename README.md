@@ -40,7 +40,6 @@ FunSearch can be run in different environments, with or without GPU/API-based LL
 
 - **Docker Container** – (Containerized isolated execution)
 - **Local Execution** – (Without Docker)
-- **SLURM with Enroot** – (For cluster-based execution)
 ---
 
 ### **3. Execution with Docker**
@@ -74,7 +73,7 @@ conda create -n funsearch_env python=3.11 pip numpy==1.26.4 -y
 conda activate funsearch_env
 ```
 
-#### **3.2. Install PyTorch matching the Docker CUDA version (inside Docker)**
+#### **3.2. Install PyTorch matching the Docker CUDA version (inside Docker) *(_Can be skipped if using LLM inference over API_)***
 
 Install PyTorch (matching CUDA version `11.8` used by the `funsearch-main` container):
 
@@ -103,7 +102,7 @@ conda create -n funsearch_env python=3.11 pip numpy==1.26.4 -y
 conda activate funsearch_env
 ```
 
-#### **4.2. PyTorch Installation (Matching CUDA)**
+#### **4.2. PyTorch Installation (Matching CUDA)** *(_Can be skipped if using LLM inference over API_)*
 
 You can find the compatible PyTorch versions [here](https://pytorch.org/get-started/previous-versions/). Installation command for CUDA `11.8`:
 
