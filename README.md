@@ -20,28 +20,7 @@ In each iteration:
 FunSearch can be adapted to different applications with minimal changes:
 - **Input format & specification script:** Modify these to adjust the application-specific input format and evaluation logic.
 - **LLM model:** You can modify the `checkpoint` parameter in the sampler script to use any open-source LLM that can be loaded from Hugging Face via `transformers.AutoModelForCausalLM`.
----
-
-## **Installation & Setup**
-
-To set up and run **FunSearch**, follow the instructions based on your preferred execution method.
-
-### **1. Clone the Repository**
-
-Clone the FunSearch repository and navigate into the project directory:
-
-```sh
-git clone https://github.com/your-username/funsearch.git
-cd Funsearch
-```
-
-### **2. Choose an Execution Method**
-
-FunSearch can be run in different environments, with or without GPU/API-based LLM inference:
-
-- **Docker Container** – (Recommended for reproducibility and isolation)
-- **Local Execution** – (Without Docker)
-- **SLURM with Enroot** – (For cluster-based execution)
+___
 
 ### **1. Clone the Repository**
 
