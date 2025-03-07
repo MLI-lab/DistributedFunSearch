@@ -140,39 +140,35 @@ To launch the search, run:
 ```bash
 python funsearch.py --config-path experiments/experimentX/config.py 
 ```
-### Command-line Arguments
+
 General settings, resource management, and termination criteria are specified via command-line arguments:
 
 #### General Settings
 
-#### `--save_checkpoints_path /path/to/checkpoints`
+`--save_checkpoints_path /path/to/checkpoints`
 Specify where checkpoints should be saved (default: `Checkpoints/`). It is recommended to set this to `experiments/experimentX/Checkpoints`.
 
-#### `--checkpoint /path/to/checkpoint`
+`--checkpoint /path/to/checkpoint`
 Path to a checkpoint file from which the search should continue (default: `None`).
 
----
-
-### Resource Management
-#### `--no-dynamic-scaling`
+#### Resource Management
+`--no-dynamic-scaling`
 Disable dynamic scaling of evaluators and samplers based on message load (default: enabled).
 
-#### `--check_interval 120`
+`--check_interval 120`
 Interval in seconds for checking resource allocation (default: `120s`).
 
-#### `--max_evaluators 1000`  
-#### `--max_samplers 1000`
+`--max_evaluators 1000`  
+`--max_samplers 1000`
 Maximum number of evaluators and samplers that can be created dynamically. Defaults to large value for scaling based on resource utilization without hard limits.
 
----
-
-### Termination Criteria
-#### `--prompt_limit 400000`
+#### Termination Criteria
+`--prompt_limit 400000`
 Once this limit is reached, no new prompts will be published. Remaining messages in the queues will still be processed to ensure exactly `prompt_limit` functions are handled.
 
-#### `--optimal_solution_programs 20000`
+`--optimal_solution_programs 20000`
 Number of additional programs to generate after finding the first optimal solution.
 
-#### `--target_solutions '{"(6,1)": 8, "(7,1)": 14, "(8,1)": 25}'`
+`--target_solutions '{"(6,1)": 8, "(7,1)": 14, "(8,1)": 25}'`
 JSON dictionary specifying target solutions for `(n, s_value)`. If set, the experiment terminates early once a target solution is found.
 
