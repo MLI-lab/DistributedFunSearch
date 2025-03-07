@@ -56,7 +56,7 @@ You can navigate to the `.devcontainer` directory to start the containers:
 cd .devcontainer
 docker-compose up --build -d
 ```
-Both containers run inside a **Docker bridge network** (`app-network`) for internal communication:
+Both containers run inside a **Docker bridge network** (`app-network`). 
 
 - **Internal communication** – The main container connects to RabbitMQ via `rabbitmq:5672` (instead of `localhost`).
 - **External access** – RabbitMQ’s interface is available at:
@@ -105,7 +105,7 @@ conda activate funsearch_env
 
 #### **4.2. PyTorch Installation (Matching CUDA)**
 
-You can find the compatible PyTorch versions [here](https://pytorch.org/get-started/previous-versions/). For example installation command for CUDA `11.8`:
+You can find the compatible PyTorch versions [here](https://pytorch.org/get-started/previous-versions/). Installation command for CUDA `11.8`:
 
 ```sh
 conda install pytorch==2.2.2 pytorch-cuda=11.8 -c pytorch -c nvidia -y
@@ -139,7 +139,7 @@ You can start an evolutionary search experiment using configurations specified i
 To launch the search, run:
 ```bash
 python funsearch.py --config-path experiments/experimentX/config.py 
-
+```
 ### Command-line Arguments
 General settings, resource management, and termination criteria are specified via command-line arguments:
 
