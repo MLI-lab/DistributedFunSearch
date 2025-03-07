@@ -7,12 +7,12 @@ services:
       dockerfile: .devcontainer/external/.devcontainer/Dockerfile
       args:
         - DEBIAN_FRONTEND=noninteractive
-    container_name: "pytorchFW"
+    container_name: "funsearch-main"
     tty: true  # Allocate a pseudo-TTY
     privileged: true 
     volumes:
-      - /home/franziska/Funsearch/.ssh:/root/.ssh
-      - /home/franziska/:/franziska/
+      - ~/.ssh:/root/.ssh  # Maps SSH folder (works across different users)
+      - ../:/workspace/funsearch  # Mounts the project directory dynamically
       - /media/:/media/
       - /srv/:/srv/
     network_mode: "host"  # Use host network mode

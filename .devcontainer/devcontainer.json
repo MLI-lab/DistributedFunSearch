@@ -1,17 +1,17 @@
 {
-    "name": "pytorchFW",
-    "dockerComposeFile": "docker-compose.yml",
-    "service": "devcontainer",
-    "workspaceFolder": "/franziska/",
-    "overrideCommand": false, 
-    "forwardPorts": [3000],
-    "customizations": {
-      "vscode": {
-        "extensions": [
-          "eamodio.gitlens",
-          "ms-python.python",
-          "ms-toolsai.jupyter"
-        ]
-      }
+  "name": "/workspace/funsearch",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "funsearch-main",
+  "workspaceFolder": "/workspace/funsearch",
+  "overrideCommand": false, 
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "eamodio.gitlens",
+        "ms-python.python",
+        "ms-toolsai.jupyter"
+      ]
     }
   }
+}

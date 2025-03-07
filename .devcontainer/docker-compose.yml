@@ -1,18 +1,18 @@
 version: '3.8'
 
 services:
-  devcontainer:
+  funsearch-main:
     build:
-      context: .. # specify where Docker deamon should look for files during build process which is one level up from where the docker-compose.yml file is located i.e. .devcontainer folder
+      context: ..  # Use project root as build context
       dockerfile: .devcontainer/Dockerfile
       args:
         - DEBIAN_FRONTEND=noninteractive
-    container_name: "pytorchFW"
-    tty: true  # Allocate a pseudo interactive terminal session attached to the container
+    container_name: "funsearch-main"
+    tty: true
     privileged: false 
     volumes:
-      - /home/franziska/.ssh:/root/.ssh
-      - /home/franziska/Funsearch/:/franziska/
+      - ~/.ssh:/root/.ssh  # Maps SSH folder (works across different users)
+      - ../:/workspace/funsearch  # Mounts the project directory dynamically
       - /media/:/media/
       - /srv/:/srv/
     networks:
@@ -29,13 +29,13 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile.rabbitmq
-    container_name: "rabbitmqFW"
+    container_name: "rabbitmq"
     ports:
-      - "6061:5672" #for rabbitmq tunnel to forward between server (e.g. yosemite) to container port (right)
-      - "16061:15672" #for rabbitmq interface port
+      - "6061:5672"
+      - "16061:15672"
     volumes:
-      - /home/franziska/funsearch/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
-      - /home/franziska/funsearch/advanced.config:/etc/rabbitmq/advanced.config
+      - ../rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - ../rabbitmq/advanced.config:/etc/rabbitmq/advanced.config
     environment:
       - RABBITMQ_CONFIG_FILE=/etc/rabbitmq/rabbitmq.conf
       - RABBITMQ_ADVANCED_CONFIG_FILE=/etc/rabbitmq/advanced.config
