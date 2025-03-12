@@ -79,10 +79,10 @@ conda activate funsearch_env
 
 #### **3.2. Install PyTorch matching the Docker CUDA version (inside Docker) *(_Can be skipped if using LLM inference over API_)***
 
-Install PyTorch (matching CUDA version `11.8` used by the `funsearch-main` container):
+Install PyTorch (matching CUDA version `12.1` used by `funsearch-main` container):
 
 ```sh
-pip install torch==2.2.2 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
 #### **3.3. Install FunSearch package (inside Docker)**
