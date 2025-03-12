@@ -57,11 +57,15 @@ docker-compose up --build -d
 ```
 Both containers run inside a **Docker bridge network** (`app-network`). 
 
-- **Internal communication** – The main container connects to RabbitMQ via `rabbitmq:5672` (instead of `localhost`).
-- **External access** – RabbitMQ’s interface is available at:
+- **Internal communication** – The main container connects to RabbitMQ via `rabbitmq:5672` (instead of `localhost`). The host name in `/src/experiments/experimentX/config.py` is set by default to 
+```sh 
+host: "localhost"
+```
+- **External access** – RabbitMQ’s interface is is enabled by default in Docker and available at:
   ```
   http://localhost:15672
   ```
+  The RabbitMQ Management Interface provides a web-based dashboard for monitoring message load, processing rates, and system status across components. 
   You can modify `docker-compose.yml` to change ports.
 
 #### **3.1. Create and Activate a New Conda Environment (inside Docker)**
@@ -122,19 +126,51 @@ Finally, install FunSearch:
 pip install .
 ```
 
-#### **4.4. Start RabbitMQ Service**
+#### **4.4. Start RabbitMQ Service (root access required)**
 
-RabbitMQ must be started before running FunSearch. To start it manually:
-
-```sh
-rabbitmq-server -detached
-```
-
-You can check if RabbitMQ is running using the following command:
+RabbitMQ must be started before running FunSearch. If RabbitMQ is **not installed** yet, install it using:
 
 ```sh
-rabbitmqctl status
+sudo apt update && sudo apt install rabbitmq-server -y
 ```
+
+After installation, RabbitMQ **automatically starts as a system service**. To check its status:
+
+```sh
+sudo systemctl status rabbitmq-server
+```
+
+If RabbitMQ is already installed but not running, start it with:
+
+```sh
+sudo systemctl start rabbitmq-server
+```
+
+To connect FunSearch to RabbitMQ when running **without Docker**, set the RabbitMQ host in `/src/experiments/experimentX/config.py` to:
+
+```sh 
+host: "localhost"
+```
+
+### **Optional: Enable the Management Interface (Monitor Load and Processing Rates)**
+The RabbitMQ **Management Interface** provides a web-based dashboard for monitoring message load, processing rates, and system status across components. Enable it with:
+
+```sh
+sudo rabbitmq-plugins enable rabbitmq_management
+sudo systemctl restart rabbitmq-server
+```
+
+If running **locally**, you can now access the **Management Interface** at:
+
+- **Web UI:** [http://localhost:15672](http://localhost:15672)
+- **Login Credentials (default):** `guest / guest`
+
+
+If RabbitMQ is running on a remote server, you cannot access the Management UI directly. To forward these ports (default is 15672 for management) to your local machine, use an SSH tunnel:
+```sh
+ssh -J <jump-user>@<jump-server> -L 15672:localhost:15672 <username>@<remote-server> -N -f
+```
+
 ___
 ## **Usage**
 You can start an evolutionary search experiment using configurations specified in an experiment file, e.g., `experiments/experimentX/config.py`. The config file contains explanations for each argument.
