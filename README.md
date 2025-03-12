@@ -200,7 +200,7 @@ Path to a checkpoint file from which the search should continue (default: `None`
 Disable dynamic scaling of evaluators and samplers based on message load (default: enabled).
 
 `--check_interval 120`
-Interval in seconds for checking resource allocation (default: `120s`).
+Interval in seconds for checking resource allocation when dynamic scaling is enabled (default: `120s`).
 
 `--max_evaluators 1000`  
 `--max_samplers 1000`
