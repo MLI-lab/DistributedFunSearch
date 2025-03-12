@@ -196,22 +196,21 @@ Specify where checkpoints should be saved (default: `Checkpoints/`). It is recom
 Path to a checkpoint file from which the search should continue (default: `None`).
 
 #### Resource Management
-`--no-dynamic-scaling`
-Disable dynamic scaling of evaluators and samplers based on message load (default: enabled).
+`--no-dynamic-scaling`  
+Disables dynamic scaling of evaluators and samplers based on message load (default: enabled).
 
-`--check_interval 120`
-Interval in seconds for checking resource allocation when dynamic scaling is enabled (default: `120s`).
+`--check_interval 120`  
+Sets the interval (in seconds) for checking resource allocation when dynamic scaling is enabled (default: `120s`).
 
-`--max_evaluators 1000`  and `--max_samplers 1000`
-Maximum number of evaluators and samplers that can be created dynamically. Defaults to large value for scaling based on resource utilization without hard limits.
+`--max_evaluators 1000`  and `--max_samplers 1000`  
+Define the maximum number of evaluators and samplers that can be created dynamically. Defaults to a large value, allowing scaling based on resource utilization without hard limits.
 
 #### Termination Criteria
-`--prompt_limit 400000`
-Once this limit is reached, no new prompts will be published. Remaining messages in the queues will still be processed to ensure exactly `prompt_limit` functions are handled.
+`--prompt_limit 400000`  
+Sets the maximum number of prompts that can be published. If set, no new prompts will be published once this limit is reached. However, any remaining messages in the queues will still be processed to ensure exactly `prompt_limit` functions are handled.
 
-`--optimal_solution_programs 20000`
-Number of additional programs to generate after finding the first optimal solution.
+`--optimal_solution_programs 20000`  
+Defines the number of additional programs to generate after the first optimal solution is found. If set, execution continues until this number is reached.
 
-`--target_solutions '{"(6,1)": 8, "(7,1)": 14, "(8,1)": 25}'`
+`--target_solutions '{"(6,1)": 8, "(7,1)": 14, "(8,1)": 25}'`  
 JSON dictionary specifying target solutions for `(n, s_value)`. If set, the experiment terminates early once a target solution is found.
-
