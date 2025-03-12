@@ -58,7 +58,9 @@ docker-compose up --build -d
 Both containers run inside a **Docker bridge network** (`app-network`). 
 
 - **Internal communication** – The main container connects to RabbitMQ via `rabbitmq:5672` (instead of `localhost`). The hostname in `/src/experiments/experimentX/config.py` is set to match this configuration by default.
-- **External access** – RabbitMQ’s interface is is enabled by default in Docker and available at:
+- **External access** – The RabbitMQ **Management Interface** is a web-based dashboard that allows you to monitor message load, processing rates, and system status across components.  
+
+  This interface is enabled by default in Docker execution and is available at:
   ```
   http://localhost:15672
   ```
