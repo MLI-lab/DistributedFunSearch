@@ -60,9 +60,14 @@ Both containers run inside a **Docker bridge network** (`app-network`).
 - **Internal communication** – The main container connects to RabbitMQ via `rabbitmq:5672` (instead of `localhost`). The hostname in `/src/experiments/experimentX/config.py` is set to match this configuration by default.
 - **External access** – The RabbitMQ Management Interface is a web-based dashboard that allows you to monitor message load, processing rates, and system status across components.  
 
-  This interface is enabled by default in Docker execution and is available at:
-  ```
-  http://localhost:15672
+  The interface is enabled by default in Docker execution and is available at:
+  - **Web UI:** [http://localhost:15672](http://localhost:15672)
+  - **Login Credentials (default):** `guest / guest`
+
+  If running on a remote server, the Management UI is not directly accessible from your local machine. To access it on your local machine, forward port 15672 (default for management) using an SSH tunnel.  
+  Run the following command on your local machine:  
+  ```sh
+  ssh -J <jump-user>@<jump-server> -L 15672:localhost:15672 <username>@<remote-server> -N -f
   ```
 
 You can modify `docker-compose.yml` to change ports.
@@ -157,7 +162,8 @@ If running **locally**, you can now access the **Management Interface** at:
 - **Login Credentials (default):** `guest / guest`
 
 
-If RabbitMQ is running on a remote server, you cannot access the Management UI directly. To forward these ports (default is 15672 for management) to your local machine, use an SSH tunnel:
+If running on a remote server, the Management UI is not directly accessible from your local machine. To access it on your local machine, forward port 15672 (default for management) using an SSH tunnel.  
+Run the following command on your local machine:
 ```sh
 ssh -J <jump-user>@<jump-server> -L 15672:localhost:15672 <username>@<remote-server> -N -f
 ```
