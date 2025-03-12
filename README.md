@@ -143,7 +143,7 @@ To connect FunSearch to RabbitMQ when running **without Docker**, set the Rabbit
 host: "localhost"
 ```
 
-### **Optional: Enable the Management Interface (Monitor Load and Processing Rates)**
+##### **Optional: Enable the Management Interface (Monitor Load and Processing Rates)**
 The RabbitMQ **Management Interface** provides a web-based dashboard for monitoring message load, processing rates, and system status across components. Enable it with:
 
 ```sh
