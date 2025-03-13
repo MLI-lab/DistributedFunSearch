@@ -191,7 +191,7 @@ This launches a search using the configurations specified in the directory's `co
 ## **Command-Line Arguments**
 You can specify **general settings, resource management, and termination criteria** via command-line arguments:
 
-### **General Settings**
+#### **General Settings**
 - `--config-path /path/to/config`  
   - Path to the configuration file.  
   - Default: `config.py` (inside the directory where the script is run).
@@ -208,7 +208,7 @@ You can specify **general settings, resource management, and termination criteri
   - Directory where logs will be stored.  
   - Default: `logs/` (inside the directory where the script is run).
 
-### **Resource Management**
+#### **Resource Management**
 - `--no-dynamic-scaling`  
   - Disables dynamic scaling of evaluators and samplers based on message load.  
   - Default: enabled.
@@ -221,7 +221,7 @@ You can specify **general settings, resource management, and termination criteri
   - Define the maximum number of evaluators and samplers that can be created dynamically.  
   - Default: a large value, allowing scaling based on resource utilization without hard limits.
 
-### **Termination Criteria**
+#### **Termination Criteria**
 - `--prompt_limit 400000`  
   - Sets the maximum number of prompts that can be published.  
   - If set, no new prompts will be published once this limit is reached. However, any remaining messages in the queues will still be processed to ensure exactly `prompt_limit` functions are handled.
@@ -235,7 +235,7 @@ You can specify **general settings, resource management, and termination criteri
   - If set, the experiment terminates early once a target solution is found.
 
 ---
-### **Running Multiple Experiments in Parallel**
+## **Running Multiple Experiments in Parallel**
 If you want to run multiple experiments in parallel, you must **assign different RabbitMQ ports**.  
 Update both the **TCP listener port** and the **management interface port** in `rabbitmq.conf`.  
 Then, update the corresponding ports in your experiment config file (`config.py`) to match the new RabbitMQ settings.
