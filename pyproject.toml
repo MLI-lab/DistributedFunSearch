@@ -17,8 +17,14 @@ dependencies = [
   "psutil",
   "GPUtil",
   "memory-profiler",
-  "cloudpickle"
+  "cloudpickle",
+  "pynvml",  
+  "accelerate",
+  "lmdb"
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+funsearch = "funsearch.funsearch:main"

@@ -28,11 +28,11 @@ class RabbitMQConfig:
       username: Username for authentication with the RabbitMQ server.
       password: Password for authentication with the RabbitMQ server.
     """
-    host: str = 'mcml-hgx-h100-003.ai.lrz.de' # change to localhost if run from other server than yosemite where rabbitmq container is located 
-    port: int = 5700 # to connect on port 5672 need to have tunnel on server script is running to conenct to yosemite ssh -L 5672:localhost:6061 -J ge74met@login01.msv.ei.tum.de:3022 franziska@yosemite.msv.ei.tum.de
-    username: str = 'guest' # 'myuser' for lrz
-    password: str = 'guest' # 'mypassword' for lrz
-    vhost = "temp_1" # for lrz use vhost
+    host: str = 'localhost'
+    port: int = 5672 
+    username: str = 'guest' 
+    password: str = 'guest' 
+    vhost = "temp_1"
     
 
 @dataclasses.dataclass(frozen=True)
@@ -53,8 +53,8 @@ class ProgramsDatabaseConfig:
   num_islands: int = 10
   reset_period: int = None
   reset_programs: int= 1200
-  cluster_sampling_temperature_init: float = 0.1 # changed from 0.1 to 1
-  cluster_sampling_temperature_period: int = 30_000 # after 30_000 reset 
+  cluster_sampling_temperature_init: float = 0.1 
+  cluster_sampling_temperature_period: int = 30_000 
   prompts_per_batch= 10
   no_deduplication: bool = False
 
@@ -80,7 +80,7 @@ class SamplerConfig:
   max_new_tokens: int = 246
   top_p: float =  0.7777777777777778 
   repetition_penalty: float = 1.222222
-  gpt: bool = False   
+  gpt: bool = True   
   
 
 
@@ -98,14 +98,14 @@ class EvaluatorConfig:
         include_nx: Include the nx package in the prompt (default: True, set False to disable).
         spec_path: Path to the specification file used in the experiment.
     """
-    s_values: List[int] = dataclasses.field(default_factory=lambda: [1])
-    start_n: List[int] = dataclasses.field(default_factory=lambda: [6])
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [11])
+    s_values: List[int] = dataclasses.field(default_factory=lambda: [1,2])
+    start_n: List[int] = dataclasses.field(default_factory=lambda: [9,10])
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [11,12])
     mode: str = "last"  
-    timeout: int = 900 # 15 min
+    timeout: int = 30 # 15 min
     eval_code: bool = False
     include_nx: bool = True 
-    spec_path: str = "/Funsearch/implementation/specifications/baseline.txt"
+    spec_path: str = "/home/franziska/Funsearch/src/funsearch/specifications/gpt/load_graph/baseline.txt"
 
 
 @dataclasses.dataclass 
@@ -125,8 +125,8 @@ class Config:
   rabbitmq: RabbitMQConfig = dataclasses.field(default_factory=RabbitMQConfig)
   sampler: SamplerConfig = dataclasses.field(default_factory=SamplerConfig) 
   evaluator: EvaluatorConfig = dataclasses.field(default_factory=EvaluatorConfig) 
-  num_samplers: int = 1
-  num_evaluators: int = 10
+  num_samplers: int = 4
+  num_evaluators: int = 40
   num_pdb: int = 1
 
 
