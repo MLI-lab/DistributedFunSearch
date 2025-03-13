@@ -28,3 +28,6 @@ analysis/FilterBest/best_programs.py
 
 # Ignore private SSH configurations (if applicable)
 .ssh/
+
+#Ignore package related 
+funsearch.egg-info/
