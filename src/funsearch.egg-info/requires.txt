@@ -1,0 +1,12 @@
+numpy
+scipy
+transformers
+openai
+aio-pika
+yarl
+psutil
+GPUtil
+memory-profiler
+cloudpickle
+pynvml
+accelerate

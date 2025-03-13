@@ -30,4 +30,6 @@ analysis/FilterBest/best_programs.py
 .ssh/
 
 #Ignore package related 
-funsearch.egg-info/
+/home/franziska/Funsearch/src/funsearch.egg-info
+
+src/experiments/experiment1/sandbox/

@@ -1,0 +1,17 @@
+Metadata-Version: 2.2
+Name: funsearch
+Version: 0.1.0
+Summary: FunSearch package
+Requires-Python: >=3.11
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: transformers
+Requires-Dist: openai
+Requires-Dist: aio-pika
+Requires-Dist: yarl
+Requires-Dist: psutil
+Requires-Dist: GPUtil
+Requires-Dist: memory-profiler
+Requires-Dist: cloudpickle
+Requires-Dist: pynvml
+Requires-Dist: accelerate
