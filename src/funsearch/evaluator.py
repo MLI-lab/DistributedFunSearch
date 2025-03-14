@@ -263,7 +263,6 @@ class Evaluator:
                 input = tasks[future]
                 try:
                     test_output, runs_ok, cpu_time,  call_data_folder, input_path, error_file= future.result(timeout=self.timeout_seconds)
-                    logger.debug(f"Evaluator: test_output is {test_output}, runs_ok is {runs_ok} and call_data_folder {call_data_folder} and error file {error_file}")
                     call_folders_to_cleanup.append(call_data_folder)
                     call_files_to_cleanup.append(input_path)
                     call_files_to_cleanup.append(error_file)

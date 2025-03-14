@@ -31,17 +31,16 @@ ScoresPerTest = Mapping[Any, float]
 
 
 def _softmax(logits: np.ndarray, temperature: float) -> np.ndarray:
-    """Returns the tempered softmax of 1D finite `logits` representing the cluster scores."""
-    if not np.all(np.isfinite(logits)):
-        non_finites = set(logits[~np.isfinite(logits)])
-        raise ValueError(f'`logits` contains non-finite value(s): {non_finites}')
-    if not np.issubdtype(logits.dtype, np.floating):
-        logits = np.array(logits, dtype=np.float32)
-    result = scipy.special.softmax(logits / temperature, axis=-1)
-    # Adjust the maximum probability to ensure the sum is exactly 1
-    index = np.argmax(result)
-    result[index] = 1 - np.sum(result[:index]) - np.sum(result[index+1:])
-    return result
+    logits = np.array(logits, dtype=np.float32)
+    # Subtract the maximum for numerical stability
+    shifted_logits = logits - np.max(logits)
+    exp_logits = np.exp(shifted_logits / temperature)
+    probs = exp_logits / np.sum(exp_logits)
+    total = probs.sum()
+    if not np.isclose(total, 1.0, atol=1e-6):
+        probs = probs / total
+    return probs
+
 
 
 def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1]) -> float:

@@ -63,19 +63,18 @@ def hash_priority_mapping(priorities, sequences):
     return hashlib.sha256(mapping_str.encode()).hexdigest()
 
 
-def evaluate(params):
+def evaluate(params, graph_dir):
     n, s = params
-    independent_set, hash_value = solve(n, s)
+    independent_set, hash_value = solve(n, s, graph_dir)
     return (len(independent_set), hash_value)
 
 
-def solve(n, s):
+def solve(n, s, graph_dir):
     """ Find a large independent set in a loaded graph while avoiding unnecessary copies. """
-    base_graph_path = "/mnt/hdd_pool_zion/users/franziska/Checkpoints/Graphs/"
-    path = f"{base_graph_path}graph_{n}.lmdb"
+    path = os.path.join(graph_dir, f"graph_s{s}_n{n}.lmdb")
 
     G = load_graph(path)  # Load the graph directly, no copying
-    G_for_priority = ReadOnlyGraph(G)  # Pass read-only wrapper to priority function
+    G_for_priority = G.copy()  
 
     sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]
     priorities = {node: priority(node, G_for_priority, n, s) for node in G.nodes}

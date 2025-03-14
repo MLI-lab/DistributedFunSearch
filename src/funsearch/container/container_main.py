@@ -3,6 +3,11 @@ import pickle
 import sys
 import traceback
 import time
+import os
+
+# Dynamically locate `src/graphs`
+SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))  # Move up two levels
+GRAPH_DIR = os.path.join(SRC_DIR, "graphs")
 
 def main(prog_file: str, input_file: str, output_file: str):
     """Executes a deserialized function with input and writes output to file."""
@@ -15,9 +20,9 @@ def main(prog_file: str, input_file: str, output_file: str):
         with open(input_file, "rb") as input_f:
             input_data = pickle.load(input_f)
 
-        # Measure the CPU time of the function
+        # Inject `GRAPH_DIR` into the function call
         start_cpu_time = time.process_time()
-        ret = func(input_data)  # Execute the deserialized function
+        ret = func(input_data, GRAPH_DIR)  # ← Pass GRAPH_DIR
         end_cpu_time = time.process_time()
 
         execution_time = end_cpu_time - start_cpu_time
@@ -27,8 +32,6 @@ def main(prog_file: str, input_file: str, output_file: str):
             pickle.dump({"result": ret, "cpu_time": execution_time}, of)
 
     except Exception as e:
-        error_traceback = traceback.format_exc()
-        
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)  # Exit with error code 1 to indicate failure
 

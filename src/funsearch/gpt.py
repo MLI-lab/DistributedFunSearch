@@ -119,8 +119,11 @@ class Sampler:
         self.evaluator_queue = evaluator_queue
         self.config = config
         self._llm = LLM_model(samples_per_prompt=self.config.samples_per_prompt)
+        self.prefetch_count = 10
 
     async def consume_and_process(self):
+        await self.channel.set_qos(prefetch_count=self.prefetch_count) # Limit prefetched messages
+
         async with self.sampler_queue.iterator() as stream:
             async for message in stream:
                 async with message.process():
