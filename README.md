@@ -36,10 +36,12 @@ cd Funsearch
 
 ### **2. Choose an Execution Method**
 
-FunSearch can be run in different environments, with or without GPU/API-based LLM inference:
+FunSearch is designed for **Linux** and tested on Ubuntu.  
+You can execute it in different environments, with or without GPU/API-based LLM inference:
 
 - **Docker Container** – (Containerized isolated execution)
 - **Local Execution** – (Without Docker)
+- **With Slurm and Enroot** – (Cluster-based execution)
 ---
 
 ### **3. Execution with Docker**
@@ -127,7 +129,7 @@ conda install pytorch==2.2.2 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 RabbitMQ must be started before running FunSearch. If RabbitMQ is **not installed** yet, install it using:
 
 ```sh
-sudo apt update && sudo apt install rabbitmq-server -y
+sudo apt update && sudo apt install -y rabbitmq-server
 ```
 
 After installation, RabbitMQ **automatically starts as a system service**. To check its status:
@@ -176,8 +178,52 @@ Finally, install FunSearch:
  pip install . 
 ```
 
+### **5. Execution with Slurm and Enroot**
+
+To run FunSearch on a Slurm cluster using Enroot containers, follow these steps:
+
+#### **5.1. Pull a PyTorch Enroot Image**  
+
+Download and convert a PyTorch image with the required CUDA version into an Enroot image.  
+For example, to install PyTorch 2.2.2 with CUDA 12.1:  
+
+```sh
+enroot import -o /desired/path/custom_name.sqsh docker://pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime
+```
+
+#### **5.2. Install RabbitMQ Inside the Enroot Image**  
+
+Start the image with root privileges to install RabbitMQ, curl, and OpenSSH client:  
+```sh
+enroot create -n custom_name desired/path/custom_name.sqsh
+enroot start --root --rw custom_name
+apt update && apt install -y rabbitmq-server curl openssh-client
+rabbitmq-plugins enable rabbitmq_management
+```
+
+Exit the Enroot container and save the changes in a new image `custom_name_with_rabbitmq` (after saving, you can delete the original `custom_name` image):
+```sh
+exit  
+enroot export -o /dss/dsshome1/02/di38yur/Funsearch/custom_name_with_rabbitmq.sqsh custom_name
+```
+
+#### **5.2. Submit SLURM Job**  
+
+Using the previously created Enroot image, you can submit your SLURM job with a job script (`.sh`).  
+An example script, `/Funsearch/src/experiments/experiment1/exp1.sh`, supports multi-node execution and sets up an SSH reverse tunnel for local access to the RabbitMQ management interface.  
+
+Submit the job with:  
+
+```sh
+sbatch /Funsearch/src/experiments/experiment1/exp1.sh
+```
+This starts an evolutionary search experiment as explained in the Usage section.
+
+
+
 ___
 ## **Usage**
+
 To start an evolutionary search experiment, navigate to your experiment directory (e.g., `experiments/experimentX/`) and run:
 
 ```bash
@@ -186,6 +232,20 @@ python -m funsearch
 
 This launches a search using the configurations specified in the directory's `config.py` file, which contains explanations for each argument.
 
+**Note:** When canceling an experiment, check the management interface if all sampler and evaluator processes are shut down before you start a new experiemnts to avoid interferencee from previous experiment .
+
+
+**(Optional) Preloading the Model**
+
+Before running the evolutionary search, you can download the model from Hugging Face and store it in a cache location by executing:
+
+```bash
+python load_llm.py
+```
+
+By default, the model will be stored in the `models/` directory inside your current working directory.
+
+**Note:** When canceling an experiment, check the management interface to ensure that all sampler and evaluator processes are shut down before starting a new experiment to avoid interference from the previous one.
 ---
 
 ## **Command-Line Arguments**
@@ -237,12 +297,67 @@ You can specify **general settings, resource management, and termination criteri
 - `--target_solutions '{"(6,1)": 8, "(7,1)": 14, "(8,1)": 25}'`  
   - JSON dictionary specifying target solutions for `(n, s_value)`.  
   - If set, the experiment terminates early once a target solution is found.
+___
+## **Scaling FunSearch Across Multiple Nodes**
 
----
+Our implementation supports distributed execution by attaching **evaluator** and **sampler** processes to a running script for:
+
+- **Multi-node execution** to increase the rate at which new priority functions are processed (generated, evaluated, and stored).
+- **Dynamic scaling** to balance message load at runtime.
+
+### **Attaching Additional Processes**
+
+To attach more evaluators and samplers:
+
+```sh
+python -m funsearch.attach_evaluators
+python -m funsearch.attach_samplers
+```
+
+The attach scripts use the same **command-line arguments** as the main script and can be run in the same execution modes described in the **Installation & Setup** section, with the exception that **RabbitMQ should not be restarted** when attaching additional processes.
+
+#### **Local Execution**
+
+- You can follow the **Execution Without Docker** steps, skipping the RabbitMQ startup and running the attach scripts instead.
+
+#### **Docker Execution**
+
+- You can start only the `funsearch-main` container (without launching a new RabbitMQ instance) by running:
+  ```sh
+  cd .devcontainer/external/.devcontainer  
+  docker-compose up  
+  ```
+  This starts a `funsearch-main` container on the new node for running the attach scripts.
+
+#### **SLURM & Enroot Execution**
+
+- For an example of multi-node SLURM execution, see:
+  ```sh
+  /Funsearch/src/experiments/experiment1/exp1.sh
+  ```
+
+### **Configuring RabbitMQ for Multi-Node Execution**
+
+To attach processes from a different node, the new node must be able to connect to the main node running RabbitMQ.
+
+If the nodes can resolve each other’s IP addresses:
+
+- You can set `host` in `config.py` to the **IP address of the main node** (where RabbitMQ runs).
+
+If the nodes **cannot** resolve each other’s IP addresses:
+
+- On the additional node, you can establish an SSH tunnel to forward RabbitMQ’s TCP listener port (default: 5672):
+
+  ```sh
+  ssh -J <jump-user>@<jump-server> -L 5672:localhost:5672 <username>@<remote-server> -N -f
+  ```
+
+- You can then set `host: 'localhost'` on the additional node.
+
 ## **Running Multiple Experiments in Parallel With SLURM**
-If you want to run multiple experiments in parallel, you must **assign different RabbitMQ ports**.  
-Update both the **TCP listener port** and the **management interface port** in `rabbitmq.conf`.  
+If you want to run multiple experiments in parallel, you need to **assign different RabbitMQ ports**.  
+You can update both the **TCP listener port** and the **management interface port** in `rabbitmq.conf`.  
 Then, update the corresponding ports in your experiment config file (`config.py`) to match the new RabbitMQ settings.
 
 
-**When canceling an experiment, wait a few seconds for the sampler and evaluator processes to shut down gracefully. Their cancellation status will be logged. Alternatively, you can manually delete the queues via the management interface to prevent interference with future experiments.**
+
