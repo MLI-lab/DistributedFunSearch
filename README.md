@@ -232,7 +232,8 @@ python -m funsearch
 
 This launches a search using the configurations specified in the directory's `config.py` file, which contains explanations for each argument.
 
-**Note:** When canceling an experiment, check the management interface if all sampler and evaluator processes are shut down before you start a new experiemnts to avoid interferencee from previous experiment .
+**Note:** If stopping an experiment, check RabbitMQ to ensure all evaluator and sampler processes are shut down before starting a new one.
+
 
 
 **(Optional) Preloading the Model**
@@ -244,8 +245,6 @@ python load_llm.py
 ```
 
 By default, the model will be stored in the `models/` directory inside your current working directory.
-
-Note: If stopping an experiment, check RabbitMQ to ensure all evaluator and sampler processes are shut down before starting a new one.
 
 ---
 
