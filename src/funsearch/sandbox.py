@@ -82,7 +82,7 @@ class ExternalProcessSandbox(DummySandbox):
 
         try:
             # Run the command with a timeout
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=self.timeout_secs)
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=self.timeout_secs, cwd=os.getcwd())
             # Write any stderr output to error_file
             if result.returncode != 0:
                 error_message = result.stderr.decode('utf-8') if result.stderr else "Unknown error"            

@@ -66,10 +66,21 @@ class TaskManager:
         return logger
 
     async def main_task(self, enable_scaling=True):
-        amqp_url = URL(
-            f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}'
-            f'@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}'
-        ).update_query(heartbeat=480000)
+        try: 
+            amqp_url = URL(
+                f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' #{self.config.rabbitmq.vhost}
+            ).update_query(heartbeat=480000)
+            connection = await aio_pika.connect_robust(amqp_url)
+        except Exception as e:
+            try:
+                self.logger.info(f"No vhost configured, connecting without. Error message: {e}")
+                amqp_url = URL(
+                    f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/' #{self.config.rabbitmq.vhost}
+                ).update_query(heartbeat=480000)
+                connection = await aio_pika.connect_robust(amqp_url)
+            except Exception as e: 
+                self.logger.info("Cannot connect to rabbitmq. Change config file.")
+
         resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
         self.tasks = [resource_logging_task]
 
@@ -133,7 +144,7 @@ class TaskManager:
             self.evaluator_processes.append(proc)
 
     def evaluator_process(self, template, inputs, amqp_url):
-        import evaluator  # Import evaluator module dynamically
+        from funsearch import evaluator  # Import evaluator module dynamically
         local_id = mp.current_process().pid  # Use process ID as local identifier
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -239,12 +250,26 @@ if __name__ == "__main__":
         help="Path to the configuration file (Python script containing the experiment config). Defaults to './config.py'.",
     )
 
+    parser.add_argument(
+        "--sandbox_base_path",
+        type=str,
+        default=os.path.join(os.getcwd(), "sandbox"),
+        help="Path to the sandbox directory. Defaults to './sandbox'.",
+    )
+
 ########################################## Resources related arguments #############################################
 
     parser.add_argument(
         "--no-dynamic-scaling",
         action="store_true",
         help="Disable dynamic scaling of evaluators (enabled by default)."
+    )
+
+    parser.add_argument(
+        "--check_interval",
+        type=int,
+        default=120,
+        help="Time interval (in seconds) between consecutive scaling checks for evaluators and samplers. Defaults to 120s (2 minutes)."
     )
 
     parser.add_argument(

@@ -16,6 +16,8 @@
 """Configuration of a FunSearch experiment. Only data classes no methods"""
 import dataclasses
 from typing import List
+import os
+
 
 
 @dataclasses.dataclass(frozen=True)
@@ -28,7 +30,7 @@ class RabbitMQConfig:
       username: Username for authentication with the RabbitMQ server.
       password: Password for authentication with the RabbitMQ server.
     """
-    host: str = 'localhost'
+    host: str = 'rabbitmq'
     port: int = 5672 
     username: str = 'guest' 
     password: str = 'guest' 
@@ -75,13 +77,24 @@ class SamplerConfig:
   """
   prompts_per_batch= 10
   samples_per_prompt: int = 2
-  temperature_period= 5_000
+  temperature_period= None
   temperature: float = 0.9444444444444444
   max_new_tokens: int = 246
   top_p: float =  0.7777777777777778 
   repetition_penalty: float = 1.222222
-  gpt: bool = True   
+  gpt: bool = False   
   
+def get_spec_path() -> str:
+    # Get the absolute directory of this file
+    base_dir = os.path.abspath(os.path.dirname(__file__))
+    # Look for the substring "Funsearch" in the path
+    idx = base_dir.find("Funsearch")
+    if idx != -1:
+        funsearch_base = base_dir[: idx + len("Funsearch")]
+    else:
+        funsearch_base = base_dir
+    # Build the path relative to the Funsearch folder
+    return os.path.join(funsearch_base, "src", "funsearch", "specifications", "StarCoder2", "load_graph", "baseline.txt")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,14 +111,14 @@ class EvaluatorConfig:
         include_nx: Include the nx package in the prompt (default: True, set False to disable).
         spec_path: Path to the specification file used in the experiment.
     """
-    s_values: List[int] = dataclasses.field(default_factory=lambda: [1,2])
-    start_n: List[int] = dataclasses.field(default_factory=lambda: [9,10])
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [11,12])
+    s_values: List[int] = dataclasses.field(default_factory=lambda: [2])
+    start_n: List[int] = dataclasses.field(default_factory=lambda: [7])
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [12])
     mode: str = "last"  
-    timeout: int = 30 # 15 min
+    timeout: int = 30 
     eval_code: bool = False
     include_nx: bool = True 
-    spec_path: str = "/home/franziska/Funsearch/src/funsearch/specifications/gpt/load_graph/baseline.txt"
+    spec_path: str = dataclasses.field(default_factory=get_spec_path)
 
 
 @dataclasses.dataclass 

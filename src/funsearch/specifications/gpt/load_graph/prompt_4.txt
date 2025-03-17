@@ -2,9 +2,14 @@
 Finds large independent set in graph G where nodes are binary strings of length n.
 Nodes in G are connected if they share a subsequence of length at least n-s. 
 
-Improve the `priority_v2` function over its previous versions below.
-Keep the code short and comment for easy understanding.
+Improve the priority_v5 function over its previous versions. 
+Consider properties of the binary string `node`, such as specific patterns, the number of ones/zeros, or other unique features, to calculate the priority.
+
+Return only the body of the function as valid Python code, without the function header, markdown, formatting, comments, or explanations. 
+Do not include any code block markers such as ```python or ```. 
+Keep the code short.
 """
+
 import itertools
 import hashlib
 import numpy as np

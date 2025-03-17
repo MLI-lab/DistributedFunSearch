@@ -166,7 +166,6 @@ class TaskManager:
 
     async def main_task(self, save_checkpoints_path, enable_scaling=True, checkpoint_file=None):
         try: 
-            self.logger.info()
             amqp_url = URL(
                 f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' #{self.config.rabbitmq.vhost}
             ).update_query(heartbeat=480000)

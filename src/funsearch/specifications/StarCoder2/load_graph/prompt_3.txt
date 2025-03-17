@@ -5,6 +5,7 @@ Nodes in G are connected if they share a subsequence of length at least n-s.
 Improve the `priority_v2` function over its previous versions below.
 Keep the code short and comment for easy understanding.
 """
+
 import itertools
 import hashlib
 import numpy as np
@@ -50,10 +51,9 @@ def solve(n, s, graph_dir):
     path = os.path.join(graph_dir, f"graph_s{s}_n{n}.lmdb")
 
     G = load_graph(path)  # Load the graph directly, no copying
-    G_for_priority = G.copy()  
 
     sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]
-    priorities = {node: priority(node, G_for_priority, n, s) for node in G.nodes}
+    priorities = {node: priority(node, n, s) for node in G.nodes}
 
     # Sort nodes first by priority (higher is better), then by lexicographic order (ascending)
     nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))
@@ -74,6 +74,6 @@ def solve(n, s, graph_dir):
     return independent_set, hash_value
 
 
-def priority(node, G, n, s):
+def priority(node, n, s):
     """ Returns the priority with which we want to add `node` to the independent set. """
     return 0.0  

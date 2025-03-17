@@ -4,9 +4,14 @@ import sys
 import traceback
 import time
 import os
+import pathlib
 
-# Dynamically locate `src/graphs`
-SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))  # Move up two levels
+
+# Use the current working directory
+CWD = os.path.abspath(os.getcwd())
+
+# Adjust as needed—for instance, if your project root is one level up from where you run the script:
+SRC_DIR = os.path.abspath(os.path.join(CWD, "..", ".."))
 GRAPH_DIR = os.path.join(SRC_DIR, "graphs")
 
 def main(prog_file: str, input_file: str, output_file: str):

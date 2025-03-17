@@ -370,7 +370,7 @@ class ProgramsDatabase:
             logger.error(f"Error initializing the database consume_and_process: {e}")
 
 
-    @async_time_execution
+    #@async_time_execution
     async def process_batch(self, batch: List[aio_pika.IncomingMessage]):
         try:
             tasks = [self.process_message(message) for message in batch]

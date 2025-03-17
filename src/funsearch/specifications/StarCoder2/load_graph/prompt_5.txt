@@ -1,10 +1,21 @@
 """
-Finds large independent set in graph G where nodes are binary strings of length n.
-Nodes in G are connected if they share a subsequence of length at least n-s. 
+Finds a large independent set in graph G where nodes are binary strings of length n.
+Nodes in G are connected if they share a subsequence of length at least n - s, where s = 1.
 
-Improve the `priority_v2` function over its previous versions below.
-Keep the code short and comment for easy understanding.
+The `priority` function assigns a priority to each node indicating its importance for inclusion in the independent set.
+
+Desired properties of the `priority` function:
+- **Efficiency**: The function should be computationally efficient.
+- **Avoid Redundant Computations**: Do not perform unnecessary calculations or repeat work.
+- **Clarity**: The code should be easy to understand, with appropriate comments.
+- **Innovation**: Explore different strategies for calculating the priority. Consider specific characteristics of the binary strings, such as:
+    - Patterns in the binary string.
+    - The number of ones or zeros (Hamming weight).
+    - Distribution of bits (e.g., runs of ones or zeros).
+
+Improve the `priority_v1` function over its previous versions below.
 """
+
 import itertools
 import hashlib
 import numpy as np
@@ -12,7 +23,6 @@ import networkx as nx
 import lmdb
 import json
 import os
-
 
 def load_graph(graph_db_path):
     """ Load the graph from an LMDB database. """

@@ -14,30 +14,6 @@ import numpy as np
 import networkx as nx
 import json
 
-class ReadOnlyGraph:
-    """ Read-only wrapper around a NetworkX graph to prevent modifications in priority function. """
-    def __init__(self, G):
-        self._G = G  # Store reference to the original graph
-
-    def __contains__(self, node):
-        return node in self._G
-
-    def neighbors(self, node):
-        return self._G.neighbors(node)
-
-    def degree(self, node):
-        return self._G.degree(node)
-
-    def __getitem__(self, node):
-        return self._G[node]  # Allows adjacency lookup but prevents modification
-
-    @property
-    def nodes(self):
-        return self._G.nodes
-
-    @property
-    def edges(self):
-        return self._G.edges
 
 def generate_graph(n, s):
     G = nx.Graph()
@@ -88,7 +64,7 @@ def evaluate(params):
 
 def solve(n, s):
     G_original = generate_graph(n, s)
-    G_for_priority = ReadOnlyGraph(G)  # Pass read-only wrapper to priority function   
+    G_for_priority = G_original.copy() # Pass read-only wrapper to priority function   
     sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]
     priorities = {node: priority(node, G_for_priority, n, s) for node in G_original.nodes}
     nodes_sorted = sorted(G_original.nodes, key=lambda x: (-priorities[x], x))

@@ -69,10 +69,20 @@ class TaskManager:
         Main async entry point. Establishes queue connections, starts initial processes,
         and optionally starts a scaling loop from ResourceManager.
         """
-        amqp_url = URL(
-            f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}'
-            f'@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}'
-        ).update_query(heartbeat=480000)
+        try: 
+            amqp_url = URL(
+                f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' #{self.config.rabbitmq.vhost}
+            ).update_query(heartbeat=480000)
+            connection = await aio_pika.connect_robust(amqp_url)
+        except Exception as e:
+            try:
+                self.logger.info("No vhost configured, connecting without.")
+                amqp_url = URL(
+                    f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/' #{self.config.rabbitmq.vhost}
+                ).update_query(heartbeat=480000)
+                connection = await aio_pika.connect_robust(amqp_url)
+            except Exception as e: 
+                self.logger.info("Cannot connect to rabbitmq. Change config file.")
 
         resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
         self.tasks = [resource_logging_task]
@@ -207,11 +217,11 @@ class TaskManager:
                     if self.config.sampler.gpt: 
                         self.logger.debug("Before initialization")
                         sampler_instance = gpt.Sampler(
-                            connection, channel, sampler_queue, evaluator_queue, self.config)
+                            connection, channel, sampler_queue, evaluator_queue, self.config.sampler)
                         self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
                     else: 
                         sampler_instance = sampler.Sampler(
-                            connection, channel, sampler_queue, evaluator_queue, self.config, device)
+                            connection, channel, sampler_queue, evaluator_queue, self.config.sampler, device)
                         self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
                 except Exception as e: 
                     self.logger.error(f"Could not start Sampler instance {e}")
