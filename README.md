@@ -17,7 +17,7 @@ In each iteration:
 - If the function is executable and unique, it is stored in the database.
 
 ### Modifications for Other Applications
-FunSearch can be adapted to different applications with minimal changes:
+Our implementation can be adapted to different applications with minimal changes:
 - **Input format & specification script:** Modify these to adjust the application-specific input format and evaluation logic.
 - **LLM:** You can modify the `checkpoint` parameter in the sampler script to use any open-source LLM that can be loaded from Hugging Face via `transformers.AutoModelForCausalLM`.
 ___
@@ -36,7 +36,7 @@ cd Funsearch
 
 ### **2. Choose an Execution Method**
 
-FunSearch is designed for **Linux** and tested on Ubuntu.  
+Our implementation is designed for **Linux** and tested on Ubuntu.  
 You can execute it in different environments, with or without GPU/API-based LLM inference:
 
 - **Docker Container** – (Containerized isolated execution)
@@ -46,7 +46,7 @@ You can execute it in different environments, with or without GPU/API-based LLM 
 
 ### **3. Execution with Docker**
 
-FunSearch uses **Docker Compose (v3.8)** to run two containers:
+Our implementation uses **Docker Compose (v3.8)** to run two containers:
 
 - `funsearch-main` (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) – Runs evolutionary search with GPU support.
 - `rabbitmq` (`rabbitmq:3.13.4-management`) – Handles message passing.
