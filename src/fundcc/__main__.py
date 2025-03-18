@@ -93,7 +93,7 @@ class TaskManager:
 
     def initialize_logger(self, log_dir):
         logger = logging.getLogger('main_logger')
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
 
         # Create the log directory for the experiment
         os.makedirs(log_dir, exist_ok=True)
