@@ -144,7 +144,7 @@ class TaskManager:
             self.evaluator_processes.append(proc)
 
     def evaluator_process(self, template, inputs, amqp_url):
-        from funsearch import evaluator  # Import evaluator module dynamically
+        from fundcc import evaluator  # Import evaluator module dynamically
         local_id = mp.current_process().pid  # Use process ID as local identifier
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
