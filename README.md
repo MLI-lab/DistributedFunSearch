@@ -323,7 +323,7 @@ To attach processes from a different node, the new node must be able to connect 
 
 If the nodes can resolve each other’s IP addresses:
 
-- You can set `host` in `config.py` to the **IP address of the main node** (where RabbitMQ runs).
+- You can set `host` in `config.py` to the **hostname of the main node** (where RabbitMQ runs).
 
 If the nodes **cannot** resolve each other’s IP addresses:
 
