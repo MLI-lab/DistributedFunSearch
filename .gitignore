@@ -14,9 +14,6 @@ analysis/checkpoint_full.txt
 # Ignore logs
 logs/
 *.log
-
-/dss/dsshome1/02/di38yur/Funsearch/experiments
-
 # Ignore compiled Python files
 *.pyc
 
@@ -29,7 +26,11 @@ analysis/FilterBest/best_programs.py
 # Ignore private SSH configurations (if applicable)
 .ssh/
 
-#Ignore package related 
-/home/franziska/Funsearch/src/funsearch.egg-info
+# Ignore package-related files
+src/fundcc.egg-info/
 
+# Ignore experiment sandbox
 src/experiments/experiment1/sandbox/
+
+# Ignore Python cache files
+src/fundcc/__pycache__/
