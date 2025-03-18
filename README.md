@@ -321,7 +321,7 @@ These scripts use the same **command-line arguments** as the main script and can
 
 To attach processes from a different node, the new node must be able to connect to the main node running RabbitMQ.
 
-If the nodes can resolve each other’s IP addresses:
+If the nodes can resolve each other’s IP addresses and are in the same network without firewall restrictions (e.g., on a cluster):
 
 - You can set `host` in `config.py` to the **hostname of the main node** (where RabbitMQ runs).
 
