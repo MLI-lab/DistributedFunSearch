@@ -26,8 +26,5 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Set up the default working directory
-WORKDIR /workspace/FunDCC/
-
 # Default command
 CMD ["/bin/bash"]
