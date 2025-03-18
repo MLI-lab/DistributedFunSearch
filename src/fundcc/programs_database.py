@@ -43,11 +43,28 @@ def _softmax(logits: np.ndarray, temperature: float) -> np.ndarray:
 
 
 
-def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], self.TARGET_SIGNATURES=None) -> float:
+import json
+
+def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], TARGET_SIGNATURES=None) -> float:
     """
     Reduces per-test scores into a single score based on the specified mode.
     Generates (n, s) pairs for each s in s_values, where n is in [start_n, end_n].
-    Could also try a difference to Target solution type score.
+    Available modes:
+    - "last": Uses the score of the largest n for each s.
+    - "average": Averages scores across all (n, s) pairs.
+    - "weighted": Weighs scores by n to prioritize larger n-values.
+    - "relative_difference": Uses relative difference (actual - target) / target to normalize across targets.
+
+    Args:
+        scores_per_test (dict): Dictionary mapping (n, s) tuples to scores.
+        mode (str): Scoring method to use.
+        start_n (list): Start values for n per s-value.
+        end_n (list): End values for n per s-value.
+        s_values (list): List of s-values to consider.
+        TARGET_SIGNATURES (dict, optional): Dictionary of target sizes for each (n, s).
+
+    Returns:
+        float: Final reduced score.
     """
     try:
         # Convert string keys in scores_per_test to (int, int) tuples
@@ -55,37 +72,43 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
     except Exception as e:
         raise ValueError(f"Failed to parse scores_per_test keys: {e}")
 
-    # Ensure lists match in length
     if not (len(start_n) == len(end_n) == len(s_values)):
         raise ValueError("The number of elements in start_n, end_n, and s_values must match.")
 
-    per_s_scores = []  # Store the reduced score for each s
+    if mode == "relative_difference" and TARGET_SIGNATURES is None:
+        raise ValueError("TARGET_SIGNATURES must be provided for 'relative_difference' mode.")
 
-    for s, s_start_n, s_end_n in zip(s_values, start_n, end_n): # loop over each s and corresponding start and end n
+    per_s_scores = []
+
+    for s, s_start_n, s_end_n in zip(s_values, start_n, end_n):
         all_dimensions = [(n, s) for n in range(s_start_n, s_end_n + 1)]
 
         if mode == "last":
-            # Return the score of the largest n for this s
             per_s_scores.append(parsed_scores.get(all_dimensions[-1], 0))
 
         elif mode == "average":
-            # Compute the average across all dimensions for this s
             complete_scores = [parsed_scores.get(dim, 0) for dim in all_dimensions]
             per_s_scores.append(sum(complete_scores) / len(complete_scores) if complete_scores else 0)
 
         elif mode == "weighted":
-            # Weigh each set size by its dimension (n) to prioritize larger dimensions
             weights = [dim[0] for dim in all_dimensions]
             weighted_sum = sum(parsed_scores.get(dim, 0) * w for dim, w in zip(all_dimensions, weights))
             total_weight = sum(weights)
             per_s_scores.append(weighted_sum / total_weight if total_weight > 0 else 0)
 
+        elif mode == "relative_difference":
+            relative_scores = []
+            for dim in all_dimensions:
+                actual = parsed_scores.get(dim, 0)
+                target = TARGET_SIGNATURES.get(dim, None)
+                if target is not None:
+                    relative_scores.append((actual - target) / target)
+            per_s_scores.append(sum(relative_scores) / len(relative_scores) if relative_scores else 0)
+
         else:
-            raise ValueError("Invalid mode. Available modes are 'last', 'average', and 'weighted'.")
+            raise ValueError("Invalid mode. Available modes are 'last', 'average', 'weighted', and 'relative_difference'.")
 
-    # Return the average score across all s-values
     return sum(per_s_scores) / len(per_s_scores) if per_s_scores else 0
-
 
 
 @dataclasses.dataclass(frozen=True)
