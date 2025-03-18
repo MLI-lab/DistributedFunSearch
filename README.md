@@ -207,7 +207,7 @@ ___
 To start an evolutionary search experiment, navigate to your experiment directory (e.g., `experiments/experiment1/`) and run:
 
 ```bash
-cd /FunDCC/src/experiments/experiment1
+cd src/experiments/experiment1
 python -m fundcc
 ```
 
