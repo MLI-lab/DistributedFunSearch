@@ -213,8 +213,7 @@ python -m fundcc
 
 This launches a search using the configurations specified in the directory's `config.py` file. The file includes explanations for each argument.
 
-**Note:** If stopping an experiment, check RabbitMQ to ensure all evaluator and sampler processes are shut down before starting a new one.
-
+**Note:** If stopping an experiment, check RabbitMQ to ensure that all evaluator and sampler processes have shut down before starting a new one. To close any remaining processes, you can restart the RabbitMQ container. For local execution, you can restart the RabbitMQ service using `sudo systemctl restart rabbitmq-server`. 
 
 
 **(Optional) Preloading the LLM**
