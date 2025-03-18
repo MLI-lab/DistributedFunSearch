@@ -34,3 +34,9 @@ src/experiments/experiment1/sandbox/
 
 # Ignore Python cache files
 src/fundcc/__pycache__/
+
+# Ignore all experiment directories
+src/experiments/experiment*/
+
+# But do NOT ignore experiment1
+!src/experiments/experiment1/
