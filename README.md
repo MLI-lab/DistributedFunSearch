@@ -305,7 +305,7 @@ These scripts use the same **command-line arguments** as the main script and can
 
 - You can start only the `fundcc-main` container (without launching a new RabbitMQ instance) by running:
   ```sh
-  cd .devcontainer/external/.devcontainer  
+  cd FunDCC/.devcontainer/external/.devcontainer  
   docker-compose up  
   ```
   This starts a `fundcc-main` container on the new node for running the attach scripts.
