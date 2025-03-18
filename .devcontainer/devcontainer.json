@@ -1,8 +1,8 @@
 {
-  "name": "/workspace/funsearch",
+  "name": "/workspace/FunDCC",
   "dockerComposeFile": "docker-compose.yml",
-  "service": "funsearch-main",
-  "workspaceFolder": "/workspace/funsearch",
+  "service": "fundcc-main",
+  "workspaceFolder": "/workspace/FunDCC",
   "overrideCommand": false, 
   "forwardPorts": [3000],
   "customizations": {

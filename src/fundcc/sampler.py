@@ -8,8 +8,8 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import aio_pika
 import numpy as np
-from funsearch import programs_database
-from funsearch.profiling import async_time_execution
+from fundcc import programs_database
+from fundcc.profiling import async_time_execution
 
 logger = logging.getLogger('main_logger')
 

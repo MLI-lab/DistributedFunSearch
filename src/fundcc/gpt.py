@@ -8,20 +8,14 @@ import logging
 import aio_pika
 import asyncio
 import json
-from funsearch import programs_database
+from fundcc import programs_database
 from typing import List
-from funsearch.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
+from fundcc.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
 from openai import AzureOpenAI
 import os
 import logging
 
 logger = logging.getLogger('main_logger')
-
-#export AZURE_OPENAI_API_KEY='83dc26cc6abc4ce2ad3377f59d55dae0'
-#export AZURE_OPENAI_ENDPOINT='https://mli-lab.openai.azure.com/'
-#export AZURE_OPENAI_API_VERSION='2024-08-01-preview'
-
-
 
 class LLM_model:
     def __init__(self, samples_per_prompt: int, model="gpt-4o-mini"):

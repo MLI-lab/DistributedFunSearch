@@ -87,14 +87,14 @@ class SamplerConfig:
 def get_spec_path() -> str:
     # Get the absolute directory of this file
     base_dir = os.path.abspath(os.path.dirname(__file__))
-    # Look for the substring "Funsearch" in the path
-    idx = base_dir.find("Funsearch")
+    # Look for the substring "FunDCC" in the path
+    idx = base_dir.find("FunDCC")
     if idx != -1:
-        funsearch_base = base_dir[: idx + len("Funsearch")]
+        fundcc_base = base_dir[: idx + len("FunDCC")]
     else:
-        funsearch_base = base_dir
-    # Build the path relative to the Funsearch folder
-    return os.path.join(funsearch_base, "src", "funsearch", "specifications", "StarCoder2", "load_graph", "baseline.txt")
+        fundcc_base = base_dir
+    # Build the path relative to the FunDCC folder
+    return os.path.join(fundcc_base, "src", "fundcc", "specifications", "StarCoder2", "load_graph", "baseline.txt")
 
 
 @dataclasses.dataclass(frozen=True)

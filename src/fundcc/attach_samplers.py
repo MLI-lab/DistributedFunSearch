@@ -11,11 +11,11 @@ import signal
 import sys
 import time
 from typing import Sequence, Any
-from funsearch.scaling_utils import ResourceManager
-from funsearch import sampler
+from fundcc.scaling_utils import ResourceManager
+from fundcc import sampler
 import importlib
 import socket
-from funsearch import gpt
+from fundcc import gpt
 
 
 def load_config(config_path):

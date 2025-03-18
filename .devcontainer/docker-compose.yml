@@ -1,18 +1,18 @@
 version: '3.8'
 
 services:
-  funsearch-main:
+  fundcc-main:
     build:
       context: ..  # Use project root as build context
       dockerfile: .devcontainer/Dockerfile
       args:
         - DEBIAN_FRONTEND=noninteractive
-    container_name: "funsearch-main"
+    container_name: "fundcc-main"
     tty: true
     privileged: false 
     volumes:
       - ~/.ssh:/root/.ssh
-      - ../:/workspace/funsearch
+      - ../:/workspace/FunDCC
       - /media/:/media/
       - /srv/:/srv/
     networks:
@@ -24,7 +24,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    working_dir: /workspace/funsearch  
+    working_dir: /workspace/FunDCC  
     command: /bin/bash                 
 
   rabbitmq:

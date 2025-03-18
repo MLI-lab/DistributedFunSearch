@@ -11,9 +11,9 @@ import socket
 import argparse
 from typing import Sequence, Any
 import datetime
-from funsearch.scaling_utils import ResourceManager
+from fundcc.scaling_utils import ResourceManager
 from yarl import URL
-from funsearch import code_manipulation
+from fundcc import code_manipulation
 import importlib
 
 def load_config(config_path):

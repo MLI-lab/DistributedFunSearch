@@ -1,2 +1,0 @@
-[console_scripts]
-funsearch = funsearch.funsearch:main

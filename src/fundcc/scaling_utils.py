@@ -381,7 +381,7 @@ class ResourceManager:
             host_gpu, container_index, _, _ = best_gpu
             container_device = f"cuda:{container_index}"
 
-            # **Reserve GPU in assigned_gpus before returning**
+            # Reserve GPU in assigned_gpus before returning
             assigned_gpus.add(container_device)
 
 

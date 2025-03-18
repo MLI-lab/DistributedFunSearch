@@ -13,7 +13,7 @@ import gc
 import os
 import multiprocessing
 from typing import Mapping, Any, List, Sequence, Optional
-from funsearch import code_manipulation
+from fundcc import code_manipulation
 import json
 import aio_pika
 import re
@@ -21,7 +21,7 @@ from logging.handlers import RotatingFileHandler
 import psutil
 from logging import FileHandler
 import datetime
-from funsearch.profiling import async_time_execution
+from fundcc.profiling import async_time_execution
 
 
 logger = logging.getLogger('main_logger')
@@ -43,10 +43,11 @@ def _softmax(logits: np.ndarray, temperature: float) -> np.ndarray:
 
 
 
-def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1]) -> float:
+def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], self.TARGET_SIGNATURES=None) -> float:
     """
     Reduces per-test scores into a single score based on the specified mode.
     Generates (n, s) pairs for each s in s_values, where n is in [start_n, end_n].
+    Could also try a difference to Target solution type score.
     """
     try:
         # Convert string keys in scores_per_test to (int, int) tuples
@@ -134,7 +135,8 @@ class ProgramsDatabase:
         s_values=[1],
         no_deduplication=False,
         prompt_limit=400_000,
-        optimal_solution_programs=20_000
+        optimal_solution_programs=20_000,
+        TARGET_SIGNATURES=None
     ):
         self._islands = [] 
         self.connection = connection
@@ -162,6 +164,7 @@ class ProgramsDatabase:
         self.found_optimal_solution = False 
         self.optimal_solution_programs = optimal_solution_programs
         self.prompts_since_optimal = 0  
+        self.TARGET_SIGNATURES=TARGET_SIGNATURES
 
 
         self.cumulative_evaluator_cpu_time = 0.0  # Track total CPU time from evaluators
@@ -226,7 +229,7 @@ class ProgramsDatabase:
 
         # Restore islands
         for island_id, island_state in enumerate(checkpoint_data["islands_state"]):
-            logger.debug(f"Loading state fpr island id {island_id}")
+            logger.debug(f"Loading state for island id {island_id}")
             island = self._islands[island_id]
             self._load_island_state(island, island_state)
         logger.info("Checkpoint loaded successfully.")
@@ -496,29 +499,45 @@ class ProgramsDatabase:
             if signature not in clusters:
                 logger.info(f"Creating new cluster with signature {scores_per_test}")
                 cluster_data = {}
-                cluster_data['score'] = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values)
+                cluster_data['score'] = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.TARGET_SIGNATURES)
                 cluster_data['programs'] = [program]
                 clusters[signature] = cluster_data
             else:
                 logger.info(f"Registering on cluster with signature {scores_per_test}")
                 cluster_data = clusters[signature]
                 cluster_data['programs'].append(program)
-            
-            island['num_programs'] += 1
         
+            island['num_programs'] += 1
+    
         except Exception as e: 
             logger.error(f"Could not append program: {e}")
     
         try: 
-            score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values)
+            # Calculate the score for the new program
+            score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.TARGET_SIGNATURES)
+        
+            # Check if the new score is higher than the current best score
             if score > self._best_score_per_island[island_id]:
                 self._best_program_per_island[island_id] = program
                 self._best_scores_per_test_per_island[island_id] = scores_per_test
                 self._best_score_per_island[island_id] = score
                 logger.info(f'Best score of island {island_id} increased to {score} with program {program} and scores {scores_per_test}')
+        
+            # If the score is equal to the best score, check the program signature
+            elif score == self._best_score_per_island[island_id]:
+                # Get the current best program's signature
+                current_best_program = self._best_program_per_island[island_id]
+                current_best_signature = self._get_signature(self._best_scores_per_test_per_island[island_id])
+            
+                # Compare signatures: if the new signature is lexicographically "larger"
+                if signature > current_best_signature:
+                    self._best_program_per_island[island_id] = program
+                    self._best_scores_per_test_per_island[island_id] = scores_per_test
+                    self._best_score_per_island[island_id] = score
+                    logger.info(f'Best program of island {island_id} replaced with program {program} (signature comparison)')
+
         except Exception as e: 
             logger.error(f"Could not update best score: {e}")
-
 
     async def reset_islands(self):
         try:

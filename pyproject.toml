@@ -3,10 +3,10 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "funsearch"
+name = "fundcc"
 version = "0.1.0"
-description = "FunSearch package"
-requires-python = ">=3.11"
+description = "FunDCC package"
+requires-python = ">=3.10"
 dependencies = [
   "numpy",
   "scipy",
@@ -27,4 +27,4 @@ dependencies = [
 where = ["src"]
 
 [project.scripts]
-funsearch = "funsearch.funsearch:main"
+fundcc = "fundcc.fundcc:main"

@@ -10,9 +10,9 @@ import os
 import signal
 import sys
 import pickle
-from funsearch import programs_database
-from funsearch import sampler
-from funsearch import code_manipulation
+from fundcc import programs_database
+from fundcc import sampler
+from fundcc import code_manipulation
 from multiprocessing import Manager
 import copy
 import psutil
@@ -20,17 +20,17 @@ import GPUtil
 import pynvml
 from typing import Sequence, Any
 import datetime
-from funsearch import evaluator
+from fundcc import evaluator
 import signal
 import sys
-from funsearch import gpt
+from fundcc import gpt
 import asyncio
 import aio_pika
 from multiprocessing import current_process
 import argparse
 import glob
 import shutil
-from funsearch.scaling_utils import ResourceManager
+from fundcc.scaling_utils import ResourceManager
 import importlib.util
 import time 
 
@@ -93,12 +93,12 @@ class TaskManager:
 
     def initialize_logger(self, log_dir):
         logger = logging.getLogger('main_logger')
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.DEBUG)
 
         # Create the log directory for the experiment
         os.makedirs(log_dir, exist_ok=True)
 
-        log_file_path = os.path.join(log_dir, 'funsearch.log')
+        log_file_path = os.path.join(log_dir, 'fundcc.log')
         handler = FileHandler(log_file_path, mode='w') 
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
@@ -221,7 +221,7 @@ class TaskManager:
                     sampler_queue, evaluator_queue, self.config.programs_database,
                     self.template_pdb, function_to_evolve, checkpoint_file, save_checkpoints_path,
                     mode=self.config.evaluator.mode, eval_code=self.config.evaluator.eval_code, include_nx=self.config.evaluator.include_nx,
-                    start_n=self.config.evaluator.start_n, end_n=self.config.evaluator.end_n, s_values=self.config.evaluator.s_values, no_deduplication=self.config.programs_database.no_deduplication, prompt_limit=args.prompt_limit, optimal_solution_programs=args.optimal_solution_programs
+                    start_n=self.config.evaluator.start_n, end_n=self.config.evaluator.end_n, s_values=self.config.evaluator.s_values, no_deduplication=self.config.programs_database.no_deduplication, prompt_limit=args.prompt_limit, optimal_solution_programs=args.optimal_solution_programs, TARGET_SIGNATURES=self.TARGET_SIGNATURES
                 )
                 database_task = asyncio.create_task(database.consume_and_process())
             except Exception as e: 
@@ -450,7 +450,7 @@ class TaskManager:
 
 
     def evaluator_process(self, template, inputs, amqp_url, TARGET_SIGNATURES):
-        import funsearch.evaluator
+        import fundcc.evaluator
         import signal
         import asyncio
 
@@ -637,14 +637,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompt_limit",
         type=int,
-        default=400_000, 
+        default=400_000_000, 
         help="Maximum number of prompts that can be generated before stopping further publishing. The system will continue processing remaining queue messages. Adjust based on computational constraints."
     )
 
     parser.add_argument(
         "--optimal_solution_programs",
         type=int,
-        default=20_000,
+        default=200_000,
         help="Number of additional programs to generate after the first optimal solution is found. Once this limit is reached, further publishing stops, but remaining queue messages continue processing."
     )
 

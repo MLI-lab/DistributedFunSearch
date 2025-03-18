@@ -3,8 +3,8 @@ import ast
 from typing import Any
 import copy
 import logging
-from funsearch import code_manipulation
-from funsearch import sandbox
+from fundcc import code_manipulation
+from fundcc import sandbox
 from pathlib import Path
 import json
 import aio_pika
@@ -18,7 +18,7 @@ import psutil
 import shutil
 import warnings
 import shutil
-from funsearch.profiling import async_time_execution
+from fundcc.profiling import async_time_execution
 import time
 
 
