@@ -12,8 +12,9 @@ services:
     privileged: false 
     volumes:
       - ~/.ssh:/root/.ssh
-      - ../:/workspace/FunDCC
-      - /media/:/media/
+      - ../:/workspace/DeCoSearch
+      - ../:/workspace/DeCoSearch
+      - /mnt/hdd_pool_zion/users/franziska/Checkpoints/Graphs:/mnt/graphs/
       - /srv/:/srv/
     networks:
       - app-network
@@ -24,7 +25,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    working_dir: /workspace/FunDCC  
+    working_dir: /workspace/DeCoSearch  
     command: /bin/bash                 
 
   rabbitmq:

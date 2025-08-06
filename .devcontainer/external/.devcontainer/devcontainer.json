@@ -2,7 +2,7 @@
     "name": "fundcc-main",
     "dockerComposeFile": "docker-compose.yml",
     "service": "devcontainer",
-    "workspaceFolder": "/workspace/FunDCC/",
+    "workspaceFolder": "/workspace/DeCoSearch/",
     "overrideCommand": false,
     "forwardPorts": [3000],
     "customizations": {

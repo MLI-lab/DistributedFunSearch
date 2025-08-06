@@ -11,9 +11,9 @@ import socket
 import argparse
 from typing import Sequence, Any
 import datetime
-from fundcc.scaling_utils import ResourceManager
+from decos.scaling_utils import ResourceManager
 from yarl import URL
-from fundcc import code_manipulation
+from decos import code_manipulation
 import importlib
 
 def load_config(config_path):
@@ -144,7 +144,7 @@ class TaskManager:
             self.evaluator_processes.append(proc)
 
     def evaluator_process(self, template, inputs, amqp_url):
-        from fundcc import evaluator  # Import evaluator module dynamically
+        from decos import evaluator  # Import evaluator module dynamically
         local_id = mp.current_process().pid  # Use process ID as local identifier
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

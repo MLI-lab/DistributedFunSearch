@@ -8,16 +8,26 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import aio_pika
 import numpy as np
-from fundcc import programs_database
-from fundcc.profiling import async_time_execution
+
+from decos import programs_database
+from decos.profiling import async_time_execution
 
 logger = logging.getLogger('main_logger')
 
 
 class LLM_model:
     """Language model that predicts continuation of provided source code."""
-    def __init__(self, samples_per_prompt: int, temperature, top_p, repetition_penalty, max_new_tokens, 
-                 device="cuda", checkpoint="bigcode/starcoder2-15b") -> None:
+    
+    def __init__(
+            self,
+            samples_per_prompt: int,
+            temperature,
+            top_p,
+            repetition_penalty,
+            max_new_tokens,
+            device="cuda",   # can be "cuda", None, "cpu", "cuda:0", etc.
+            checkpoint="bigcode/starcoder2-15b",
+    ) -> None:
         self.gpu_time = 0.0
         self._samples_per_prompt = samples_per_prompt
         self.temperature = temperature
@@ -28,25 +38,31 @@ class LLM_model:
         self.previous_total_registered_programs = 0
 
         # Set cache directory and environment variable
-        try: 
-            #self.cache_dir = os.path.join(os.getcwd(), "models")
+        try:
             self.cache_dir = "/workspace/models/"
             os.makedirs(self.cache_dir, exist_ok=True)
-            os.environ["TRANSFORMERS_CACHE"] =  self.cache_dir
             os.environ["TRANSFORMERS_CACHE"] = self.cache_dir
         except Exception as e:
-            logger.error(f"Warning: Could not create cache directory {cache_dir}, falling back to default cache location instead. Error: {e}")
+            logger.error(
+                f"Warning: Could not create cache directory {self.cache_dir}, "
+                f"falling back to default cache location instead. Error: {e}"
+            )
 
-
+        # Decide how to handle the device mapping
         if device == "cuda" or device is None:
+            # Let HF handle the distribution across all GPUs automatically
             self.device_map = "auto"
-            self.device = device
-            logger.info("Using all available GPUs with device_map='auto'.")
+            self.device = None
+            logger.info("Using device_map='auto' (all available GPUs).")
         else:
-            self.device = device if isinstance(device, str) else f"cuda:{device}"
             self.device_map = None
-            logger.info(f"Attempting to load model on device: {self.device}")
+            if isinstance(device, int):
+                self.device = f"cuda:{device}"
+            else:
+                self.device = device  # e.g. "cuda:0" or "cpu"
+            logger.info(f"Using explicit device='{self.device}', device_map=None")
 
+        # Load tokenizer
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.checkpoint,
@@ -57,17 +73,33 @@ class LLM_model:
             logger.error(f"Could not load tokenizer from cache because: {e}")
             raise
 
+        # Ensure we have a padding token
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({'pad_token': self.tokenizer.eos_token})
 
+        # Load model
         try:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.checkpoint,
-                cache_dir=self.cache_dir,
-                torch_dtype=torch.float16,
-                local_files_only=False,
-                device_map=self.device_map
-            ).to(self.device)
+            if self.device_map == "auto":
+                # Let HF do the device placement
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.checkpoint,
+                    cache_dir=self.cache_dir,
+                    torch_dtype=torch.float16,
+                    local_files_only=False,
+                    device_map="auto",
+                )
+            else:
+                # Load on CPU/GPU as requested, then .to() if relevant
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.checkpoint,
+                    cache_dir=self.cache_dir,
+                    torch_dtype=torch.float16,
+                    local_files_only=False,
+                    device_map=None,
+                )
+                # Move to user-specified device
+                self.model.to(self.device)
+
             logger.info("Successfully loaded model.")
         except Exception as e:
             logger.error(f"Could not load model from cache because: {e}")
@@ -96,20 +128,37 @@ class LLM_model:
                 self.generate_kwargs.pop("temperature", None)
                 self.generate_kwargs.pop("top_p", None)
             self.previous_total_registered_programs = total_registered_programs
-            logger.debug(f"Adjusted LLM temperature to {new_temp} based on {total_registered_programs} registered programs.")
+            logger.debug(
+                f"Adjusted LLM temperature to {new_temp} "
+                f"based on {total_registered_programs} registered programs."
+            )
 
-    def draw_batch_samples(self, prompts: List[str], total_registered_programs: int = 0, temperature_period: int = 10000) -> List[List[str]]:
+    def draw_batch_samples(
+            self,
+            prompts: List[str],
+            total_registered_programs: int = 0,
+            temperature_period: int = 10000
+    ) -> List[List[str]]:
         if temperature_period is not None:
             try:
                 self.adjust_temperature(total_registered_programs, temperature_period)
             except Exception as e:
                 logger.error(f"Error adjusting temperature: {e}")
+
         try:
             self.tokenizer.padding_side = 'left'
-            # Tokenize once for the whole batch
-            inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=False).to(self.device)
-            input_length = inputs.input_ids.shape[1]
-            logger.info(f"LLM: input dims {inputs.input_ids.shape}")
+            # Tokenize once for the whole batch (on CPU by default)
+            inputs = self.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=False
+            )
+
+            inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+
+            input_length = inputs["input_ids"].shape[1]
+            logger.info(f"LLM: input dims {inputs['input_ids'].shape}")
 
             all_samples = []
             start_event = torch.cuda.Event(enable_timing=True)
@@ -118,7 +167,11 @@ class LLM_model:
 
             for _ in range(self._samples_per_prompt):
                 try:
-                    outputs = self.model.generate(**inputs, **self.generate_kwargs, pad_token_id=self.tokenizer.eos_token_id)
+                    outputs = self.model.generate(
+                        **inputs,
+                        **self.generate_kwargs,
+                        pad_token_id=self.tokenizer.eos_token_id
+                    )
                 except Exception as e:
                     logger.error(f"Generation failed: {e}")
                     continue
@@ -126,7 +179,10 @@ class LLM_model:
                 logger.debug(f"LLM: output dims {outputs.shape}")
                 try:
                     generated_tokens = outputs[:, input_length:]
-                    decoded_texts = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+                    decoded_texts = self.tokenizer.batch_decode(
+                        generated_tokens,
+                        skip_special_tokens=True
+                    )
                     all_samples.append(decoded_texts)
                 except Exception as e:
                     logger.error(f"Decoding failed: {e}")
@@ -135,6 +191,8 @@ class LLM_model:
             torch.cuda.synchronize()
             self.gpu_time = start_event.elapsed_time(end_event) / 1000.0
             logger.debug(f"GPU sampling time: {self.gpu_time:.2f} sec")
+
+            # Group the samples so that for each prompt we have a list of generated completions
             grouped_samples = list(map(list, zip(*all_samples)))
             return grouped_samples
 
@@ -155,12 +213,20 @@ class Sampler:
         self.temperature_period = self._config.temperature_period
         self.samples_per_prompt = self._config.samples_per_prompt
         self.samples_per_batch = self._config.prompts_per_batch
+
         try:
-            self._llm = LLM_model(self.samples_per_prompt, self._config.temperature, self._config.top_p, 
-                                  self._config.repetition_penalty, self._config.max_new_tokens, self.device, 
-                                  "bigcode/starcoder2-15b")
+            self._llm = LLM_model(
+                samples_per_prompt=self.samples_per_prompt,
+                temperature=self._config.temperature,
+                top_p=self._config.top_p,
+                repetition_penalty=self._config.repetition_penalty,
+                max_new_tokens=self._config.max_new_tokens,
+                device=self.device,   # Could be "cuda", None, "cpu", or "cuda:0"
+                checkpoint="bigcode/starcoder2-15b"
+            )
         except Exception as e:
             logger.error(f"Error initializing LLM: {e}")
+            # Optionally raise
 
     async def consume_and_process(self) -> None:
         try:
@@ -173,7 +239,11 @@ class Sampler:
                     async for message in stream:
                         batch.append(message)
                         current_time = asyncio.get_event_loop().time()
-                        if len(batch) >= self.samples_per_batch or (current_time - batch_start_time) > batch_timeout:
+                        # If we hit batch size or time threshold, process the batch
+                        if (
+                            len(batch) >= self.samples_per_batch
+                            or (current_time - batch_start_time) > batch_timeout
+                        ):
                             await self.process_batch_s(batch)
                             batch = []
                             batch_start_time = asyncio.get_event_loop().time()
@@ -191,16 +261,20 @@ class Sampler:
         prompts = []
         metadata = []
         flags = []
+        total_registered_programs = 0  # track if any message has a value
 
         for message in batch:
             try:
                 async with message.process():
                     data = json.loads(message.body.decode())
                     prompt_data = data["prompt"]
+                    # In your original code, total_registered_programs is overwritten each time.
+                    # If you want the last one, keep as is:
                     total_registered_programs = data.get("total_registered_programs", 0)
                     flag = data.get("flag", False)
                     flags.append(flag)
                     prompt = programs_database.Prompt.deserialize(prompt_data)
+
                     if prompt.code is not None:
                         prompts.append(prompt.code)
                         metadata.append({
@@ -209,7 +283,9 @@ class Sampler:
                             "expected_version": prompt.expected_version,
                         })
                     else:
-                        logger.warning(f"Skipping prompt with island_id {prompt.island_id}: no code.")
+                        logger.warning(
+                            f"Skipping prompt with island_id {prompt.island_id}: no code."
+                        )
             except Exception as e:
                 logger.error(f"Sampler: Error processing message: {e}")
                 continue
@@ -218,13 +294,17 @@ class Sampler:
             logger.warning("No valid prompts in batch; skipping processing.")
             return
 
+        # Get the completions from the LLM
         try:
-            samples_list = self._llm.draw_batch_samples(prompts, total_registered_programs, self.temperature_period)
+            samples_list = self._llm.draw_batch_samples(
+                prompts, total_registered_programs, self.temperature_period
+            )
             gpu_time = self._llm.gpu_time
         except Exception as e:
             logger.error(f"LLM sampling failed: {e}")
             return
 
+        # Publish results to the evaluator queue
         for samples, meta, flag in zip(samples_list, metadata, flags):
             if flag:
                 try:

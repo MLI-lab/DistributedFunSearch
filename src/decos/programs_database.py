@@ -13,7 +13,7 @@ import gc
 import os
 import multiprocessing
 from typing import Mapping, Any, List, Sequence, Optional
-from fundcc import code_manipulation
+from decos import code_manipulation
 import json
 import aio_pika
 import re
@@ -21,7 +21,7 @@ from logging.handlers import RotatingFileHandler
 import psutil
 from logging import FileHandler
 import datetime
-from fundcc.profiling import async_time_execution
+from decos.profiling import async_time_execution
 
 
 logger = logging.getLogger('main_logger')

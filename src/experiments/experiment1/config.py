@@ -30,7 +30,7 @@ class RabbitMQConfig:
       username: Username for authentication with the RabbitMQ server.
       password: Password for authentication with the RabbitMQ server.
     """
-    host: str = 'rabbitmq'
+    host: str = 'sequoia.mli.ei.tum.de'
     port: int = 5672 
     username: str = 'guest' 
     password: str = 'guest' 
@@ -82,19 +82,19 @@ class SamplerConfig:
   max_new_tokens: int = 246
   top_p: float =  0.7777777777777778 
   repetition_penalty: float = 1.222222
-  gpt: bool = False   
+  gpt: bool = True   
   
 def get_spec_path() -> str:
     # Get the absolute directory of this file
     base_dir = os.path.abspath(os.path.dirname(__file__))
-    # Look for the substring "FunDCC" in the path
-    idx = base_dir.find("FunDCC")
+    # Look for the substring "DeCoSearch" in the path
+    idx = base_dir.find("DeCoSearch")
     if idx != -1:
-        fundcc_base = base_dir[: idx + len("FunDCC")]
+        decos_base = base_dir[: idx + len("DeCoSearch")]
     else:
-        fundcc_base = base_dir
-    # Build the path relative to the FunDCC folder
-    return os.path.join(fundcc_base, "src", "fundcc", "specifications", "StarCoder2", "load_graph", "baseline.txt")
+        decos_base = base_dir
+    # Build the path relative to the DeCoSearch folder
+    return os.path.join(decos_base, "src", "decos", "specifications", "StarCoder2", "load_graph", "baseline.txt")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -138,8 +138,8 @@ class Config:
   rabbitmq: RabbitMQConfig = dataclasses.field(default_factory=RabbitMQConfig)
   sampler: SamplerConfig = dataclasses.field(default_factory=SamplerConfig) 
   evaluator: EvaluatorConfig = dataclasses.field(default_factory=EvaluatorConfig) 
-  num_samplers: int = 4
-  num_evaluators: int = 40
+  num_samplers: int = 1
+  num_evaluators: int = 1
   num_pdb: int = 1
 
 

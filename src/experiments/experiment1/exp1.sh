@@ -5,8 +5,8 @@
 #SBATCH --ntasks-per-node=1                                          # Number of tasks per node
 #SBATCH --cpus-per-task=92                                           # CPU cores per node
 #SBATCH --gres=gpu:4                                                 # GPUs per node
-#SBATCH -o FunDCC/src/experiments/experiment1/logs/experiment.out # Standard output log
-#SBATCH -e FunDCC/src/experiments/experiment1/logs/experiment.err # Standard error log
+#SBATCH -o DeCoSearch/src/experiments/experiment1/logs/experiment.out # Standard output log
+#SBATCH -e DeCoSearch/src/experiments/experiment1/logs/experiment.err # Standard error log
 #SBATCH --time=48:00:00                                              # Time limit
 
 
@@ -34,18 +34,18 @@ echo "RabbitMQ server hostname: $RABBITMQ_HOSTNAME"
 # Run the main setup process on Node 1
 srun -N1 -n1 --nodelist=$NODE_1 \
      --container-image=desired/path/custom_name.sqsh \
-     --container-mounts="$PWD/FunDCC:/FunDCC,\
-$PWD/.ssh:/FunDCC/.ssh" \
+     --container-mounts="$PWD/DeCoSearch:/DeCoSearch,\
+$PWD/.ssh:/DeCoSearch/.ssh" \
      bash -c "
          echo 'Running on $(hostname -f)'
 
          # Update the RabbitMQ configuration with the hostname of allocated node
-         python /FunDCC/src/fundcc/update_config_file.py /FunDCC/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
+         python /DeCoSearch/src/decos/update_config_file.py /DeCoSearch/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
 
          # Configure RabbitMQ environment
          export RABBITMQ_NODENAME=rabbit_${SLURM_JOB_ID}@localhost
          export RABBITMQ_USE_LONGNAME=true
-         export RABBITMQ_CONFIG_FILE=/FunDCC/src/experiments/$EXPERIMENT_NAME/rabbitmq.conf
+         export RABBITMQ_CONFIG_FILE=/DeCoSearch/src/experiments/$EXPERIMENT_NAME/rabbitmq.conf
 
          # Start RabbitMQ in the foreground
          echo 'Starting RabbitMQ server...'
@@ -75,13 +75,13 @@ $PWD/.ssh:/FunDCC/.ssh" \
 
          # Export API credentials (implementation is for an Azure-based API)
 
-         # Install FunDCC
-         cd /FunDCC
+         # Install DeCoSearch
+         cd /DeCoSearch
          pip install .
         
-         # Run FunDCC
-         cd /FunDCC/src/experiments/$EXPERIMENT_NAME
-         python -m fundcc --checkpoint=/FunDCC/src/experiments/experiment1/Checkpoints/checkpoint_2025-03-17_09-41-48.pkl  --target_solutions=\"{\\\"(7, 2)\\\": 5, \\\"(8, 2)\\\": 7, \\\"(9, 2)\\\": 11, \\\"(10, 2)\\\": 16, \\\"(11, 2)\\\": 24, \\\"(12, 2)\\\": 33}\"
+         # Run DeCoSearch
+         cd /DeCoSearch/src/experiments/$EXPERIMENT_NAME
+         python -m decos --checkpoint=/DeCoSearch/src/experiments/experiment1/Checkpoints/checkpoint_2025-03-17_09-41-48.pkl  --target_solutions=\"{\\\"(7, 2)\\\": 5, \\\"(8, 2)\\\": 7, \\\"(9, 2)\\\": 11, \\\"(10, 2)\\\": 16, \\\"(11, 2)\\\": 24, \\\"(12, 2)\\\": 33}\"
      " &
 
 # Create a list of 10 times evenly spaced from 1800 to 3600 seconds
@@ -98,23 +98,23 @@ for i in "${!REMAINING[@]}"; do
     scaling_time_e=${scaling_intervals_e[$i]}  # Get scaling interval for evaluator
     srun -N1 -n1 --nodelist=$node \
      --container-image=desired/path/custom_name.sqsh \
-     --container-mounts="$PWD/FunDCC:/FunDCC,\
-$PWD/.ssh:/FunDCC/.ssh" \
+     --container-mounts="$PWD/DeCoSearch:/DeCoSearch,\
+$PWD/.ssh:/DeCoSearch/.ssh" \
         bash -c "
             echo 'Running on $(hostname -f)'
 
             # Update the RabbitMQ configuration with the hostname
-            python /FunDCC/src/fundcc/update_config_file.py /FunDCC/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
+            python /DeCoSearch/src/decos/update_config_file.py /DeCoSearch/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
 
-            # Install FunDCC
-            cd /FunDCC
+            # Install DeCoSearch
+            cd /DeCoSearch
             pip install .
 
-            cd /FunDCC/src/experiments/$EXPERIMENT_NAME
+            cd /DeCoSearch/src/experiments/$EXPERIMENT_NAME
 
-            python -m fundcc.attach_evaluators --check_interval=$scaling_time_e --sandbox_base_path=/workspace/sandboxstorage/ || { echo 'Error running attach_evaluators'; exit 1; } &
+            python -m decos.attach_evaluators --check_interval=$scaling_time_e --sandbox_base_path=/workspace/sandboxstorage/ || { echo 'Error running attach_evaluators'; exit 1; } &
 
-            python -m fundcc.attach_samplers --check_interval=$scaling_time_s || { echo 'Error running attach_sampler'; exit 1; } &
+            python -m decos.attach_samplers --check_interval=$scaling_time_s || { echo 'Error running attach_sampler'; exit 1; } &
             wait
         " &
 done

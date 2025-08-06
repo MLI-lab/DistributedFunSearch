@@ -1,43 +1,50 @@
 ## LLM-Guided Search for Deletion-Correcting Codes
 
 <div align="center">
-  <img src="fig/overview.png" alt="FunSearch Overview" width="600">
+  <img src="fig/overview.png" alt="DeCoSearch Overview" width="600">
 </div>
 
 <p>&nbsp;</p>
 
 This repository provides a **distributed implementation of FunSearch** (Romera et al., 2024) using RabbitMQ for parallelization via asynchronous message passing. The code accompanies the paper *"LLM-Guided Search for Deletion-Correcting Codes"* and is designed for discovering large deletion-correcting codes for any code length and deletion correction capacity.
 
-FunDCC (FunSearch for Deletion-Correcting Codes) iteratively refines a **priority function** using **evolutionary search**, guided by a **pretrained LLM** (default: Starcoder2, with support for GPT-4o Mini via API).
+**DeCoSearch** (Deletion-Correcting Code Search) is an LLM-guided framework that iteratively refines a **priority function** using **evolutionary search**. It is guided by a **pretrained LLM**, defaulting to **StarCoder2**, with support for **OpenAI models via API** (e.g., **GPT-4o Mini** via **Azure OpenAI**).
 
 In each iteration:
-- We construct a few-shot prompt by sampling from the program database.
+
+- A few-shot prompt is constructed by sampling from the program database, which stores all previously generated functions and their metadata.
 - The LLM generates a new priority function.
-- The function is evaluated by greedily constructing deletion-correcting codes for various code lengths, with a fixed or variable number of deletions.
-- If the function is executable and unique, it is stored in the program database.
+- The function is evaluated by greedily constructing deletion-correcting codes for user-defined code lengths and number of adversarial deletions.
+- If the function is executable and logically distinct from previously stored ones, it is added to the program database along with its evaluation results (i.e., the code sizes achieved).
+
 
 ### Modifications for Other Applications
+
 Our implementation can be adapted to different applications with minimal changes:
-- **Input format & evaluation logic:** You can modify the input format in `config.py` and `__main__.py`, as well as the `specifications` folder, to adapt the evaluation logic to your specific application.
-- **LLM:** You can modify the `checkpoint` parameter in the sampler script to use any open-source LLM that can be loaded from Hugging Face via `transformers.AutoModelForCausalLM`.
+
+- **Input format and evaluation logic:** You can modify the input format of the evolved function in `src/experiments/experiment1/config.py` (via the `EvaluatorConfig` class), and specify a custom performance threshold using the `--target_solution` argument in `src/decos/__main__.py` (e.g., to search for functions that outperform the current best-known solution).  
+To adapt how functions are evaluated for your specific application, you can modify the logic in the `src/decos/specifications/` folder.
+
+- **LLM:** You can modify the `checkpoint` parameter in the sampler script (`src/decos/sampler.py`) to use a different open-source LLM that can be loaded from Hugging Face via `transformers.AutoModelForCausalLM`.
+
 ___
-## **Installation & Setup**
+## **Installation & setup**
 
-To set up and run FunDCC, follow the instructions based on your preferred execution method.
+To set up and run DeCoSearch, follow the instructions based on your preferred execution environment.
 
-### **1. Clone the Repository**
+### **1. Clone the repository**
 
-Clone the FunDCC repository and navigate into the project directory:
+Clone the DeCoSearch repository:
 
 ```sh
-git clone https://github.com/your-username/FunDCC.git
-cd FunDCC
+git clone https://github.com/your-username/DeCoSearch.git
+cd DeCoSearch
 ```
 
-### **2. Choose an Execution Method**
+### **2. Choose an execution environment**
 
-Our implementation is designed for **Linux** and tested on Ubuntu.  
-You can execute FunDCC in different environments, with or without GPU/API-based LLM inference:
+Our implementation is designed for Linux and tested on Ubuntu 22.04.6 LTS.
+You can execute DeCoSearch in different environments, with or without GPU/API-based LLM inference:
 
 - **Docker Container** – (Containerized isolated execution)
 - **Local Execution** – (Without Docker)
@@ -48,10 +55,10 @@ You can execute FunDCC in different environments, with or without GPU/API-based 
 
 Our implementation uses **Docker Compose (v3.8)** to run two containers:
 
-- `fundcc-main` (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) – Runs the evolutionary search with GPU support.
+- `decos-main` (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) – Runs the evolutionary search with GPU support.
 - `rabbitmq` (`rabbitmq:3.13.4-management`) – Handles message passing.
 
-You can navigate to the `.devcontainer` directory to start the containers:
+You can navigate to the `.devcontainer` directory to start the two containers:
 
 ```sh
 cd .devcontainer
@@ -59,8 +66,8 @@ docker-compose up --build -d
 ```
 Both containers run inside a **Docker bridge network** (`app-network`). 
 
-- **Internal communication** – The main container `fundcc-main` connects to RabbitMQ via `rabbitmq:5672` (instead of `localhost`). The hostname in `/src/experiments/experiment1/config.py` is set to match this configuration by default.
-- **External access** – The RabbitMQ Management Interface is a web-based dashboard that allows you to monitor message load, processing rates, and system status across components.  
+- **Internal communication** – The main container `decos-main` connects to RabbitMQ via `rabbitmq:5672`. The hostname in `/src/experiments/experiment1/config.py` is set to match this configuration by default.
+- **External access** – The RabbitMQ Management Interface is a web-based dashboard that allows you to monitor message load, processing rates, and system status across system components.  
 
   The interface is enabled by default in Docker execution and is available at:
   - **Web UI:** [http://localhost:15672](http://localhost:15672)
@@ -72,9 +79,9 @@ Both containers run inside a **Docker bridge network** (`app-network`).
   ssh -J <jump-user>@<jump-server> -L 15672:localhost:15672 <username>@<remote-server> -N -f
   ```
 
-You can modify `docker-compose.yml` to change ports.
+To change ports or hostnames, you can modify `docker-compose.yml`.
 
-#### **3.1. Create and Activate a New Conda Environment (inside Docker)**
+#### **3.1. Create and activate a new conda environment (inside Docker)**
 
 We recommend creating a clean Conda environment:
 
@@ -83,21 +90,21 @@ We recommend creating a clean Conda environment:
 conda init bash
 source ~/.bashrc 
 # Create and activate the Conda environment
-conda create -n fundcc_env python=3.11 pip numpy==1.26.4 -y
-conda activate fundcc_env
+conda create -n decos_env python=3.11 pip numpy==1.26.4 -y
+conda activate decos_env
 ```
 
 #### **3.2. Install PyTorch (inside Docker) *(_Can be skipped if using LLM inference over API_)***
 
-You can install PyTorch (matching CUDA version `12.1` used by the `fundcc-main` container) with the following command:
+You can install PyTorch (matching CUDA version `12.1` used by `decos-main` container) with the following command:
 
 ```sh
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-#### **3.3. Install FunDCC package (inside Docker)**
+#### **3.3. Install DeCoSearch package (inside Docker)**
 
-Finally, you can install FunDCC with:
+Finally, you can install DeCoSearch with:
 
 ```sh
 pip install .
@@ -105,18 +112,18 @@ pip install .
 ---
 ### **4. Execution without Docker**
 
-If you prefer to run FunDCC without Docker, follow these steps:
+If you prefer to run DeCoSearch without Docker, follow these steps:
 
-#### **4.1. Create a Conda Environment**
+#### **4.1. Create a conda environment**
 
 Create a clean Conda environment:
 
 ```sh
-conda create -n fundcc_env python=3.11 pip numpy==1.26.4 -y
-conda activate fundcc_env
+conda create -n decos_env python=3.11 pip numpy==1.26.4 -y
+conda activate decos_env
 ```
 
-#### **4.2. PyTorch Installation Matching CUDA** *(_Can be skipped if using LLM inference over API_)*
+#### **4.2. PyTorch installation matching CUDA** *(_Can be skipped if using LLM inference over API_)*
 
 You can check your installed CUDA version using `nvidia-smi` and can find compatible PyTorch versions [here](https://pytorch.org/get-started/previous-versions/). For example, to install PyTorch for CUDA `12.1`, use: 
 
@@ -124,9 +131,9 @@ You can check your installed CUDA version using `nvidia-smi` and can find compat
 conda install pytorch==2.2.2 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 ```
 
-#### **4.4. Start RabbitMQ Service (Root Access Required)**
+#### **4.4. Start RabbitMQ service (root access required)**
 
-RabbitMQ must be started before running FunDCC. If RabbitMQ is **not installed** yet, you can install it using:
+RabbitMQ must be started before running DeCoSearch. If RabbitMQ is **not installed**, you can install it using:
 
 ```sh
 sudo apt update && sudo apt install -y rabbitmq-server
@@ -144,43 +151,43 @@ If RabbitMQ is already installed but not running, start it with:
 sudo systemctl start rabbitmq-server
 ```
 
-To connect FunDCC to RabbitMQ when running **without Docker**, set the RabbitMQ host in `/src/experiments/experimentX/config.py` to:
+To connect DeCoSearch to RabbitMQ when running **without Docker**, set the RabbitMQ host in `/src/experiments/experimentX/config.py` to:
 
 ```sh 
 host: str = 'localhost'
 ```
 
-#### **Optional: Enable the Management Interface (Monitor Load and Processing Rates)**
+#### **Optional: Enable the management interface (for monitoring load and processing rates)**
 The RabbitMQ **Management Interface** provides a web-based dashboard for monitoring message load, processing rates, and system status across components. You can enable it with:
 
 ```sh
 sudo rabbitmq-plugins enable rabbitmq_management
 sudo systemctl restart rabbitmq-server
 ```
-For local and remote access instructions, see the Execution with Docker section.
+For local and remote access instructions, see Execution with Docker.
 
-#### **4.5. Install FunDCC package**
+#### **4.5. Install DeCoSearch package**
 
-Finally, install FunDCC:
+Finally, install DeCoSearch:
 
 ```sh
  pip install . 
 ```
 
-### **5. Execution with Slurm and Enroot**
+### **5. Execution with slurm and enroot**
 
-To run FunDCC on a Slurm cluster using Enroot containers, follow these steps:
+To run DeCoSearch on a Slurm cluster using Enroot containers, follow these steps:
 
-#### **5.1. Pull a PyTorch Enroot Image**  
+#### **5.1. Pull a PyTorch enroot image**  
 
-You can download and convert a PyTorch image with the required CUDA version into an Enroot image.  
+You can download and convert a PyTorch image with the required CUDA version to an enroot image.  
 For example, to install PyTorch 2.2.2 with CUDA 12.1:  
 
 ```sh
 enroot import -o /desired/path/custom_name.sqsh docker://pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime
 ```
 
-#### **5.2. Install RabbitMQ Inside the Enroot Image**  
+#### **5.2. Install RabbitMQ inside the enroot image**  
 
 You can start the image with root privileges to install RabbitMQ, curl, and OpenSSH client:  
 ```sh
@@ -196,19 +203,19 @@ exit
 enroot export -o desired/path/custom_name_with_rabbitmq.sqsh custom_name
 ```
 
-#### **5.2. Submit SLURM Job**  
+#### **5.2. Submit SLURM job**  
 
 You can submit your SLURM job using the previously created Enroot image and a job script (`.sh`).  
-For an example of multi-node execution, see `/FunDCC/src/experiments/experiment1/exp1.sh`. This script also sets up an SSH reverse tunnel for local access to the RabbitMQ management interface.  
+For an example of multi-node execution, see `src/experiments/experiment1/exp1.sh`. This script also sets up an SSH reverse tunnel for local access to the RabbitMQ management interface.  
 
 ___
 ## **Usage**
 
-To start an evolutionary search experiment, navigate to your experiment directory (e.g., `experiments/experiment1/`) and run:
+To start an evolutionary search experiment, navigate to your experiment directory (e.g., `src/experiments/experiment1/`) and run:
 
 ```bash
 cd src/experiments/experiment1
-python -m fundcc
+python -m decos
 ```
 
 This launches a search using the configurations specified in the directory's `config.py` file. The file includes explanations for each argument.
@@ -216,7 +223,7 @@ This launches a search using the configurations specified in the directory's `co
 **Note:** If stopping an experiment, check RabbitMQ to ensure that all evaluator and sampler processes have shut down before starting a new one. To close any remaining processes, you can restart the RabbitMQ container. For local execution, you can restart the RabbitMQ service using `sudo systemctl restart rabbitmq-server`. 
 
 
-**(Optional) Preloading the LLM**
+**(Optional) Downloading the LLM**
 
 Before running the evolutionary search, you can download the LLM from Hugging Face and store it in a cache location. To download StarCoder2, run:
 
@@ -228,10 +235,10 @@ By default, the model will be stored in the `models/` directory inside your curr
 
 ---
 
-## **Command-Line Arguments**
+## **Command-line arguments**
 You can specify **general settings, resource management, and termination criteria** via command-line arguments:
 
-#### **General Settings**
+#### **General settings**
 - `--config-path /path/to/config`  
   - Path to the configuration file.  
   - Default: `config.py` (inside the directory where the script is run).
@@ -252,7 +259,7 @@ You can specify **general settings, resource management, and termination criteri
   - Directory where logs will be stored.  
   - Default: `logs/` (inside the directory where the script is run).
 
-#### **Resource Management**
+#### **Resource management**
 - `--no-dynamic-scaling`  
   - Disables dynamic scaling of evaluators and samplers based on message load.  
   - Default: enabled.
@@ -265,7 +272,7 @@ You can specify **general settings, resource management, and termination criteri
   - Sets the maximum number of evaluators and samplers that can be created dynamically.
   - Default: large value (`1000`), allowing scaling based on resource utilization without hard limits.
 
-#### **Termination Criteria**
+#### **Termination criteria**
 - `--prompt_limit`  
   - Maximum number of prompts that can be published. Once reached, no new prompts are constructed,  but queued messages are still processed.
   - Default: `400_000`
@@ -279,44 +286,44 @@ You can specify **general settings, resource management, and termination criteri
   - If set, the experiment terminates early upon finding a target solution.  
 
 ___
-## **Scaling FunDCC Across Multiple Nodes**
+## **Scaling DeCoSearch across multiple nodes**
 
 Our implementation supports distributed execution by attaching **evaluator** and **sampler** processes to a running script for:
 
 - **Multi-node execution** to increase the rate at which new priority functions are processed (generated, evaluated, and stored).
 - **Dynamic scaling** to balance message load at runtime.
 
-### **Attaching Additional Processes**
+### **Attaching additional processes**
 
 You can run the following commands to attach more evaluators and samplers:
 ```sh
-python -m fundcc.attach_evaluators
-python -m fundcc.attach_samplers
+python -m decos.attach_evaluators
+python -m decos.attach_samplers
 ```
 
 These scripts use the same **command-line arguments** as the main script and can be run in the same execution modes, with the difference that **RabbitMQ should not be restarted** if additional processes are attached.
 
-#### **Local Execution**
+#### **Local execution**
 
-- You can follow the **Execution Without Docker** steps, skipping the RabbitMQ startup and running the attach scripts instead of the main script (`fundcc`).
+- You can follow the **Execution without docker** steps, skipping the RabbitMQ startup and running the attach scripts instead of the main script (`decos`).
 
-#### **Docker Execution**
+#### **Docker execution**
 
-- You can start only the `fundcc-main` container (without launching a new RabbitMQ instance) by running:
+- You can start only the `decos-main` container (without launching a new RabbitMQ instance) by running:
   ```sh
-  cd FunDCC/.devcontainer/external/.devcontainer  
+  cd DeCoSearch/.devcontainer/external/.devcontainer  
   docker-compose up  
   ```
-  This starts a `fundcc-main` container on the new node for running the attach scripts.
+  This starts a `decos-main` container on the new node for running the attach scripts.
 
-#### **SLURM & Enroot Execution**
+#### **SLURM & enroot execution**
 
 - For an example of multi-node SLURM execution, see:
   ```sh
-  /FunDCC/src/experiments/experiment1/exp1.sh
+  /DeCoSearch/src/experiments/experiment1/exp1.sh
   ```
 
-### **Configuring RabbitMQ for Multi-Node Execution**
+### **Configuring RabbitMQ for multi-node execution**
 
 To attach processes from a different node, the new node must be able to connect to the main node running RabbitMQ.
 
@@ -334,10 +341,10 @@ If the nodes **cannot** resolve each other’s IP addresses:
 
 - You can then set `host: 'localhost'` on the new node.
 
-## **Running Multiple Experiments in Parallel With SLURM**
+## **Running multiple experiments in parallel with SLURM**
 If you want to run multiple experiments in parallel, you need to **assign different RabbitMQ ports**.  
 You can update both the **TCP listener port** and the **management interface port** in `rabbitmq.conf`.  
-Then, update the corresponding ports in your experiment config file (`config.py`) to match the new RabbitMQ settings.
+Then, update the corresponding ports in your experiment config file (`src/experiments/experiment1/config.py`) to match the new RabbitMQ settings.
 
 
 

@@ -10,9 +10,9 @@ import os
 import signal
 import sys
 import pickle
-from fundcc import programs_database
-from fundcc import sampler
-from fundcc import code_manipulation
+from decos import programs_database
+from decos import sampler
+from decos import code_manipulation
 from multiprocessing import Manager
 import copy
 import psutil
@@ -20,17 +20,17 @@ import GPUtil
 import pynvml
 from typing import Sequence, Any
 import datetime
-from fundcc import evaluator
+from decos import evaluator
 import signal
 import sys
-from fundcc import gpt
+from decos import gpt
 import asyncio
 import aio_pika
 from multiprocessing import current_process
 import argparse
 import glob
 import shutil
-from fundcc.scaling_utils import ResourceManager
+from decos.scaling_utils import ResourceManager
 import importlib.util
 import time 
 
@@ -98,7 +98,7 @@ class TaskManager:
         # Create the log directory for the experiment
         os.makedirs(log_dir, exist_ok=True)
 
-        log_file_path = os.path.join(log_dir, 'fundcc.log')
+        log_file_path = os.path.join(log_dir, 'decos.log')
         handler = FileHandler(log_file_path, mode='w') 
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
@@ -450,7 +450,7 @@ class TaskManager:
 
 
     def evaluator_process(self, template, inputs, amqp_url, TARGET_SIGNATURES):
-        import fundcc.evaluator
+        import decos.evaluator
         import signal
         import asyncio
 
@@ -652,7 +652,7 @@ if __name__ == "__main__":
         "--target_solutions",
         type=str,
         default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',  
-        help="JSON string specifying target solutions for (n, s_value). Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'"
+        help="JSON string specifying target solutions for (n, s_value) to terminate search early. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'"
     )
 
     args = parser.parse_args()

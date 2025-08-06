@@ -40,3 +40,4 @@ src/experiments/experiment*/
 
 # But do NOT ignore experiment1
 !src/experiments/experiment1/
+src/graphs/KaMIS/

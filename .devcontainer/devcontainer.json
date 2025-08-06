@@ -1,8 +1,8 @@
 {
-  "name": "fundcc-main",
+  "name": "decos-main",
   "dockerComposeFile": "docker-compose.yml",
-  "service": "fundcc-main",
-  "workspaceFolder": "/workspace/FunDCC/",
+  "service": "decos-main",
+  "workspaceFolder": "/workspace/DeCoSearch/",
   "overrideCommand": false, 
   "forwardPorts": [3000],
   "customizations": {

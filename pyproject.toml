@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fundcc"
+name = "decos"
 version = "0.1.0"
-description = "FunDCC package"
+description = "DeCoSearch package"
 requires-python = ">=3.10"
 dependencies = [
   "numpy",
@@ -27,4 +27,4 @@ dependencies = [
 where = ["src"]
 
 [project.scripts]
-fundcc = "fundcc.fundcc:main"
+decos = "decos.decos:main"

@@ -8,14 +8,15 @@ import logging
 import aio_pika
 import asyncio
 import json
-from fundcc import programs_database
+from decos import programs_database
 from typing import List
-from fundcc.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
+from decos.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
 from openai import AzureOpenAI
 import os
 import logging
 
 logger = logging.getLogger('main_logger')
+
 
 class LLM_model:
     def __init__(self, samples_per_prompt: int, model="gpt-4o-mini"):
