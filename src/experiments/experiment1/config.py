@@ -13,7 +13,10 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Configuration of a FunSearch experiment. Only data classes no methods"""
+"""Configuration of a FunSearch experiment. Only data classes no methods
+
+Adjusted to include RabbitMQ setup, deduplication option and set sepecification file for experiment. 
+"""
 import dataclasses
 from typing import List
 import os
@@ -30,7 +33,7 @@ class RabbitMQConfig:
       username: Username for authentication with the RabbitMQ server.
       password: Password for authentication with the RabbitMQ server.
     """
-    host: str = 'sequoia.mli.ei.tum.de'
+    host: str = 'rabbitmq'
     port: int = 5672 
     username: str = 'guest' 
     password: str = 'guest' 
@@ -82,7 +85,7 @@ class SamplerConfig:
   max_new_tokens: int = 246
   top_p: float =  0.7777777777777778 
   repetition_penalty: float = 1.222222
-  gpt: bool = True   
+  gpt: bool = False   
   
 def get_spec_path() -> str:
     # Get the absolute directory of this file

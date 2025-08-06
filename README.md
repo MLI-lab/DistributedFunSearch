@@ -220,8 +220,18 @@ python -m decos
 
 This launches a search using the configurations specified in the directory's `config.py` file. The file includes explanations for each argument.
 
-**Note:** If stopping an experiment, check RabbitMQ to ensure that all evaluator and sampler processes have shut down before starting a new one. To close any remaining processes, you can restart the RabbitMQ container. For local execution, you can restart the RabbitMQ service using `sudo systemctl restart rabbitmq-server`. 
+The number of GPUs used is controlled by the `num_samplers` parameter, each sampler runs on a separate GPU.
+The number of CPUs used is determined by the `num_evaluators` parameter, each evaluator runs two parallel CPU processes to evaluate generated functions on different inputs.
 
+You can monitor the messages passed between components through the RabbitMQ Management Interface.
+
+**Note:** If stopping an experiment, check RabbitMQ to ensure that all evaluator and sampler processes have shut down before starting a new one. To close any remaining processes, you can restart the RabbitMQ container. For local execution, you can restart the RabbitMQ service using `sudo systemctl restart rabbitmq-server`. 
+If you are using Azure OpenAI (i.e., `gpt=True` in the `SamplerConfig` class), make sure to export the following environment variables before running:
+
+```bash
+export AZURE_OPENAI_API_KEY=<your-key>
+export AZURE_OPENAI_API_VERSION=<your-version>  # e.g., 2024-08-01-preview
+```
 
 **(Optional) Downloading the LLM**
 
@@ -231,7 +241,9 @@ Before running the evolutionary search, you can download the LLM from Hugging Fa
 python load_llm.py
 ```
 
-By default, the model will be stored in the `models/` directory inside your current working directory.
+The model will be cached in the `/workspace/models/` directory, for both download in advance or when the script first runs.
+
+To change the cache location, you can modify the `TRANSFORMERS_CACHE` environment variable in `src/decos/sampler.py`.
 
 ---
 
