@@ -6,7 +6,12 @@
 
 <p>&nbsp;</p>
 
-This repository provides a **distributed implementation of FunSearch** (Romera et al., 2024) using RabbitMQ for parallelization via asynchronous message passing. The code accompanies the paper *"LLM-Guided Search for Deletion-Correcting Codes"* and is designed for discovering large deletion-correcting codes for any code length and deletion correction capacity.
+This repository contains a **distributed implementation of FunSearch** (Romera et al., 2024), using RabbitMQ for parallelization via asynchronous message passing.  
+It is designed to discover large deletion-correcting codes for any code length and deletion capacity.
+
+For more details, see our paper:  
+**[LLM-Guided Search for Deletion-Correcting Codes](https://arxiv.org/abs/2504.00613)**
+
 
 **DeCoSearch** (Deletion-Correcting Code Search) is an LLM-guided framework that iteratively refines a **priority function** using **evolutionary search**. It is guided by a **pretrained LLM**, defaulting to **StarCoder2**, with support for **OpenAI models via API** (e.g., **GPT-4o Mini** via **Azure OpenAI**).
 
