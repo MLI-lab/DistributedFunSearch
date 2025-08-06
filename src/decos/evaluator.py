@@ -14,8 +14,20 @@
 # ==============================================================================
 
 
-"""
-Asynchronous, distributed evaluator with sandboxed execution of generated functions.
+"""Asynchronous RabbitMQ Evaluator.
+
+Differences from the original DeepMind FunSearch version
+
+* Evaluates samples using a sandboxed execution environment that runs each 
+  generated program on test inputs in isolated subprocesses.
+* Uses multiprocessing with CPU parallelism (via `ProcessPoolExecutor`) to evaluate 
+  multiple inputs in parallel.
+* Tracks and publishes per-sample CPU time, along with GPU time and token counts 
+  received from the sampler.
+* Publishes results back to the database queue with functional scores, hashed outputs, 
+  and a flag indicating whether an optimal solution was found.
+* Logs full outputs for prompts with structurally identical few-shot examples, 
+  allowing downstream deduplication and analysis.
 """
 
 

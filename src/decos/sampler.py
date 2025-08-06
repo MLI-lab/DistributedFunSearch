@@ -13,15 +13,25 @@
 # limitations under the License.
 # ==============================================================================
 
-"""
-Asynchronous, distributed sampler.
+"""Asynchronous RabbitMQ Sampler.
 
-Consumes prompts from RabbitMQ, uses an HF LLM to generate N continuations,
-and publishes results to the evaluator queue.
+Differences from the original DeepMind FunSearch version
 
-Dynamically lowers sampling temperature as the program database grows
-when `temperature_period` is set (otherwise the temperature stays fixed).
+* Implements placeholder to inferences LLM (StarCoder-2 15B).  
+* Dynamic batching based on message load. Messages are collected for up to 10 milliseconds; 
+  if at least 10 prompts arrive within that window we batch 10, otherwise we batch the smaller number that arrived. 
+* Dynamically adjusts the sampling temperature based on how many programs 
+  have been stored. Encourages exploration early (higher temperature) and 
+  shifts toward exploitation (greedy decoding) after a configurable number 
+  of new programs. Once this threshold is reached, temperature is reset 
+  and the process repeats.
+* Tracks GPU runtime and token counts (input/output) for each sample.
+* **CPU/GPU fallback**: if CUDA is unavailable the model logs a warning
+  and runs on CPU rather than crashing.
+* When a prompt is flagged as functionally identical to a previous one, all samples 
+  are logged to `duplicate_samples.txt` for manual inspection and debugging.
 """
+
 
 import random
 import os
