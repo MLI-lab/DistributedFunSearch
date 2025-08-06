@@ -192,10 +192,6 @@ class ProgramsDatabase:
 
         self.cumulative_evaluator_cpu_time = 0.0  # Track total CPU time from evaluators
         self.cumulative_sampler_gpu_time = 0.0  # Track total GPU time
-
-        self.cumulative_input_tokens  = 0         
-        self.cumulative_output_tokens = 0         
-
         self.dublicate_prompts=0
         self.total_prompts=0 # equals total processed messages as each message stored triggers a prompt 
         self.total_stored_programs = 0
@@ -229,9 +225,6 @@ class ProgramsDatabase:
 
         self.cumulative_evaluator_cpu_time = checkpoint_data.get("cumulative_evaluator_cpu_time", 0.0)
         self.cumulative_sampler_gpu_time = checkpoint_data.get("cumulative_sampler_gpu_time", 0.0)
-
-        self.cumulative_input_tokens  = checkpoint_data.get("cumulative_input_tokens",  0)
-        self.cumulative_output_tokens = checkpoint_data.get("cumulative_output_tokens", 0)
 
         self.total_prompts=checkpoint_data.get("total_prompts", 0)
         self.dublicate_prompts = checkpoint_data.get("dublicate_prompts", 0)
@@ -292,8 +285,6 @@ class ProgramsDatabase:
         checkpoint_data = {
             "cumulative_evaluator_cpu_time": self.cumulative_evaluator_cpu_time,
             "cumulative_sampler_gpu_time": self.cumulative_sampler_gpu_time,
-            "cumulative_input_tokens":  self.cumulative_input_tokens,
-            "cumulative_output_tokens": self.cumulative_output_tokens,
             "best_score_per_island": list(self._best_score_per_island),
             "best_program_per_island": [program.to_dict() if program else None for program in self._best_program_per_island],
             "best_scores_per_test_per_island": list(self._best_scores_per_test_per_island),
@@ -427,8 +418,6 @@ class ProgramsDatabase:
                 # Update cumulative evaluator CPU and GPU times
                 evaluator_cpu_time = data.get("cpu_time", 0.0)
                 sampler_gpu_time = data.get("gpu_time", 0.0)
-                input_tokens  = int(data.get("input_tokens", 0))
-                output_tokens = int(data.get("output_tokens", 0))
                 found_optimal_solution = data.get("found_optimal_solution", False)
                 if found_optimal_solution and not self.found_optimal_solution:
                     self.found_optimal_solution = True  # Mark as found
@@ -437,9 +426,6 @@ class ProgramsDatabase:
 
                 self.cumulative_evaluator_cpu_time += evaluator_cpu_time
                 self.cumulative_sampler_gpu_time += sampler_gpu_time
-
-                self.cumulative_input_tokens  += input_tokens
-                self.cumulative_output_tokens += output_tokens
 
                 logger.debug(f"Updated cumulative CPU time: {self.cumulative_evaluator_cpu_time:.2f} seconds")
                 logger.debug(f"Updated cumulative GPU time: {self.cumulative_sampler_gpu_time:.2f} seconds")

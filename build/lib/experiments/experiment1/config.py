@@ -37,7 +37,7 @@ class RabbitMQConfig:
     port: int = 5672 
     username: str = 'guest' 
     password: str = 'guest' 
-    #vhost = "temp_1" for cluster execution only 
+    vhost = "temp_1"
     
 
 @dataclasses.dataclass(frozen=True)

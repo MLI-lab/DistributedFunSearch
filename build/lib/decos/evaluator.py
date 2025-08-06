@@ -1,24 +1,4 @@
-# Copyright 2023 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-
-"""
-Asynchronous, distributed evaluator with sandboxed execution of generated functions.
-"""
-
-
+"""Class for evaluating programs proposed by the Sampler."""
 import ast
 from typing import Any
 import copy
@@ -260,12 +240,8 @@ class Evaluator:
             logger.debug(f"Evaluator: Starts to analyze generated continuation of def priority: {data['sample']}")
 
             # Deserialize GPU time
-            gpu_time      = data.get("gpu_time", 0.0)
-            input_tokens  = data.get("input_tokens", 0)      
-            output_tokens = data.get("output_tokens", 0)     
+            gpu_time = data.get("gpu_time", 0.0)
             logger.debug(f"Received GPU time from Sampler: {gpu_time} seconds")
-            logger.debug(f"Received input_tokens from Sampler: {input_tokens}")
-            logger.debug(f"Received output_tokens from Sampler: {output_tokens}")
 
             # Process the new function from the generated code
             new_function, program = _sample_to_program(data["sample"], data.get("version_generated"), self.template, self.function_to_evolve)
@@ -277,8 +253,8 @@ class Evaluator:
                 tasks = {self.executor.submit(run_evaluation, self.sandbox, program, self.function_to_run, input, self.timeout_seconds, self.call_count, self.call_count_lock): input for input in self.inputs}
             else:
                 logger.info("New function body is None or empty. Skipping execution but publishing 'return'.")
-                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False)
-                await self.publish_to_database(result, hash_value)  # Publish "return" result
+                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, False)
+                await self.publish_to_database(result, message, hash_value)  # Publish "return" result
                 return  # Early return after publishing
 
             scores_per_test = {}
@@ -319,13 +295,13 @@ class Evaluator:
 
             # Prepare the result for publishing
             if len(scores_per_test) == len(self.inputs) and any(score != 0 for score in scores_per_test.values()):
-                result = (new_function, data['island_id'], scores_per_test, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution)
+                result = (new_function, data['island_id'], scores_per_test, data['expected_version'], self.cumulative_cpu_time, gpu_time, found_optimal_solution)
                 logger.debug(f"Scores are {scores_per_test}")
             else:
-                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False)
+                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, False)
 
             # Publish the result
-            await self.publish_to_database(result, hash_value)
+            await self.publish_to_database(result, message, hash_value)
 
             # Reset cumulative CPU time after publishing
             with self.cpu_time_lock:
@@ -341,10 +317,10 @@ class Evaluator:
                 shutil.rmtree(call_data_folder)
 
 
-    async def publish_to_database(self, result, hash_value):
+    async def publish_to_database(self, result, message, hash_value):
         try:
 
-            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution = result 
+            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, found_optimal_solution = result 
 
             serialized_result = {
                 "new_function": function.serialize() if hasattr(function, 'serialize') else str(function),
@@ -354,8 +330,6 @@ class Evaluator:
                 "hash_value": hash_value,
                 "cpu_time": cpu_time,  # Include CPU time
                 "gpu_time": gpu_time,   # Include GPU time
-                "input_tokens":      input_tokens,        
-                "output_tokens":     output_tokens,       
                 "found_optimal_solution": found_optimal_solution
             }
 

@@ -13,7 +13,6 @@ services:
     volumes:
       - ~/.ssh:/root/.ssh
       - ../:/workspace/DeCoSearch
-      - ../:/workspace/DeCoSearch
       - /mnt/hdd_pool_zion/users/franziska/Checkpoints/Graphs:/mnt/graphs/
       - /srv/:/srv/
     networks:

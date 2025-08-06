@@ -21,7 +21,6 @@ It implements 2 classes representing unities of code:
 - Program, which contains a code preface (which could be imports, global
   variables and classes, ...) and a list of Functions.
 """
-
 import ast # to parse Python code into its Abstract Syntax Tree
 from collections.abc import Iterator, MutableSet, Sequence # to define types 
 import dataclasses # Provides decorators to simplify class structure 
@@ -223,19 +222,6 @@ class ProgramVisitor(ast.NodeVisitor):
 
 
 def text_to_program(text: str, remove_classes: bool = False) -> Program:
-
-    """
-    Parse text into a class:`Program`.
-
-    - Builds a preface (everything before the first top-level function).  
-    - Collects every top-level function into class:`Function` objects.  
-    - When remove_classes is True, any code lines belonging to
-      top-level class definitions are discarded before the preface and
-      functions are assembled for the prompt to the LLM.
-
-    Returns a :class:`Program` containing the cleaned preface and functions.
-    """
-
     try:
         tree = ast.parse(text)
         logger.debug("AST parsed successfully.")

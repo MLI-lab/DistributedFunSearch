@@ -1,28 +1,3 @@
-# Copyright 2023 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-"""
-Asynchronous, distributed sampler.
-
-Consumes prompts from RabbitMQ, uses an HF LLM to generate N continuations,
-and publishes results to the evaluator queue.
-
-Dynamically lowers sampling temperature as the program database grows
-when `temperature_period` is set (otherwise the temperature stays fixed).
-"""
-
 import random
 import os
 import json
@@ -41,7 +16,7 @@ logger = logging.getLogger('main_logger')
 
 
 class LLM_model:
-    """Language model that generates continuation of provided source code."""
+    """Language model that predicts continuation of provided source code."""
     
     def __init__(
             self,
@@ -64,7 +39,7 @@ class LLM_model:
 
         # Set cache directory and environment variable
         try:
-            self.cache_dir = "/mnt/graphs/"
+            self.cache_dir = "/workspace/models/"
             os.makedirs(self.cache_dir, exist_ok=True)
             os.environ["TRANSFORMERS_CACHE"] = self.cache_dir
         except Exception as e:
@@ -81,9 +56,6 @@ class LLM_model:
             logger.info("Using device_map='auto' (all available GPUs).")
         else:
             self.device_map = None
-            self.device = "cpu"
-                    logger.warning("No CUDA GPU available. Falling back to CPU.")
-
             if isinstance(device, int):
                 self.device = f"cuda:{device}"
             else:
@@ -185,9 +157,6 @@ class LLM_model:
 
             inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
-            input_token_counts = [len(ids) for ids in inputs["input_ids"]]
-
-
             input_length = inputs["input_ids"].shape[1]
             logger.info(f"LLM: input dims {inputs['input_ids'].shape}")
 
@@ -195,8 +164,6 @@ class LLM_model:
             start_event = torch.cuda.Event(enable_timing=True)
             end_event = torch.cuda.Event(enable_timing=True)
             start_event.record()
-
-            all_output_token_counts = []
 
             for _ in range(self._samples_per_prompt):
                 try:
@@ -220,22 +187,18 @@ class LLM_model:
                 except Exception as e:
                     logger.error(f"Decoding failed: {e}")
 
-                all_output_token_counts.append([t.numel() for t in generated_tokens])        
-
             end_event.record()
             torch.cuda.synchronize()
             self.gpu_time = start_event.elapsed_time(end_event) / 1000.0
             logger.debug(f"GPU sampling time: {self.gpu_time:.2f} sec")
-            # Transpose so outer index = prompt
-            output_token_counts = list(map(list, zip(*all_output_token_counts)))
 
             # Group the samples so that for each prompt we have a list of generated completions
             grouped_samples = list(map(list, zip(*all_samples)))
-            return grouped_samples, input_token_counts, output_token_counts
+            return grouped_samples
 
         except Exception as e:
             logger.error(f"Error during batch generation: {e}")
-            return [], [], []
+            return []
 
 
 class Sampler:
@@ -277,7 +240,10 @@ class Sampler:
                         batch.append(message)
                         current_time = asyncio.get_event_loop().time()
                         # If we hit batch size or time threshold, process the batch
-                        if (len(batch) >= self.samples_per_batch or (current_time - batch_start_time) > batch_timeout):
+                        if (
+                            len(batch) >= self.samples_per_batch
+                            or (current_time - batch_start_time) > batch_timeout
+                        ):
                             await self.process_batch_s(batch)
                             batch = []
                             batch_start_time = asyncio.get_event_loop().time()
@@ -295,13 +261,17 @@ class Sampler:
         prompts = []
         metadata = []
         flags = []
+        total_registered_programs = 0  # track if any message has a value
+
         for message in batch:
             try:
                 async with message.process():
                     data = json.loads(message.body.decode())
                     prompt_data = data["prompt"]
+                    # In your original code, total_registered_programs is overwritten each time.
+                    # If you want the last one, keep as is:
                     total_registered_programs = data.get("total_registered_programs", 0)
-                    flag = data.get("flag", False) # sampler gets from database a flag if prompt has few shot examples thar are functionally identically
+                    flag = data.get("flag", False)
                     flags.append(flag)
                     prompt = programs_database.Prompt.deserialize(prompt_data)
 
@@ -313,11 +283,11 @@ class Sampler:
                             "expected_version": prompt.expected_version,
                         })
                     else:
-                        logger.warning(f"Skipping prompt with island_id {prompt.island_id}: Prompt is empty.")
-                        
+                        logger.warning(
+                            f"Skipping prompt with island_id {prompt.island_id}: no code."
+                        )
             except Exception as e:
                 logger.error(f"Sampler: Error processing message: {e}")
-                total_registered_programs = 0  
                 continue
 
         if not prompts:
@@ -326,43 +296,39 @@ class Sampler:
 
         # Get the completions from the LLM
         try:
-            samples_list, input_token_counts, output_token_counts = self._llm.draw_batch_samples(prompts, total_registered_programs, self.temperature_period)
+            samples_list = self._llm.draw_batch_samples(
+                prompts, total_registered_programs, self.temperature_period
+            )
             gpu_time = self._llm.gpu_time
         except Exception as e:
             logger.error(f"LLM sampling failed: {e}")
             return
 
         # Publish results to the evaluator queue
-        for prompt_idx, (samples, meta, flag) in enumerate(zip(samples_list,metadata, flags)):
-            # log duplicated-prompt runs for manual inspection of output+prompt
+        for samples, meta, flag in zip(samples_list, metadata, flags):
             if flag:
                 try:
                     with open("duplicate_samples.txt", "a") as f:
                         f.write(f"Prompt Metadata:\n{meta}\n")
                         for idx, sample in enumerate(samples):
                             f.write(f"Output {idx + 1}:\n{sample}\n{'-'*50}\n")
-                    logger.info("Logged duplicate prompt and outputs to "
-                                "'duplicate_samples.txt'.")
+                    logger.info("Logged duplicate prompt and outputs to 'duplicate_samples.txt'.")
                 except Exception as e:
                     logger.error(f"Error logging duplicate data: {e}")
 
-            # Send every sample to the evaluator queue
-            for sample_idx, sample in enumerate(samples):
+            for sample in samples:
                 message_data = {
-                    "sample":             sample,
-                    "island_id":          meta["island_id"],
-                    "version_generated":  meta["version_generated"],
-                    "expected_version":   meta["expected_version"],
-                    "gpu_time":           gpu_time,
-                    "input_tokens":       input_token_counts[prompt_idx],
-                    "output_tokens":      output_token_counts[prompt_idx][sample_idx],
+                    "sample": sample,
+                    "island_id": meta["island_id"],
+                    "version_generated": meta["version_generated"],
+                    "expected_version": meta["expected_version"],
+                    "gpu_time": gpu_time,
                 }
                 serialized_message = json.dumps(message_data)
-
                 try:
                     await self.channel.default_exchange.publish(
                         aio_pika.Message(body=serialized_message.encode()),
-                        routing_key="evaluator_queue",
+                        routing_key='evaluator_queue'
                     )
                     logger.debug("Published sample to evaluator_queue.")
                 except Exception as e:

@@ -1,68 +1,42 @@
-# Copyright 2023 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-"""
-This is a distributed implementation of FunSearch, adapted from DeepMind's original single-threaded version.
-It uses RabbitMQ and asyncio for asynchronous message passing, enabling parallel evaluation and sampling across multiple processes and nodes.
-"""
-
-import os
-import sys
-import time
-import glob
-
-import json
-import copy
-import shutil
-import signal
-import pickle
-import argparse
-import logging
 import asyncio
-import datetime
-from typing import Sequence, Any
+import logging
 from logging import FileHandler
-from multiprocessing import Manager, current_process
-
-import torch.multiprocessing as mp
+import json
 import aio_pika
 from yarl import URL
+import torch.multiprocessing as mp
+import time
+import os
+import signal
+import sys
+import pickle
+from decos import programs_database
+from decos import sampler
+from decos import code_manipulation
+from multiprocessing import Manager
+import copy
 import psutil
 import GPUtil
 import pynvml
-
-from decos import (
-    programs_database,
-    sampler,
-    code_manipulation,
-    evaluator,
-    gpt,
-)
+from typing import Sequence, Any
+import datetime
+from decos import evaluator
+import signal
+import sys
+from decos import gpt
+import asyncio
+import aio_pika
+from multiprocessing import current_process
+import argparse
+import glob
+import shutil
 from decos.scaling_utils import ResourceManager
 import importlib.util
-
-# Disable multi-threaded tokenization.
-# Our prompts are short and we run many parallel processes, so single-threaded tokenization is faster 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import time 
 
 def load_config(config_path):
     """
-    Dynamically load a configuration module from a given file path.
-
-    This function imports and returns the `Config` class instance defined in the target file,
-    allowing flexible experiment configuration without hardcoded imports.
+    Dynamically load a configuration module from a specified file path.
     """
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Configuration file not found at {config_path}")
@@ -77,6 +51,7 @@ def load_config(config_path):
     return config_module.Config()
 
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def backup_python_files(src, dest, exclude_dirs=[]):
     """
@@ -97,8 +72,8 @@ def backup_python_files(src, dest, exclude_dirs=[]):
 
 class TaskManager:
     def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, TARGET_SIGNATURES):
-        self.template = code_manipulation.text_to_program(specification) 
-        self.template_pdb = code_manipulation.text_to_program(specification, remove_classes=True) # we do not include class definitions in prompt to LLM 
+        self.template = code_manipulation.text_to_program(specification)
+        self.template_pdb = code_manipulation.text_to_program(specification, remove_classes=True)
         self.inputs = inputs
         self.config = config
         self.logger = self.initialize_logger(log_dir)
@@ -110,7 +85,6 @@ class TaskManager:
         self.queues = []
         self.connection = None
         if self.config.sampler.gpt: 
-            # if inference over API execution over cpus only
             self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True)
         else: 
             self.resource_manager = ResourceManager(log_dir=log_dir)
@@ -194,14 +168,14 @@ class TaskManager:
         try: 
             amqp_url = URL(
                 f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' #{self.config.rabbitmq.vhost}
-            ).update_query(heartbeat=60)
+            ).update_query(heartbeat=480000)
             connection = await aio_pika.connect_robust(amqp_url)
         except Exception as e:
             try:
                 self.logger.info("No vhost configured, connecting without.")
                 amqp_url = URL(
                     f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/' #{self.config.rabbitmq.vhost}
-                ).update_query(heartbeat=60)
+                ).update_query(heartbeat=480000)
                 connection = await aio_pika.connect_robust(amqp_url)
             except Exception as e: 
                 self.logger.info("Cannot connect to rabbitmq. Change config file.")
@@ -309,7 +283,7 @@ class TaskManager:
             self.queues = ["database_queue", "sampler_queue", "evaluator_queue"]
 
             # Run all tasks concurrently
-            await asyncio.gather(*self.tasks, return_exceptions=True)
+            await asyncio.gather(*self.tasks)
 
         except Exception as e:
             self.logger.error(f"Exception occurred in main_task: {e}")
@@ -677,7 +651,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--target_solutions",
         type=str,
-        default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',  # if different eval inputs used effectively will never terminate early
+        default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',  
         help="JSON string specifying target solutions for (n, s_value) to terminate search early. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'"
     )
 
@@ -756,7 +730,7 @@ if __name__ == "__main__":
  
         # Initialize the task manager
         task_manager = TaskManager(specification=specification, inputs=inputs, config=config, log_dir=args.log_dir, TARGET_SIGNATURES=TARGET_SIGNATURES )
-        main.task_manager = task_manager
+
         task = asyncio.create_task(
             task_manager.main_task(
                 save_checkpoints_path=args.save_checkpoints_path,
@@ -766,56 +740,8 @@ if __name__ == "__main__":
         )
         await task  # Ensure the task is awaited
 
-    # helper for graceful-shutdown 
-    async def _shutdown(loop, signame):
-        print(f"\nReceived {signame}. Shutting down gracefully…")
-
-        # Stop accepting new callbacks
-        loop.stop()
-
-        # Terminate child processes and give them a grace period
-        children = (main.task_manager.evaluator_processes +
-                    main.task_manager.sampler_processes +
-                    main.task_manager.database_processes)
-
-        for p in children:
-            if p.is_alive():
-                p.terminate()          # SIGTERM first
-
-        deadline = time.time() + 10     # 10-second grace period
-        while any(p.is_alive() for p in children) and time.time() < deadline:
-            await asyncio.sleep(0.2)
-
-        # SIGKILL anything that’s still around
-        for p in children:
-            if p.is_alive():
-                p.kill()
-
-        # Cancel all still-pending asyncio tasks without awaiting them
-        for t in asyncio.all_tasks(loop):
-            t.cancel()
-
-        # Close the default AMQP connection if the parent still owns one
-        try:
-            await main.task_manager.connection.close(no_wait=True)
-        except Exception:
-            pass
-
-
-    # run the loop  
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(
-            sig, lambda s=sig: asyncio.create_task(_shutdown(loop, s.name))
-        )
-
+    # Top-level call to asyncio.run() to start the event loop
     try:
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.close()
-        sys.exit(0)
-
+        asyncio.run(main())
+    except Exception as e:
+        print(f"Error in asyncio.run(main()): {e}")

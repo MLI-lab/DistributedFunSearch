@@ -40,12 +40,6 @@ class ResourceManager:
         """Initialize NVML for GPU monitoring."""
         pynvml.nvmlInit()
 
-
-    async def has_enough_system_memory(self, min_free_gib=30):
-        mem = await asyncio.to_thread(psutil.virtual_memory)
-        free_gib = mem.available / (1024**3)
-        return free_gib >= min_free_gib
-
     def _initialize_resource_logger(self, log_dir):
         """Sets up a file-based logger."""
         pid = os.getpid()
@@ -192,7 +186,7 @@ class ResourceManager:
                 sampler_message_count = await self.get_queue_message_count(sampler_queue) if sampler_queue else 0
                 self.resource_logger.info(f"Message counts are {evaluator_message_count} and {sampler_message_count}")
                 # Scale Evaluators
-                evaluator_scaled = False
+                evaluator_scaled = True
                 if evaluator_queue and max_evaluators > 0:
                     can_scale_eval = await self.can_scale_evaluator()
                     if evaluator_message_count > 10 and len(evaluator_processes) < max_evaluators and can_scale_eval:
@@ -211,7 +205,7 @@ class ResourceManager:
                     if self.cpu_only:
                          assignment = await self.can_scale_evaluator() # if we are in cpu only mode also check cpu load for samplers 
                     self.resource_logger.info(f"Assignment is {assignment}")
-                    if sampler_message_count > 50 and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
+                    if sampler_message_count > 50 and len(sampler_processes) < max_samplers and assignment:
                         self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
                         started = self.start_sampler_process(sampler_function, sampler_args, sampler_processes, "Sampler", assignment=assignment)
                         if not started:

@@ -225,7 +225,10 @@ The number of CPUs used is determined by the `num_evaluators` parameter, each ev
 
 You can monitor the messages passed between components through the RabbitMQ Management Interface.
 
-**Note:** If stopping an experiment, check RabbitMQ to ensure that all evaluator and sampler processes have shut down before starting a new one. To close any remaining processes, you can restart the RabbitMQ container. For local execution, you can restart the RabbitMQ service using `sudo systemctl restart rabbitmq-server`. 
+**Note:** If stopping an experiment (e.g. via Ctrl+C), shutdown can take 30–60 seconds. During this time, evaluator and sampler processes clean up their connections to RabbitMQ and close all open resources.
+
+
+Before starting a new run, ensure that all old processes have fully shut down. To close any remaining processes, you can restart the RabbitMQ container. For local execution, you can restart the RabbitMQ service using `sudo systemctl restart rabbitmq-server`. 
 If you are using Azure OpenAI (i.e., `gpt=True` in the `SamplerConfig` class), make sure to export the following environment variables before running:
 
 ```bash
