@@ -20,9 +20,10 @@ Differences from the original DeepMind FunSearch version
 
 * Works inside an async RabbitMQ loop (`consume_and_process`, `get_prompt`).
 * Logs cumulative evaluator CPU, sampler GPU, and I/O token counts.
-* Saves / reloads *hourly pickle checkpoints (resume after crash or restart).
+* Saves and resumes from checkpoint.
 * Enforces deduplication (hash-based) and version-mismatch checks.
 * Stops early after an optimal solution or a prompt/solution quota.
+* Implements different evaluation scoring (last, average, weighted, relative difference to a traget solution)
 """
 
 import copy

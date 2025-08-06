@@ -328,7 +328,7 @@ class ResourceManager:
         else:
             return False
 
-    def assign_gpu_device(self, min_free_memory_gib=34, max_utilization=50, assigned_gpus=None):
+    def assign_gpu_device(self, min_free_memory_gib=50, max_utilization=20, assigned_gpus=None):
         """
         Assigns a GPU that has sufficient free memory and low utilization.
         Ensures that samplers are distributed across different GPUs.
