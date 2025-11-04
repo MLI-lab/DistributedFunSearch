@@ -81,7 +81,7 @@ Both containers run inside a **Docker bridge network** (`app-network`).
 
 To change ports or hostnames, you can modify `docker-compose.yml`.
 
-#### **3.1. Create and activate a new conda environment (inside Docker)**
+#### **3.1. Create and activate a new conda environment (inside docker container decos-main)**
 
 We recommend creating a clean Conda environment:
 
