@@ -96,7 +96,7 @@ conda activate decos_env
 
 #### **3.2. Install PyTorch (inside Docker) *(_Can be skipped if using LLM inference over API_)***
 
-You can install PyTorch (matching CUDA version `12.1` used by `decos-main` container) with the following command:
+You can install PyTorch (matching CUDA `12.1` used by the `decos-main` Docker image) with the following command:
 
 ```sh
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
