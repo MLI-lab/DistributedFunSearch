@@ -37,7 +37,7 @@ To set up and run DeCoSearch, follow the instructions based on your preferred ex
 Clone the DeCoSearch repository:
 
 ```sh
-git clone https://github.com/your-username/DeCoSearch.git
+git clone [https://github.com/your-username/DeCoSearch.git](https://github.com/MLI-lab/DeCoSearch.git)
 cd DeCoSearch
 ```
 
