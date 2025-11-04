@@ -62,7 +62,7 @@ You can navigate to the `.devcontainer` directory to start the two containers:
 
 ```sh
 cd .devcontainer
-docker-compose up --build -d
+docker compose up --build -d
 ```
 Both containers run inside a **Docker bridge network** (`app-network`). 
 
