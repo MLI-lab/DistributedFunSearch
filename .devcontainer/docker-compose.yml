@@ -12,8 +12,8 @@ services:
     privileged: false 
     volumes:
       - ~/.ssh:/root/.ssh
-      - ../:/workspace/DeCoSearch
-      - /mnt/hdd_pool_zion/users/franziska/Checkpoints/Graphs:/mnt/graphs/
+      - ../:/workspace/DeCoSearch  # Mount project root (host) into /workspace/DeCoSearch (container)
+      #- /mnt/hdd_pool_zion/users/franziska/Checkpoints/Graphs:/mnt/graphs/    # optional graph dir
       - /srv/:/srv/
     networks:
       - app-network
