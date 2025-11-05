@@ -80,3 +80,7 @@ wandb/
 
 # Ignore RabbitMQ data directory
 rabbitmq/
+
+# Ignore build directories
+build/
+dist/
