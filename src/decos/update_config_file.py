@@ -3,14 +3,15 @@ import sys
 
 def update_config_file(config_file, host_value):
     """Update the RabbitMQ host in the config file based on the assigned SLURM node."""
-    try: 
+    try:
         with open(config_file, 'r') as file:
             content = file.read()
-    except Exception as e: 
+    except Exception as e:
         print(f"Couldnt not read content file {e}")
 
     # Replace the `host` attribute in the configuration with hostname str of assigned node
-    pattern = r"(host\s*:\s*str\s*=\s*)['\"].*?['\"]|host\s*:\s*str\s*=\s*''"
+    # Use word boundary \b to match only 'host', not 'vhost'
+    pattern = r"(\bhost\s*:\s*str\s*=\s*)['\"].*?['\"]|\bhost\s*:\s*str\s*=\s*''"
     replacement = rf"\1'{host_value}'"
     updated_content = re.sub(pattern, replacement, content)
 
