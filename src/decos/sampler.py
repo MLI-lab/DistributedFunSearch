@@ -17,18 +17,20 @@
 
 Differences from the original DeepMind FunSearch version
 
-* Implements placeholder to inferences LLM (StarCoder-2 15B).  
-* Dynamic batching based on message load. Messages are collected for up to 10 milliseconds; 
-  if at least 10 prompts arrive within that window we batch 10, otherwise we batch the smaller number that arrived. 
-* Dynamically adjusts the sampling temperature based on how many programs 
-  have been stored. Encourages exploration early (higher temperature) and 
-  shifts toward exploitation (greedy decoding) after a configurable number 
-  of new programs. Once this threshold is reached, temperature is reset 
+* Implements placeholder to inferences LLM (StarCoder-2 15B).
+* Dynamic batching based on message load. Messages are collected for up to 10 milliseconds;
+  if at least 10 prompts arrive within that window we batch 10, otherwise we batch the smaller number that arrived.
+* Dynamically adjusts the sampling temperature based on how many programs
+  have been stored. Encourages exploration early (higher temperature) and
+  shifts toward exploitation (greedy decoding) after a configurable number
+  of new programs. Once this threshold is reached, temperature is reset
   and the process repeats.
 * Tracks GPU runtime and token counts (input/output) for each sample.
-* **CPU/GPU fallback**: if CUDA is unavailable the model logs a warning
+  GPU time is measured for the entire batch and then evenly distributed across all samples
+  to ensure accurate resource tracking.
+* CPU/GPU fallback: if CUDA is unavailable the model logs a warning
   and runs on CPU rather than crashing.
-* When a prompt is flagged as functionally identical to a previous one, all samples 
+* When a prompt is flagged as functionally identical to a previous one, all samples
   are logged to `duplicate_samples.txt` for manual inspection and debugging.
 """
 
@@ -91,13 +93,15 @@ class LLM_model:
             logger.info("Using device_map='auto' (all available GPUs).")
         else:
             self.device_map = None
-            self.device = "cpu"
-                    logger.warning("No CUDA GPU available. Falling back to CPU.")
 
             if isinstance(device, int):
                 self.device = f"cuda:{device}"
             else:
                 self.device = device  # e.g. "cuda:0" or "cpu"
+
+            if self.device == "cpu":
+                logger.warning("No CUDA GPU available. Falling back to CPU.")
+
             logger.info(f"Using explicit device='{self.device}', device_map=None")
 
         # Load tokenizer
@@ -122,7 +126,7 @@ class LLM_model:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.checkpoint,
                     cache_dir=self.cache_dir,
-                    torch_dtype=torch.float16,
+                    dtype=torch.float16,
                     local_files_only=False,
                     device_map="auto",
                 )
@@ -131,7 +135,7 @@ class LLM_model:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.checkpoint,
                     cache_dir=self.cache_dir,
-                    torch_dtype=torch.float16,
+                    dtype=torch.float16,
                     local_files_only=False,
                     device_map=None,
                 )
@@ -321,6 +325,7 @@ class Sampler:
                             "island_id": prompt.island_id,
                             "version_generated": prompt.version_generated,
                             "expected_version": prompt.expected_version,
+                            "parent_ids": data.get("parent_ids", []),  # Extract parent IDs for lineage tracking
                         })
                     else:
                         logger.warning(f"Skipping prompt with island_id {prompt.island_id}: Prompt is empty.")
@@ -341,6 +346,11 @@ class Sampler:
         except Exception as e:
             logger.error(f"LLM sampling failed: {e}")
             return
+
+        # Calculate total samples generated in this batch to properly distribute GPU time
+        total_samples = sum(len(samples) for samples in samples_list)
+        gpu_time_per_sample = gpu_time / total_samples if total_samples > 0 else 0.0
+        logger.debug(f"Batch GPU time: {gpu_time:.2f}s for {total_samples} samples = {gpu_time_per_sample:.4f}s per sample")
 
         # Publish results to the evaluator queue
         for prompt_idx, (samples, meta, flag) in enumerate(zip(samples_list,metadata, flags)):
@@ -363,9 +373,10 @@ class Sampler:
                     "island_id":          meta["island_id"],
                     "version_generated":  meta["version_generated"],
                     "expected_version":   meta["expected_version"],
-                    "gpu_time":           gpu_time,
+                    "gpu_time":           gpu_time_per_sample,
                     "input_tokens":       input_token_counts[prompt_idx],
                     "output_tokens":      output_token_counts[prompt_idx][sample_idx],
+                    "parent_ids":         meta.get("parent_ids", []),  # Pass parent IDs for lineage tracking
                 }
                 serialized_message = json.dumps(message_data)
 

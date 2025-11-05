@@ -18,9 +18,15 @@ dependencies = [
   "GPUtil",
   "memory-profiler",
   "cloudpickle",
-  "pynvml",  
+  "nvidia-ml-py",
   "accelerate",
-  "lmdb"
+  "lmdb",
+  "python-Levenshtein",
+  "tqdm",
+  "wandb",
+  "matplotlib",
+  "tabulate",
+  "networkx"
 ]
 
 [tool.setuptools.packages.find]

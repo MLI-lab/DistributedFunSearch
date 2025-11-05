@@ -18,16 +18,20 @@
 
 Differences from the original DeepMind FunSearch version
 
-* Evaluates samples using a sandboxed execution environment that runs each 
+* Evaluates samples using a sandboxed execution environment that runs each
   generated program on test inputs in isolated subprocesses.
-* Uses multiprocessing with CPU parallelism (via `ProcessPoolExecutor`) to evaluate 
+* Uses multiprocessing with CPU parallelism (via `ProcessPoolExecutor`) to evaluate
   multiple inputs in parallel.
-* Tracks and publishes per-sample CPU time, along with GPU time and token counts 
+* Tracks and publishes per-sample CPU time, along with GPU time and token counts
   received from the sampler.
-* Publishes results back to the database queue with functional scores, hashed outputs, 
+* Publishes results back to the database queue with functional scores, hashed outputs,
   and a flag indicating whether an optimal solution was found.
-* Logs full outputs for prompts with structurally identical few-shot examples, 
+* Logs full outputs for prompts with structurally identical few-shot examples,
   allowing downstream deduplication and analysis.
+* Parses LLM output by extracting only the first valid function body from generated code.
+  If the LLM generates multiple functions or malformed code, only the first parseable
+  function body is kept and the rest is silently discarded.
+
 """
 
 
@@ -139,7 +143,14 @@ def run_evaluation(sandbox, program, function_to_run, input, timeout_seconds, ca
 
 
 class Evaluator:
-    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, TARGET_SIGNATURES):
+    """Evaluates generated functions in sandboxed subprocesses.
+
+    Note: Debug information about which graph files are being loaded is written to stderr
+    in the sandbox subprocesses. These logs can be found in sandbox stderr_*.log files
+    (e.g., sandbox/sandbox<PID>/stderr_N.log). The stderr files are automatically cleaned up
+    after evaluation completes.
+    """
+    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2):
         self.connection = connection
         self.channel = channel
         self.evaluator_queue = evaluator_queue
@@ -155,10 +166,10 @@ class Evaluator:
         self.call_count_lock = self.manager.Lock()
         self.sandbox = sandbox.ExternalProcessSandbox(
             base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id)
-        self.executor = ProcessPoolExecutor(max_workers=2)
+        self.executor = ProcessPoolExecutor(max_workers=max_workers)
         self.cumulative_cpu_time = 0.0  # Track total CPU time
         self.cpu_time_lock = self.manager.Lock()  # Lock to protect updates to cumulative CPU time
-        self.TARGET_SIGNATURES=TARGET_SIGNATURES # Example {6: 10, 7: 16, 8: 30, 9: 52, 10: 94, 11: 172}
+        self.target_signatures = target_signatures # Example {(6,1): 10, (7,1): 16, (8,1): 30, (9,1): 52, (10,1): 94, (11,1): 172}
 
     def _track_cpu_time(self):
         """
@@ -175,11 +186,19 @@ class Evaluator:
 
     async def shutdown(self):
         logger.info(f"Evaluator {self.local_id}: Initiating shutdown process.")
-        try: 
+        try:
             if self.executor:
                 logger.info(f"Evaluator {self.local_id}: Shutting down executor.")
-                self.executor.shutdown(wait=False) # if evaluator spawns processes using the executor and then is cancelled those continue running, if wait=True executer could hand while waiting for the completion of the task if wait= False might fail to clean up properly 
-                # Also if the subtasks are acessing any shared resouces eg call_count or the logger improper termination can cause issues if another process is waiting for them
+                try:
+                    # Shutdown executor with timeout to avoid hanging
+                    await asyncio.wait_for(
+                        asyncio.to_thread(self.executor.shutdown, wait=True),
+                        timeout=5
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Evaluator {self.local_id}: Executor shutdown timed out after 5s, forcing termination...")
+                    # Force shutdown if timeout
+                    self.executor.shutdown(wait=False)
                 self.executor = None  # Set to None to avoid future attempts to use it
             else:
                 logger.info(f"Evaluator {self.local_id}: Executor already shut down or not initialized.")
@@ -271,25 +290,28 @@ class Evaluator:
             logger.debug(f"Data is {data}")
             logger.debug(f"Evaluator: Starts to analyze generated continuation of def priority: {data['sample']}")
 
-            # Deserialize GPU time
+            # Deserialize GPU time and lineage tracking
             gpu_time      = data.get("gpu_time", 0.0)
-            input_tokens  = data.get("input_tokens", 0)      
-            output_tokens = data.get("output_tokens", 0)     
+            input_tokens  = data.get("input_tokens", 0)
+            output_tokens = data.get("output_tokens", 0)
+            parent_ids    = data.get("parent_ids", [])  # Extract parent IDs for lineage tracking
             logger.debug(f"Received GPU time from Sampler: {gpu_time} seconds")
             logger.debug(f"Received input_tokens from Sampler: {input_tokens}")
             logger.debug(f"Received output_tokens from Sampler: {output_tokens}")
+            logger.debug(f"Received parent_ids from Sampler: {parent_ids}")
 
             # Process the new function from the generated code
             new_function, program = _sample_to_program(data["sample"], data.get("version_generated"), self.template, self.function_to_evolve)
 
             tasks = {}
-            
+
             if new_function.body not in [None, '']:
                 # Submit each test input as a task for multiprocessing
+                logger.debug(f"Evaluator: Submitting {len(self.inputs)} evaluation tasks with inputs: {self.inputs}")
                 tasks = {self.executor.submit(run_evaluation, self.sandbox, program, self.function_to_run, input, self.timeout_seconds, self.call_count, self.call_count_lock): input for input in self.inputs}
             else:
                 logger.info("New function body is None or empty. Skipping execution but publishing 'return'.")
-                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False)
+                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False, parent_ids)
                 await self.publish_to_database(result, hash_value)  # Publish "return" result
                 return  # Early return after publishing
 
@@ -306,9 +328,11 @@ class Evaluator:
                     # Accumulate CPU time
                     with self.cpu_time_lock:
                         self.cumulative_cpu_time += cpu_time
-                        
+
                     if runs_ok and test_output[0] is not None:
-                        scores_per_test[input] = test_output[0]
+                        # Store score with only (n, s) as key, stripping out q
+                        score_key = input[:2] if isinstance(input, tuple) and len(input) >= 3 else input
+                        scores_per_test[score_key] = test_output[0]
                         if test_output[1] is not None:
                             hash_value=test_output[1]
                         logger.debug(f"Evaluator: scores_per_test {scores_per_test}")
@@ -322,19 +346,19 @@ class Evaluator:
             
 
 
-            if self.TARGET_SIGNATURES: 
+            if self.target_signatures:
                 found_optimal_solution = all(
-                    scores_per_test.get(dim, 0) >= self.TARGET_SIGNATURES.get(dim, float("inf"))
-                    for dim in self.TARGET_SIGNATURES)            
-            else: 
+                    scores_per_test.get(dim, 0) >= self.target_signatures.get(dim, float("inf"))
+                    for dim in self.target_signatures)
+            else:
                 found_optimal_solution = False
 
             # Prepare the result for publishing
             if len(scores_per_test) == len(self.inputs) and any(score != 0 for score in scores_per_test.values()):
-                result = (new_function, data['island_id'], scores_per_test, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution)
+                result = (new_function, data['island_id'], scores_per_test, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids)
                 logger.debug(f"Scores are {scores_per_test}")
             else:
-                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False)
+                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False, parent_ids)
 
             # Publish the result
             await self.publish_to_database(result, hash_value)
@@ -356,7 +380,7 @@ class Evaluator:
     async def publish_to_database(self, result, hash_value):
         try:
 
-            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution = result 
+            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids = result
 
             serialized_result = {
                 "new_function": function.serialize() if hasattr(function, 'serialize') else str(function),
@@ -366,9 +390,10 @@ class Evaluator:
                 "hash_value": hash_value,
                 "cpu_time": cpu_time,  # Include CPU time
                 "gpu_time": gpu_time,   # Include GPU time
-                "input_tokens":      input_tokens,        
-                "output_tokens":     output_tokens,       
-                "found_optimal_solution": found_optimal_solution
+                "input_tokens":      input_tokens,
+                "output_tokens":     output_tokens,
+                "found_optimal_solution": found_optimal_solution,
+                "parent_ids": parent_ids  # Include parent IDs for lineage tracking
             }
 
             message_body = json.dumps(serialized_result)

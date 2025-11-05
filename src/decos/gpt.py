@@ -128,7 +128,8 @@ class Sampler:
                         prompt_data = data["prompt"]
                         prompt = programs_database.Prompt.deserialize(prompt_data)
                         total_registered_programs = data.get("total_registered_programs", 0)
-                        responses = self._llm.draw_sample(prompt.code)  
+                        parent_ids = data.get("parent_ids", [])  # Extract parent IDs for lineage tracking
+                        responses = self._llm.draw_sample(prompt.code)
                         logger.debug(f"responses is {responses}")
                         for response in responses:
                             message_data = {
@@ -137,6 +138,7 @@ class Sampler:
                                 "version_generated": prompt.version_generated,
                                 "expected_version": prompt.expected_version,
                                 "gpu_time": gpu_time,  # Include GPU time
+                                "parent_ids": parent_ids,  # Pass parent IDs for lineage tracking
                             }
                             serialized_message = json.dumps(message_data)
                             await self.channel.default_exchange.publish(

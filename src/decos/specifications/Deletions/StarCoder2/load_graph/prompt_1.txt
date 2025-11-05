@@ -1,13 +1,11 @@
 """
-Finds large independent set in graph G where nodes are binary strings of length n.
-Nodes in G are connected if they share a subsequence of length at least n-s. 
+Finds a large independent set in graph G where nodes are q-ary strings of length n.
+Nodes in G are connected if they share a subsequence of length at least n - s, where s = 1.
 
-Improve the priority_v5 function over its previous versions. 
-Consider properties of the binary string `node`, such as specific patterns, the number of ones/zeros, or other unique features, to calculate the priority.
+The `priority` function assigns a priority to each node indicating its importance for inclusion in the independent set.
 
-Return only the body of the function as valid Python code, without the function header, markdown, formatting, comments, or explanations. 
-Do not include any code block markers such as ```python or ```. 
-Keep the code short.
+Improve the `priority_v1` function over its previous versions below.
+Keep the code short and comment for easy understanding.
 """
 
 import itertools
@@ -45,19 +43,21 @@ def hash_priority_mapping(priorities, sequences):
 
 
 def evaluate(params, graph_dir):
-    n, s = params
-    independent_set, hash_value = solve(n, s, graph_dir)
+    n, s, q = params
+    independent_set, hash_value = solve(n, s, q, graph_dir)
     return (len(independent_set), hash_value)
 
 
-def solve(n, s, graph_dir):
+def solve(n, s, q, graph_dir):
     """ Find a large independent set in a loaded graph while avoiding unnecessary copies. """
-    path = os.path.join(graph_dir, f"graph_s{s}_n{n}.lmdb")
+    path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+    print(f"[DEBUG] Loading graph from: {path}")
 
     G = load_graph(path)  # Load the graph directly, no copying
-    G_for_priority = G.copy()  
+    G_for_priority = G.copy()
 
-    sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]
+    alphabet = ''.join(str(i) for i in range(q))
+    sequences = [''.join(seq) for seq in itertools.product(alphabet, repeat=n)]
     priorities = {node: priority(node, G_for_priority, n, s) for node in G.nodes}
 
     # Sort nodes first by priority (higher is better), then by lexicographic order (ascending)
@@ -73,12 +73,12 @@ def solve(n, s, graph_dir):
         G.remove_nodes_from(neighbors)  # Remove its neighbors
 
     hash_value = None
-    if n == 9:
+    if n == start_n:
         hash_value = hash_priority_mapping(priorities, sequences)
 
     return independent_set, hash_value
 
 
 def priority(node, G, n, s):
-    """ Returns the priority with which we want to add `node` to the independent set. """
-    return 0.0  
+    """Returns the priority with which we want to add `node` to the independent set."""
+    return 0.0

@@ -13,6 +13,7 @@ import time
 from typing import Sequence, Any
 from decos.scaling_utils import ResourceManager
 from decos import sampler
+from decos import process_utils
 import importlib
 import socket
 from decos import gpt
@@ -99,12 +100,7 @@ class TaskManager:
             channel = await connection.channel()
 
             # Declare the sampler queue (the queue we want to scale on)
-            sampler_queue = await channel.declare_queue(
-                "sampler_queue",
-                durable=False,
-                auto_delete=True
-                #arguments={'x-consumer-timeout': 360000000}
-            )
+            sampler_queue = await process_utils.declare_standard_queue(channel, "sampler_queue")
             self.logger.info("sampler_queue declared for scaling logic.")
 
             if enable_scaling:
@@ -152,8 +148,8 @@ class TaskManager:
             assigned_gpus = set()
             # Use the ResourceManager's assign_gpu_device method for consistent GPU assignment.
             for i in range(self.config.num_samplers):
-                try: 
-                    assignment = self.resource_manager.assign_gpu_device(assigned_gpus=assigned_gpus)
+                try:
+                    assignment = self.resource_manager.assign_gpu_device(min_free_memory_gib=20, max_utilization=50, assigned_gpus=assigned_gpus)
                 except Exception as e: 
                     self.logger.error(f"Cannot start sampler {i}: No suitable GPU available and error {e}.")
 
@@ -218,14 +214,8 @@ class TaskManager:
                 )
                 channel = await connection.channel()
 
-                sampler_queue = await channel.declare_queue(
-                    "sampler_queue", durable=False, auto_delete=True,
-                    arguments={'x-consumer-timeout': 360000000}
-                )
-                evaluator_queue = await channel.declare_queue(
-                    "evaluator_queue", durable=False, auto_delete=True,
-                    arguments={'x-consumer-timeout': 360000000}
-                )
+                sampler_queue = await process_utils.declare_standard_queue(channel, "sampler_queue")
+                evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
 
                 try:
                     if self.config.sampler.gpt: 
@@ -254,12 +244,10 @@ class TaskManager:
                     await connection.close()
                 self.logger.debug(f"Sampler {local_id}: Connection closed.")
 
-        def signal_handler(sig, frame):
-            self.logger.info(f"Sampler process {local_id} received signal {sig}. Initiating shutdown.")
-            loop.create_task(graceful_shutdown(loop, connection, channel, sampler_task))
-
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
+        process_utils.setup_signal_handlers(
+            loop, "Sampler", local_id, self.logger,
+            lambda: graceful_shutdown(loop, connection, channel, sampler_task)
+        )
 
         try:
             loop.run_until_complete(run_sampler())
