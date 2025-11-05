@@ -42,8 +42,41 @@ src/experiments/experiment*/
 !src/experiments/experiment1/
 src/graphs/KaMIS/
 
+# Ignore IDS graphs but keep deletion graphs
+src/graphs/graph_ids_*.lmdb
+**/graph_ids_*.lmdb
+
 # Ignore all logs folders
 **/logs/
 
 # Ignore all sandbox folders
 **/sandbox/
+
+# Ignore all __pycache__ directories
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore Claude AI files
+.claude/
+CLAUDE.md
+.claude_history
+
+# Ignore baselines directory
+src/baselines/
+
+# Ignore Weights & Biases files
+wandb/
+**/wandb/
+*.wandb
+
+# Ignore checkpoint files
+**/Checkpoints/
+*.pkl
+*.ckpt
+*.pth
+*.checkpoint
+
+# Ignore RabbitMQ data directory
+rabbitmq/
