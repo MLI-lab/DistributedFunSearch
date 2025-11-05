@@ -74,10 +74,13 @@ $PWD/.ssh:/DeCoSearch/.ssh" \
          # Set up reverse SSH tunnel for RabbitMQ management interface
          # Make sure to replace SSH_USER, SSH_HOST, and SSH_PORT with your actual SSH credentials
          # And keys are in .ssh folder for non-interactive login
+         # on server we reverse tunnel to and want to access the interface run: ssh -L PORT:localhost:PORT SSH_USER@SSH_HOST -p SSH_PORT
+         # access interface at  http://localhost:PORT on server machine
          ssh -R $PORT:localhost:$PORT $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel'; exit 1; }
 
          # Set up a reverse SSH tunnel for message passing, allowing external nodes to communicate with the main task running inside the cluster.
          ssh -R $PORT2:localhost:$PORT2  $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel for RabbitMQ AMQP'; exit 1; }
+
 
          # Export API credentials (implementation is for an Azure-based API)
 
