@@ -35,8 +35,9 @@ RABBITMQ_HOSTNAME=$(srun -N1 -n1 --nodelist=$NODE_1 hostname -f) || { echo "Erro
 echo "RabbitMQ server hostname: $RABBITMQ_HOSTNAME"
 
 # Run the main setup process on Node 1
+# Set path to enroot image
 srun -N1 -n1 --nodelist=$NODE_1 \
-     --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
+     --container-image="" \
      --container-mounts="$PWD/DeCoSearch:/DeCoSearch,\
 $PWD/.ssh:/DeCoSearch/.ssh" \
      bash -c "
