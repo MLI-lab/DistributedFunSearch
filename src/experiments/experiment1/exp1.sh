@@ -9,7 +9,6 @@
 #SBATCH -e DeCoSearch/src/experiments/experiment1/logs/experiment.err # Standard error log
 #SBATCH --time=48:00:00                                              # Time limit
 
-
 # Extract node lists for node groups
 NODE_LIST=($(scontrol show hostnames $SLURM_JOB_NODELIST_HET_GROUP_0)) || { echo "Error fetching node list"; exit 1; }
 
@@ -24,8 +23,12 @@ echo "Remaining nodes: ${REMAINING[@]}"
 EXPERIMENT_NAME="experiment1"
 CONFIG_NAME="config.py"
 RABBITMQ_CONF="rabbitmq.conf"
-PORT=15672
-PORT2=5672
+PORT=15673
+PORT2=5673
+SSH_USER=" " # set user name
+SSH_HOST="login01.msv.ei.tum.de"   # set to your laptop’s public IP or server name from which you want to access interface (note needs to be on same network as cluster)
+SSH_PORT= #set to port at which to connect 
+
 
 # Get RabbitMQ hostname
 RABBITMQ_HOSTNAME=$(srun -N1 -n1 --nodelist=$NODE_1 hostname -f) || { echo "Error getting RabbitMQ hostname"; exit 1; }
@@ -33,14 +36,14 @@ echo "RabbitMQ server hostname: $RABBITMQ_HOSTNAME"
 
 # Run the main setup process on Node 1
 srun -N1 -n1 --nodelist=$NODE_1 \
-     --container-image=desired/path/custom_name.sqsh \
+     --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
      --container-mounts="$PWD/DeCoSearch:/DeCoSearch,\
 $PWD/.ssh:/DeCoSearch/.ssh" \
      bash -c "
          echo 'Running on $(hostname -f)'
 
          # Update the RabbitMQ configuration with the hostname of allocated node
-         python /DeCoSearch/src/decos/update_config_file.py /DeCoSearch/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
+         python3 /DeCoSearch/src/decos/update_config_file.py /DeCoSearch/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
 
          # Configure RabbitMQ environment
          export RABBITMQ_NODENAME=rabbit_${SLURM_JOB_ID}@localhost
@@ -55,7 +58,7 @@ $PWD/.ssh:/DeCoSearch/.ssh" \
          sleep 30 || { echo 'Error during sleep waiting for RabbitMQ'; exit 1; }
 
          # Create the virtual host
-         curl -s -u guest:guest -X PUT http://localhost:$PORT/api/vhosts/temp_1 || { echo 'Error creating virtual host'; exit 1; }
+         curl -s -u guest:guest -X PUT http://localhost:$PORT/api/vhosts/exp1 || { echo 'Error creating virtual host'; exit 1; }
 
          # Create a new RabbitMQ user
          curl -s -u guest:guest -X PUT -d '{\"password\":\"mypassword\",\"tags\":\"administrator\"}' \
@@ -63,25 +66,28 @@ $PWD/.ssh:/DeCoSearch/.ssh" \
 
          # Set permissions for the new user on the virtual host
          curl -s -u guest:guest -X PUT -d '{\"configure\":\".*\", \"write\":\".*\", \"read\":\".*\"}' \
-             -H 'content-type:application/json' http://localhost:$PORT/api/permissions/temp_1/myuser || { echo 'Error setting permissions'; exit 1; }
+             -H 'content-type:application/json' http://localhost:$PORT/api/permissions/exp1/myuser || { echo 'Error setting permissions'; exit 1; }
 
          echo 'RabbitMQ setup complete.'
 
          # Set up reverse SSH tunnel for RabbitMQ management interface
+         # Make sure to replace SSH_USER, SSH_HOST, and SSH_PORT with your actual SSH credentials
+         # And keys are in .ssh folder for non-interactive login
          ssh -R $PORT:localhost:$PORT $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel'; exit 1; }
 
          # Set up a reverse SSH tunnel for message passing, allowing external nodes to communicate with the main task running inside the cluster.
-         ssh -R $PORT2:localhost:$PORT2  $SSH_USE@$SSH_HOST -p $SSH_PORT2 -N -f || { echo 'Error setting up SSH tunnel for RabbitMQ AMQP'; exit 1; }
+         ssh -R $PORT2:localhost:$PORT2  $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel for RabbitMQ AMQP'; exit 1; }
 
          # Export API credentials (implementation is for an Azure-based API)
 
          # Install DeCoSearch
          cd /DeCoSearch
-         pip install .
+         python3 -m pip install .
         
          # Run DeCoSearch
          cd /DeCoSearch/src/experiments/$EXPERIMENT_NAME
-         python -m decos --checkpoint=/DeCoSearch/src/experiments/experiment1/Checkpoints/checkpoint_2025-03-17_09-41-48.pkl  --target_solutions=\"{\\\"(7, 2)\\\": 5, \\\"(8, 2)\\\": 7, \\\"(9, 2)\\\": 11, \\\"(10, 2)\\\": 16, \\\"(11, 2)\\\": 24, \\\"(12, 2)\\\": 33}\"
+         # Add command line arguments as needed
+         python3 -m decos 
      " &
 
 # Create a list of 10 times evenly spaced from 1800 to 3600 seconds
