@@ -12,6 +12,7 @@ import argparse
 from typing import Sequence, Any
 import datetime
 from decos.scaling_utils import ResourceManager
+from decos import process_utils
 from yarl import URL
 from decos import code_manipulation
 import importlib
@@ -36,7 +37,7 @@ def get_ip_address():
         return f"Error fetching IP address: {e}"
 
 class TaskManager:
-    def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, TARGET_SIGNATURES):
+    def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, target_signatures):
         self.specification = specification
         self.inputs = inputs
         self.config = config
@@ -49,7 +50,7 @@ class TaskManager:
         self.queues = []
         self.connection = None
         self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True)
-        self.TARGET_SIGNATURES= TARGET_SIGNATURES
+        self.target_signatures= target_signatures
 
     def initialize_logger(self, log_dir):
         logger = logging.getLogger('main_logger')
@@ -99,12 +100,7 @@ class TaskManager:
             channel = await connection.channel()
 
             # Declare the evaluator queue for scaling
-            evaluator_queue = await channel.declare_queue(
-                "evaluator_queue",
-                durable=False,
-                auto_delete=True,
-                arguments={'x-consumer-timeout': 360000000}
-            )
+            evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
             self.logger.info("evaluator_queue declared for scaling logic.")
 
             if enable_scaling:
@@ -116,7 +112,7 @@ class TaskManager:
                         sampler_processes=None,
                         evaluator_function=self.evaluator_process,
                         sampler_function=None,
-                        evaluator_args=(self.template, self.inputs, amqp_url, self.TARGET_SIGNATURES),
+                        evaluator_args=(self.template, self.inputs, amqp_url, self.target_signatures),
                         sampler_args=None,
                         max_evaluators=args.max_evaluators,
                         max_samplers=None,
@@ -186,22 +182,13 @@ class TaskManager:
                     client_properties={"connection_attempts": 1, "retry_delay": 0}
                 )
                 channel = await connection.channel()
-                evaluator_queue = await channel.declare_queue(
-                    "evaluator_queue",
-                    durable=False,
-                    auto_delete=True,
-                    arguments={'x-consumer-timeout': 360000000}
-                )
-                database_queue = await channel.declare_queue(
-                    "database_queue",
-                    durable=False,
-                    auto_delete=True,
-                    arguments={'x-consumer-timeout': 360000000}
-                )
+                evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
+                database_queue = await process_utils.declare_standard_queue(channel, "database_queue")
                 evaluator_instance = evaluator.Evaluator(
                     connection, channel, evaluator_queue, database_queue,
                     self.template, 'priority', 'evaluate', inputs, args.sandbox_base_path,
-                    timeout_seconds=self.config.evaluator.timeout, local_id=local_id, TARGET_SIGNATURES=self.TARGET_SIGNATURES
+                    timeout_seconds=self.config.evaluator.timeout, local_id=local_id, target_signatures=self.target_signatures,
+                    max_workers=self.config.evaluator.max_workers
                 )
                 evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
                 await evaluator_task
@@ -300,10 +287,10 @@ if __name__ == "__main__":
     # Convert JSON string to dictionary
     try:
         if args.target_solutions:
-            TARGET_SIGNATURES = json.loads(args.target_solutions)
-            TARGET_SIGNATURES = {eval(k): v for k, v in TARGET_SIGNATURES.items()}  # Convert string keys to tuples
+            target_signatures = json.loads(args.target_solutions)
+            target_signatures = {eval(k): v for k, v in target_signatures.items()}  # Convert string keys to tuples
         else:
-            TARGET_SIGNATURES=args.target_solutions
+            target_signatures=args.target_solutions
             
     except json.JSONDecodeError:
         raise ValueError("Invalid JSON format for --target_solutions. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'.")
@@ -321,6 +308,12 @@ if __name__ == "__main__":
                 specification = file.read()
             if not isinstance(specification, str) or not specification.strip():
                 raise ValueError("Specification must be a non-empty string.")
+
+            # Substitute start_n placeholder with actual value from config
+            # This allows hash computation to use the correct n value without manual sync
+            actual_start_n = config.evaluator.start_n[0]  # Get first start_n value
+            specification = specification.replace("n == start_n", f"n == {actual_start_n}")
+
         except FileNotFoundError:
             print(f"Error: Specification file not found at {spec_path}")
             sys.exit(1)
@@ -331,14 +324,14 @@ if __name__ == "__main__":
         if not (len(config.evaluator.s_values) == len(config.evaluator.start_n) == len(config.evaluator.end_n)):
             raise ValueError("The number of elements in --s-values, --start-n, and --end-n must match.")
 
-        inputs = [(n, s) for s, start_n, end_n in zip(config.evaluator.s_values, config.evaluator.start_n, config.evaluator.end_n) for n in range(start_n, end_n + 1)]
+        inputs = [(n, s, config.evaluator.q) for s, start_n, end_n in zip(config.evaluator.s_values, config.evaluator.start_n, config.evaluator.end_n) for n in range(start_n, end_n + 1)]
 
         task_manager = TaskManager(
             specification=specification,
             inputs=inputs,
             config=config,
             log_dir=args.log_dir, 
-            TARGET_SIGNATURES= TARGET_SIGNATURES
+            target_signatures= target_signatures
         )
 
         task = asyncio.create_task(

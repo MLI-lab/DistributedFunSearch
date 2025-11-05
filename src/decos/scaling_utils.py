@@ -186,50 +186,55 @@ class ResourceManager:
         sampler_args = sampler_args or ()
         max_evaluators = max_evaluators if max_evaluators is not None else 0
 
-        while True:
-            try:
-                evaluator_message_count = await self.get_queue_message_count(evaluator_queue) if evaluator_queue else 0
-                sampler_message_count = await self.get_queue_message_count(sampler_queue) if sampler_queue else 0
-                self.resource_logger.info(f"Message counts are {evaluator_message_count} and {sampler_message_count}")
-                # Scale Evaluators
-                evaluator_scaled = False
-                if evaluator_queue and max_evaluators > 0:
-                    can_scale_eval = await self.can_scale_evaluator()
-                    if evaluator_message_count > 10 and len(evaluator_processes) < max_evaluators and can_scale_eval:
-                        self.resource_logger.info(f"Can scale evaluators with messages in queue {evaluator_message_count}")
-                        self.start_evaluator_process(evaluator_function, evaluator_args, evaluator_processes, "Evaluator")
-                        evaluator_scaled = True
-                    elif evaluator_message_count == 0 and len(evaluator_processes) > min_evaluators:
-                        self.resource_logger.info(f"Zero messages in the queue and not last Evaluator, terminating ...")
-                        self.terminate_process(evaluator_processes, "Evaluator")
-                        evaluator_scaled = True
+        try:
+            while True:
+                try:
+                    evaluator_message_count = await self.get_queue_message_count(evaluator_queue) if evaluator_queue else 0
+                    sampler_message_count = await self.get_queue_message_count(sampler_queue) if sampler_queue else 0
+                    self.resource_logger.info(f"Message counts are {evaluator_message_count} and {sampler_message_count}")
+                    # Scale Evaluators
+                    evaluator_scaled = False
+                    if evaluator_queue and max_evaluators > 0:
+                        can_scale_eval = await self.can_scale_evaluator()
+                        if evaluator_message_count > 10 and len(evaluator_processes) < max_evaluators and can_scale_eval:
+                            self.resource_logger.info(f"Can scale evaluators with messages in queue {evaluator_message_count}")
+                            self.start_evaluator_process(evaluator_function, evaluator_args, evaluator_processes, "Evaluator")
+                            evaluator_scaled = True
+                        elif evaluator_message_count == 0 and len(evaluator_processes) > min_evaluators:
+                            self.resource_logger.info(f"Zero messages in the queue and not last Evaluator, terminating ...")
+                            await self.terminate_process(evaluator_processes, "Evaluator")
+                            evaluator_scaled = True
 
-                # Scale Samplers
-                sampler_scaled = False
-                if sampler_queue and max_samplers > 0:
-                    assignment = await self.can_scale_up_samplers()
-                    if self.cpu_only:
-                         assignment = await self.can_scale_evaluator() # if we are in cpu only mode also check cpu load for samplers 
-                    self.resource_logger.info(f"Assignment is {assignment}")
-                    if sampler_message_count > 50 and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
-                        self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
-                        started = self.start_sampler_process(sampler_function, sampler_args, sampler_processes, "Sampler", assignment=assignment)
-                        if not started:
-                            self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
-                        sampler_scaled = True
-                    elif sampler_message_count == 0 and len(sampler_processes) > min_samplers:
-                        self.resource_logger.info(f"Can terminate a sampler with messages in queue {sampler_message_count}")
-                        self.terminate_process(sampler_processes, "Sampler")
-                        sampler_scaled = True
+                    # Scale Samplers
+                    sampler_scaled = False
+                    if sampler_queue and max_samplers > 0:
+                        assignment = await self.can_scale_up_samplers()
+                        if self.cpu_only:
+                             assignment = await self.can_scale_evaluator() # if we are in cpu only mode also check cpu load for samplers
+                        self.resource_logger.info(f"Assignment is {assignment}")
+                        if sampler_message_count > 50 and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
+                            self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
+                            started = self.start_sampler_process(sampler_function, sampler_args, sampler_processes, "Sampler", assignment=assignment)
+                            if not started:
+                                self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
+                            sampler_scaled = True
+                        elif sampler_message_count == 0 and len(sampler_processes) > min_samplers:
+                            self.resource_logger.info(f"Can terminate a sampler with messages in queue {sampler_message_count}")
+                            await self.terminate_process(sampler_processes, "Sampler")
+                            sampler_scaled = True
 
-                # If nothing was scaled, log that scaling was skipped
-                if not evaluator_scaled and not sampler_scaled:
-                    self.resource_logger.info("No scaling action taken in this iteration.")
+                    # If nothing was scaled, log that scaling was skipped
+                    if not evaluator_scaled and not sampler_scaled:
+                        self.resource_logger.info("No scaling action taken in this iteration.")
 
-            except Exception as e:
-                self.resource_logger.error(f"Scaling loop encountered an error: {e}")
+                except Exception as e:
+                    self.resource_logger.error(f"Scaling loop encountered an error: {e}")
 
-            await asyncio.sleep(check_interval)
+                await asyncio.sleep(check_interval)
+
+        except asyncio.CancelledError:
+            self.resource_logger.info("Scaling loop cancelled, stopping gracefully...")
+            raise  # Re-raise to properly propagate cancellation
 
     def start_evaluator_process(self, target_function, args, processes, process_name):
         """Starts a new evaluator process."""
@@ -263,7 +268,7 @@ class ResourceManager:
             return None
 
         # See if any GPU is free enough
-        assignment = self.assign_gpu_device()
+        assignment = self.assign_gpu_device(min_free_memory_gib=20, max_utilization=50)
         return assignment  
 
     async def can_scale_evaluator(self, required_cores=4, cpu_usage_threshold=99, normalized_load_threshold=0.99, duration=10, interval=1):
@@ -401,20 +406,28 @@ class ResourceManager:
             return None
 
 
-    def terminate_process(self, processes, process_name, timeout=30):
-        """Terminates a running process and ensures it fully exits."""
+    async def terminate_process(self, processes, process_name, timeout=30):
+        """Terminates a running process and ensures it fully exits (async to avoid blocking)."""
         if processes:
             proc = processes.pop(0)
+            pid = proc.pid
             proc.terminate()
-            self.resource_logger.info(f"Sent SIGTERM to {process_name} process (PID: {proc.pid}). Waiting for termination...")
-            proc.join(timeout)
+            self.resource_logger.info(f"Sent SIGTERM to {process_name} process (PID: {pid}). Waiting for termination...")
+
+            # Use asyncio.to_thread to avoid blocking the event loop
+            await asyncio.to_thread(proc.join, timeout)
 
             if proc.is_alive():  # If still running, force kill
-                self.resource_logger.warning(f"{process_name} process (PID: {proc.pid}) did not terminate in {timeout}s. Sending SIGKILL.")
+                self.resource_logger.warning(f"{process_name} process (PID: {pid}) did not terminate in {timeout}s. Sending SIGKILL.")
                 proc.kill()
-                proc.join()
-        
-            self.resource_logger.info(f"Terminated {process_name} process (PID: {proc.pid})")
+                await asyncio.to_thread(proc.join)
+
+            # Clean up GPU assignment map if this was a sampler process
+            if pid in self.process_to_device_map:
+                device = self.process_to_device_map.pop(pid)
+                self.resource_logger.info(f"Freed GPU assignment for PID {pid}: {device}")
+
+            self.resource_logger.info(f"Terminated {process_name} process (PID: {pid})")
 
 
     async def get_queue_message_count(self, queue):

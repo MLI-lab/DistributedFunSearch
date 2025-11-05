@@ -83,9 +83,8 @@ class ExternalProcessSandbox(DummySandbox):
         try:
             # Run the command with a timeout
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=self.timeout_secs, cwd=os.getcwd())
-            # Write any stderr output to error_file
-            if result.returncode != 0:
-                error_message = result.stderr.decode('utf-8') if result.stderr else "Unknown error"            
+            # Always write stderr output to error_file (includes debug info like graph file paths)
+            if result.stderr:
                 with open(error_file_path, "wb") as ef:
                     ef.write(result.stderr)
             return (result.returncode == 0)

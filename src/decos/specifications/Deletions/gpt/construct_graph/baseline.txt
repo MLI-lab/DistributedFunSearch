@@ -1,9 +1,11 @@
 """
-Finds large independent set in graph G where nodes are binary strings of length n.
-Nodes in G are connected if they share a subsequence of length at least n-s. 
+Finds large independent set in graph G where nodes are q-ary strings of length n.
+Nodes in G are connected if they share a subsequence of length at least n-s.
 
-Improve the `priority_v2` function over its previous versions below.
-Keep the code short and comment for easy understanding.
+Improve the priority_v5 function over its previous versions.
+Return only the body of the function as valid Python code, without the function header, markdown, formatting, comments, or explanations.
+Do not include any code block markers such as ```python or ```.
+Keep the code short.
 """
 
 import itertools
@@ -12,34 +14,11 @@ import numpy as np
 import networkx as nx
 import json
 
-class ReadOnlyGraph:
-    """ Read-only wrapper around a NetworkX graph to prevent modifications in priority function. """
-    def __init__(self, G):
-        self._G = G  # Store reference to the original graph
 
-    def __contains__(self, node):
-        return node in self._G
-
-    def neighbors(self, node):
-        return self._G.neighbors(node)
-
-    def degree(self, node):
-        return self._G.degree(node)
-
-    def __getitem__(self, node):
-        return self._G[node]  # Allows adjacency lookup but prevents modification
-
-    @property
-    def nodes(self):
-        return self._G.nodes
-
-    @property
-    def edges(self):
-        return self._G.edges
-
-def generate_graph(n, s):
+def generate_graph(n, s, q):
     G = nx.Graph()
-    sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]  # Generate all binary strings of length n
+    alphabet = ''.join(str(i) for i in range(q))  # Generate q-ary alphabet
+    sequences = [''.join(seq) for seq in itertools.product(alphabet, repeat=n)]  # Generate all q-ary strings of length n
     # Adding nodes
     for seq in sequences:
         G.add_node(seq)
@@ -80,14 +59,15 @@ def hash_priority_mapping(priorities, sequences):
     return hashlib.sha256(mapping_str.encode()).hexdigest()
     
 def evaluate(params):
-    n, s = params
-    independent_set, hash_value = solve(n, s)
+    n, s, q = params
+    independent_set, hash_value = solve(n, s, q)
     return (len(independent_set), hash_value)
 
-def solve(n, s):
-    G_original = generate_graph(n, s)
-    G_for_priority = ReadOnlyGraph(G)  # Pass read-only wrapper to priority function   
-    sequences = [''.join(seq) for seq in itertools.product('01', repeat=n)]
+def solve(n, s, q):
+    G_original = generate_graph(n, s, q)
+    G_for_priority = G_original.copy() # Pass read-only wrapper to priority function
+    alphabet = ''.join(str(i) for i in range(q))
+    sequences = [''.join(seq) for seq in itertools.product(alphabet, repeat=n)]
     priorities = {node: priority(node, G_for_priority, n, s) for node in G_original.nodes}
     nodes_sorted = sorted(G_original.nodes, key=lambda x: (-priorities[x], x))
     independent_set = set()
@@ -99,13 +79,11 @@ def solve(n, s):
         G_original.remove_node(node)
         G_original.remove_nodes_from(neighbors)
     hash_value = None
-    if n == 6:
+    if n == start_n:
         hash_value = hash_priority_mapping(priorities, sequences)
     return independent_set, hash_value
 
 def priority(node, G, n, s):
-    """
-    Returns the priority with which we want to add `node` to independent set.
-    """
+    """Returns the priority with which we want to add `node` to independent set."""
     return 0.0
 

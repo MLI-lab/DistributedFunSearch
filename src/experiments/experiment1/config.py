@@ -32,12 +32,13 @@ class RabbitMQConfig:
       port: The port of the RabbitMQ server.
       username: Username for authentication with the RabbitMQ server.
       password: Password for authentication with the RabbitMQ server.
+      vhost: Virtual host for isolation between experiments. Use '' for default vhost.
     """
     host: str = 'rabbitmq'
-    port: int = 5672 
-    username: str = 'guest' 
-    password: str = 'guest' 
-    #vhost = "temp_1" for cluster execution only 
+    port: int = 5672
+    username: str = 'guest'
+    password: str = 'guest'
+    vhost: str = 'exp1'  # Use '' for default vhost, or 'exp1', 'exp2', etc. for isolated experiments 
     
 
 @dataclasses.dataclass(frozen=True)
@@ -88,6 +89,27 @@ class SamplerConfig:
   gpt: bool = False   
   
 def get_spec_path() -> str:
+    """
+    Returns the path to the specification file.
+
+    Available specifications:
+
+    1. Deletion-only codes (sequences that can survive deletions):
+       - For StarCoder2: "Deletions/StarCoder2/load_graph/baseline.txt"
+       - For GPT:        "Deletions/gpt/load_graph/baseline.txt"
+       - Constructs on-the-fly: Use "construct_graph" instead of "load_graph"
+       - Graph files: graph_s{s}_n{n}.lmdb
+
+    2. IDS codes (sequences that can survive insertions/deletions/substitutions):
+       - For StarCoder2: "IDS/StarCoder2/load_graph/baseline.txt"
+       - For GPT:        Not yet implemented
+       - Constructs on-the-fly: Use "construct_graph" instead of "load_graph"
+       - Graph files: graph_ids_s{s}_n{n}.lmdb
+       - Note: For IDS codes, s corrects s errors, requires min distance 2s+1
+
+    Graph files are loaded from: /workspace/DeCoSearch/src/graphs/
+    To pre-compute IDS graphs, run: python src/construct_graphs/construct_ids_graphs.py
+    """
     # Get the absolute directory of this file
     base_dir = os.path.abspath(os.path.dirname(__file__))
     # Look for the substring "DeCoSearch" in the path
@@ -96,35 +118,97 @@ def get_spec_path() -> str:
         decos_base = base_dir[: idx + len("DeCoSearch")]
     else:
         decos_base = base_dir
-    # Build the path relative to the DeCoSearch folder
-    return os.path.join(decos_base, "src", "decos", "specifications", "StarCoder2", "load_graph", "baseline.txt")
+
+    # Change this line to switch between specifications
+    # Default: Deletion-only codes with pre-computed graphs
+    return os.path.join(decos_base, "src", "decos", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
+
+    # To use IDS codes (insertion/deletion/substitution), uncomment this instead:
+    #return os.path.join(decos_base, "src", "decos", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
 
 
 @dataclasses.dataclass(frozen=True)
 class EvaluatorConfig:
-    """Configuration of a ProgramsDatabase.
+    """Configuration of the Evaluator.
 
     Attributes:
-        s_values: List of number of deletions s.
+        s_values: List of error correction parameters.
+                  - For Deletion codes: s = number of deletions to correct
+                  - For IDS codes: s = number of insertions/deletions/substitutions to correct (requires min distance 2s+1)
         start_n: List of shortest code length for each s.
         end_n: List of longest code lengths for each s.
-        mode: Mode for score reduction. Available options: 'last', 'average', 'weighted'. 
+        mode: Mode for score reduction. Available options: 'last', 'average', 'weighted'.
         timeout: Timeout in seconds for the sandbox.
+        max_workers: Number of parallel CPU processes per evaluator for evaluating functions on different inputs (default: 2).
         eval_code: Include evaluation script in prompt. (default: False, set True to enable).
         include_nx: Include the nx package in the prompt (default: True, set False to disable).
         spec_path: Path to the specification file used in the experiment.
+                   Change get_spec_path() function above to switch between Deletions and IDS specifications.
+        q: Alphabet size for the codes (default: 2 for binary). Set to 4 for DNA data storage use case (alphabet: A, C, G, T).
     """
     s_values: List[int] = dataclasses.field(default_factory=lambda: [2])
-    start_n: List[int] = dataclasses.field(default_factory=lambda: [7])
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [12])
-    mode: str = "last"  
-    timeout: int = 30 
+    start_n: List[int] = dataclasses.field(default_factory=lambda: [7])  # Hash is computed for n==start_n[0] (automatically substituted in specification)
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [12])  # Reduced from 8 due to large graph size with q=4 (65K nodes)
+    mode: str = "last"
+    timeout: int = 90
+    max_workers: int = 2
     eval_code: bool = False
-    include_nx: bool = True 
+    include_nx: bool = True
     spec_path: str = dataclasses.field(default_factory=get_spec_path)
+    q: int = 2  # Set to 4 for DNA data storage use case (alphabet: A, C, G, T)
 
 
-@dataclasses.dataclass 
+@dataclasses.dataclass(frozen=True)
+class PromptConfig:
+    """Configuration for prompt generation and score display.
+
+    Attributes:
+        show_eval_scores: Whether to include evaluation scores in function docstrings (default: False).
+        display_mode: How to display scores: "absolute" or "relative" (default: "absolute").
+        best_known_solutions: Dictionary mapping (n, s) tuples to best-known or baseline scores.
+                             Required when display_mode is "relative".
+                             Example: {(6, 1): 8, (7, 1): 14, (8, 1): 26}
+        absolute_label: Prefix text for absolute scores.
+                       Format: (n, s): set_size where n=string length, s=errors corrected, set_size=independent set size (larger is better).
+        relative_label: Prefix text for relative improvements (default: "Relative to baseline:").
+
+    Notes:
+        When display_mode is "relative", the formula used is:
+        Relative Improvement = (Score_ours - Score_baseline) / |Score_baseline| × 100%
+
+        The best_known_solutions should match the (n, s) values defined in EvaluatorConfig.
+        Scores are appended to function docstrings in the few-shot prompt.
+        Score format: {(n, s): set_size} where n is string length, s is error correction parameter,
+        and set_size is the size of the independent set found (larger is better).
+    """
+    show_eval_scores: bool = True
+    display_mode: str = "relative" # "absolute" or "relative"
+    best_known_solutions: dict = dataclasses.field(default_factory=lambda: {(7, 2): 5, (8, 2): 7, (9, 2): 11, (10, 2): 16, (11, 2): 24, (12, 2): 32})  # use e.g. VT codes for single deletion or logn +loglogn + log3 for single IDS code rate (need to transform to code sizes) (from https://arxiv.org/pdf/2312.12717)
+    absolute_label: str = "Absolute scores (format (n, s): set_size, larger is better):"
+    relative_label: str = "Performance relative to baseline (format (n, s): improvement%):"
+
+
+@dataclasses.dataclass(frozen=True)
+class WandbConfig:
+    """Configuration for Weights & Biases logging.
+
+    Attributes:
+        enabled: Enable W&B logging (default: False).
+        project: W&B project name.
+        entity: W&B entity (username or team name).
+        run_name: Name for this run (default: None, auto-generated).
+        log_interval: How often to log metrics in seconds (default: 300 = 5 minutes).
+        tags: List of tags for this run.
+    """
+    enabled: bool = True
+    project: str = "decosSearch"
+    entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
+    run_name: str = "exp1"  # Auto-generated if None
+    log_interval: int = 300  # Log every 5 minutes
+    tags: List[str] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
 class Config:
   """Configuration of a FunSearch experiment.
 
@@ -133,14 +217,18 @@ class Config:
     rabbitmq: Configuration for RabbitMQ connection.
     sampler: Configuration of the samplers.
     evaluator: Configuration of the evaluators.
-    num_samplers: Number of independent Samplers in the experiment. 
+    prompt: Configuration for prompt generation and score display.
+    wandb: Configuration for Weights & Biases logging.
+    num_samplers: Number of independent Samplers in the experiment.
     num_evaluators: Number of independent program Evaluators in the experiment.
     num_pdb: Number of independent program databases. Currently supports only one, but this does not create a bottleneck.
-  """ 
+  """
   programs_database: ProgramsDatabaseConfig = dataclasses.field(default_factory=ProgramsDatabaseConfig)
   rabbitmq: RabbitMQConfig = dataclasses.field(default_factory=RabbitMQConfig)
-  sampler: SamplerConfig = dataclasses.field(default_factory=SamplerConfig) 
-  evaluator: EvaluatorConfig = dataclasses.field(default_factory=EvaluatorConfig) 
+  sampler: SamplerConfig = dataclasses.field(default_factory=SamplerConfig)
+  evaluator: EvaluatorConfig = dataclasses.field(default_factory=EvaluatorConfig)
+  prompt: PromptConfig = dataclasses.field(default_factory=PromptConfig)
+  wandb: WandbConfig = dataclasses.field(default_factory=WandbConfig)
   num_samplers: int = 1
   num_evaluators: int = 1
   num_pdb: int = 1

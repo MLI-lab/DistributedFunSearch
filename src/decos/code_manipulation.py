@@ -42,6 +42,11 @@ class Function:
     return_type: str | None = None
     docstring: str | None = None
     hash_value: int | None = None  # Add the hash_value attribute
+    # Evolutionary lineage tracking
+    program_id: int | None = None  # Unique ID for this program
+    parent_ids: list[int] | None = None  # IDs of programs in the prompt that generated this
+    generation: int = 0  # Generation number (0 for baseline, increments for offspring)
+    timestamp: float | None = None  # When this program was created
 
 
     def __str__(self) -> str:

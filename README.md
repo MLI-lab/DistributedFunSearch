@@ -20,7 +20,7 @@ For more details, see [our paper](https://arxiv.org/abs/2504.00613).
 
 ### Modifications for other applications
 
-Our implementation can be adapted to different applications with minimal changes:
+Our implementation can be adapted to different applications with minimal changes and supports resuming from checkpoints and tracking the evolutionary progress with W&B logging:
 
 - **Input format and evaluation logic:** You can modify the input format of the function to be evolved in `src/experiments/experiment1/config.py` (via the `EvaluatorConfig` class), and optionally set a performance threshold using the `--target_solution` argument in `src/decos/__main__.py` (e.g., to terminate the search once a function surpasses the current best-known solution).  
 To adapt how functions are evaluated for your specific application, you can modify the logic in the `src/decos/specifications/` folder.
@@ -46,17 +46,17 @@ cd DeCoSearch
 Our implementation is designed for Linux and tested on Ubuntu 22.04.6 LTS.
 You can execute DeCoSearch in different environments, with or without GPU/API-based LLM inference:
 
-- **Docker Container** – (Containerized isolated execution)
-- **Local Execution** – (Without Docker)
-- **With Slurm and Enroot** – (Cluster-based execution)
+- **Docker Container** - (Containerized isolated execution)
+- **Local Execution** - (Without Docker)
+- **With Slurm and Enroot** - (Cluster-based execution)
 ---
 
 ### **3. Execution with Docker**
 
 Our implementation uses **Docker Compose (v3.8)** to run two containers:
 
-- `decos-main` (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) – Runs the evolutionary search with GPU support.
-- `rabbitmq` (`rabbitmq:3.13.4-management`) – Handles message passing.
+- `decos-main` (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) - Runs the evolutionary search with GPU support.
+- `rabbitmq` (`rabbitmq:3.13.4-management`) - Handles message passing.
 
 You can navigate to the `.devcontainer` directory to start the two containers:
 
@@ -66,8 +66,8 @@ docker compose up --build -d
 ```
 Both containers run inside a **Docker bridge network** (`app-network`). 
 
-- **Internal communication** – The main container `decos-main` connects to RabbitMQ via `rabbitmq:5672`. The hostname in `/src/experiments/experiment1/config.py` is set to match this configuration by default.
-- **External access** – The RabbitMQ Management Interface is a web-based dashboard that allows you to monitor message load, processing rates, and system status across system components.  
+- **Internal communication** - The main container `decos-main` connects to RabbitMQ via `rabbitmq:5672`. The hostname in `/src/experiments/experiment1/config.py` is set to match this configuration by default.
+- **External access** - The RabbitMQ Management Interface is a web-based dashboard that allows you to monitor message load, processing rates, and system status across system components.  
 
   The interface is enabled by default in Docker execution and is available at:
   - **Web UI:** [http://localhost:15672](http://localhost:15672)
@@ -80,6 +80,23 @@ Both containers run inside a **Docker bridge network** (`app-network`).
   ```
 
 To change ports or hostnames, you can modify `docker-compose.yml`.
+
+#### **Running multiple experiments simultaneously**
+
+To run multiple experiments in parallel without interference, use RabbitMQ virtual hosts:
+
+1. Set `vhost` in `RabbitMQConfig` (in each experiment's `config.py`):
+   ```python
+   vhost: str = 'exp1'  # Use different vhost for each experiment
+   ```
+
+2. Create the vhost in RabbitMQ with appropriate permissions:
+   ```sh
+   docker exec rabbitmq rabbitmqctl add_vhost exp1
+   docker exec rabbitmq rabbitmqctl set_permissions -p exp1 guest ".*" ".*" ".*"
+   ```
+
+Each experiment with a different `vhost` will be completely isolated.
 
 #### **3.1. Create and activate a new conda environment (inside docker container decos-main)**
 
@@ -220,12 +237,12 @@ python -m decos
 
 This launches a search using the configurations specified in the directory's `config.py` file. The file includes explanations for each argument.
 
-The number of GPUs used is controlled by the `num_samplers` parameter, each sampler runs on a separate GPU.
+The number of GPUs used is determined by the `num_samplers` parameter, each sampler runs on a separate GPU.
 The number of CPUs used is determined by the `num_evaluators` parameter, each evaluator runs two parallel CPU processes to evaluate generated functions on different inputs.
 
 You can monitor the messages passed between components through the RabbitMQ Management Interface.
 
-**Note:** If stopping an experiment (e.g. via Ctrl+C), shutdown can take 30–60 seconds. During this time, evaluator and sampler processes clean up their connections to RabbitMQ and close all open resources.
+**Note:** If stopping an experiment (e.g. via Ctrl+C), shutdown can take 30-60 seconds. During this time, evaluator and sampler processes clean up their connections to RabbitMQ and close all open resources.
 
 
 Before starting a new run, ensure that all old processes have fully shut down. To close any remaining processes, you can restart the RabbitMQ container. For local execution, you can restart the RabbitMQ service using `sudo systemctl restart rabbitmq-server`. 

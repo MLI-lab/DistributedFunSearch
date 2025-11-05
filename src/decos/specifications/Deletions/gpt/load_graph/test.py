@@ -2,8 +2,10 @@
 Finds large independent set in graph G where nodes are binary strings of length n.
 Nodes in G are connected if they share a subsequence of length at least n-s. 
 
-Improve the `priority_v2` function over its previous versions below.
-Keep the code short and comment for easy understanding.
+Improve the priority_v5 function over its previous versions. 
+Return only the body of the function as valid Python code, without the function header, markdown, formatting, comments, or explanations. 
+Do not include any code block markers such as ```python or ```. 
+Keep the code short.
 """
 import itertools
 import hashlib
@@ -39,15 +41,17 @@ def hash_priority_mapping(priorities, sequences):
     return hashlib.sha256(mapping_str.encode()).hexdigest()
 
 
-def evaluate(params, graph_dir):
+def evaluate(params):
     n, s = params
-    independent_set, hash_value = solve(n, s, graph_dir)
+    independent_set, hash_value = solve(n, s)
     return (len(independent_set), hash_value)
 
 
-def solve(n, s, graph_dir):
+def solve(n, s):
     """ Find a large independent set in a loaded graph while avoiding unnecessary copies. """
-    path = os.path.join(graph_dir, f"graph_s{s}_n{n}.lmdb")
+    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../graphs"))
+    path = os.path.join(BASE_DIR, f"graph_s{s}_n{n}.lmdb")
+    print(path)
 
     G = load_graph(path)  # Load the graph directly, no copying
     G_for_priority = G.copy()  
@@ -68,12 +72,16 @@ def solve(n, s, graph_dir):
         G.remove_nodes_from(neighbors)  # Remove its neighbors
 
     hash_value = None
-    if n == 9:
+    if n == 10:
         hash_value = hash_priority_mapping(priorities, sequences)
 
     return independent_set, hash_value
 
 
 def priority(node, G, n, s):
-    """ Returns the priority with which we want to add `node` to the independent set. """
-    return 0.0  
+    """Returns the priority with which we want to add `node` to the independent set."""
+    return 0.0
+
+params=(7,1)
+result=evaluate(params)
+print(result)

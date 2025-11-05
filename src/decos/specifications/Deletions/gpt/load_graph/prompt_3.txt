@@ -1,0 +1,83 @@
+"""
+Find a large independent set in graph G where nodes are q-ary strings of length n.
+Nodes are connected if they share a subsequence of length at least n - s.
+
+Improve the priority_v5 function over its previous versions.
+Return only the body of the function as valid Python code, without the function header, markdown, formatting, comments, or explanations.
+Do not include any code block markers such as ```python or ```.
+Keep the code short.
+"""
+
+import itertools
+import hashlib
+import numpy as np
+import networkx as nx
+import lmdb
+import json
+import os
+
+
+def load_graph(graph_db_path):
+    """ Load the graph from an LMDB database. """
+    G = nx.Graph()
+    graph_env = lmdb.open(graph_db_path, readonly=True, lock=False)
+
+    with graph_env.begin() as txn:
+        cursor = txn.cursor()
+        for key, value in cursor:
+            node = key.decode()
+            neighbors = json.loads(value.decode())
+            for neighbor in neighbors:
+                G.add_edge(node, neighbor)
+
+    graph_env.close()
+    return G
+
+
+def hash_priority_mapping(priorities, sequences):
+    """ Generate a hash based on the mapping of sequences to their priority scores. """
+    mapping = [(seq, priorities[seq]) for seq in sequences]
+    mapping_sorted = sorted(mapping, key=lambda x: x[0])  # Sort by sequence
+    mapping_str = ','.join(f'{seq}:{score}' for seq, score in mapping_sorted)
+    return hashlib.sha256(mapping_str.encode()).hexdigest()
+
+
+def evaluate(params, graph_dir):
+    n, s, q = params
+    independent_set, hash_value = solve(n, s, q, graph_dir)
+    return (len(independent_set), hash_value)
+
+
+def solve(n, s, q, graph_dir):
+    """ Find a large independent set in a loaded graph while avoiding unnecessary copies. """
+    path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+    print(f"[DEBUG] Loading graph from: {path}")
+
+    G = load_graph(path)  # Load the graph directly, no copying
+
+    alphabet = ''.join(str(i) for i in range(q))
+    sequences = [''.join(seq) for seq in itertools.product(alphabet, repeat=n)]
+    priorities = {node: priority(node, n, s) for node in G.nodes}
+
+    # Sort nodes first by priority (higher is better), then by lexicographic order (ascending)
+    nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))
+
+    independent_set = set()
+    for node in nodes_sorted:
+        if node not in G:
+            continue
+        independent_set.add(node)
+        neighbors = list(G.neighbors(node))
+        G.remove_node(node)  # Remove the node from the original graph
+        G.remove_nodes_from(neighbors)  # Remove its neighbors
+
+    hash_value = None
+    if n == start_n:
+        hash_value = hash_priority_mapping(priorities, sequences)
+
+    return independent_set, hash_value
+
+
+def priority(node, n, s):
+    """Returns the priority with which we want to add `node` to the independent set."""
+    return 0.0
