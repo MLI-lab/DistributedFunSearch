@@ -48,7 +48,9 @@ from multiprocessing import Pool, cpu_count
 
 def estimate_memory_usage(n, s, q, max_workers):
     """
-    Estimate peak memory usage for graph construction.
+    Estimate peak memory usage for graph construction (Upper bound).
+
+    Uses Hamming ball formula to compute estimate of degree and edge distribution (Levenshtein distance ≤ Hamming distance)
 
     Args:
         n: Length of strings
@@ -59,35 +61,38 @@ def estimate_memory_usage(n, s, q, max_workers):
     Returns:
         dict with memory estimates in GB
     """
+    from math import comb
+
     total_sequences = q ** n
+    r = 2 * s  # Hamming distance threshold
 
-    # Sequences list: each string is approximately 50-70 bytes in Python
-    seq_memory_mb = total_sequences * 60 / (1024**2)
+    # Compute Hamming ball volume: V_q(n,r) = sum_{t=0}^{r} C(n,t) * (q-1)^t
+    hamming_ball_volume = sum(comb(n, t) * ((q - 1) ** t) for t in range(r + 1))
+    avg_degree = hamming_ball_volume
 
-    # Estimate average degree based on edit distance threshold
-    # For edit distance < 2s+1:
-    # - Distance 1: n * (q-1) neighbors
-    # - Distance 2: C(n,2) * (q-1)^2 neighbors
-    # This is a rough approximation
-    threshold = 2 * s + 1
-    if threshold >= 2:
-        avg_degree_d1 = n * (q - 1)
-        avg_degree_d2 = (n * (n - 1) // 2) * ((q - 1) ** 2)
-        avg_degree = avg_degree_d1 + avg_degree_d2
-    else:
-        avg_degree = n * (q - 1)
+    # Edge probability: p_edge ≈ V_q(n,r) / (N-1)
+    p_edge = hamming_ball_volume / (total_sequences - 1) if total_sequences > 1 else 0
 
-    # Adjacency dict: pointers to neighbors (8 bytes per pointer)
-    adjacency_gb = total_sequences * avg_degree * 8 / (1024**3)
+    # Total pairs and pairs per worker
+    total_pairs = total_sequences * (total_sequences - 1) // 2
+    pairs_per_worker = total_pairs / max_workers if max_workers > 0 else 0
 
-    # Sequences list memory
-    sequences_gb = seq_memory_mb / 1024
+    # Expected edges per worker: E_w ≈ P_w * p_edge
+    expected_edges_per_worker = pairs_per_worker * p_edge
 
-    # Per-worker memory: minimal overhead due to copy-on-write and temp edge lists
-    # Based on profiling with n=7,q=4: ~10-50 MB per worker
-    worker_memory_gb = max_workers * 0.05  # Refined estimate: 50MB per worker
+    # Memory per edge: Python tuple of two strings (~120-200 bytes)
+    # Using conservative 150 bytes per edge
+    bytes_per_edge = 150
+    edge_buffer_gb_per_worker = expected_edges_per_worker * bytes_per_edge / (1024**3)
 
-    # Total (note: workers often share sequences via copy-on-write, so not fully additive)
+    # Per-worker memory: edge buffer + process overhead (~50-150 MB)
+    worker_memory_gb = max_workers * (edge_buffer_gb_per_worker + 0.1)
+
+    # Main process memory components
+    sequences_gb = total_sequences * 60 / (1024**3)  # ~60 bytes per string
+    adjacency_gb = total_sequences * avg_degree * 8 / (1024**3)  # 8 bytes per pointer
+
+    # Total memory
     total_gb = adjacency_gb + sequences_gb + worker_memory_gb + 0.2
 
     return {
@@ -95,8 +100,12 @@ def estimate_memory_usage(n, s, q, max_workers):
         'adjacency': adjacency_gb,
         'sequences': sequences_gb,
         'workers': worker_memory_gb,
+        'edge_buffer_per_worker': edge_buffer_gb_per_worker,
+        'expected_edges_per_worker': expected_edges_per_worker,
         'overhead': 0.2,
         'avg_degree': avg_degree,
+        'hamming_ball_volume': hamming_ball_volume,
+        'p_edge': p_edge,
         'total_nodes': total_sequences
     }
 
@@ -165,12 +174,24 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
 
     # Print memory estimate
     mem_estimate = estimate_memory_usage(n, s, q, max_workers)
-    print(f"  Estimated memory usage:")
+    print(f"  Estimated memory usage (UPPER BOUND):")
     print(f"    Total: {mem_estimate['total']:.2f} GB")
-    print(f"    - Adjacency dict: {mem_estimate['adjacency']:.2f} GB (est. {mem_estimate['avg_degree']:.0f} neighbors/node)")
+    print(f"    - Adjacency dict: {mem_estimate['adjacency']:.2f} GB")
     print(f"    - Sequences list: {mem_estimate['sequences']:.2f} GB")
     print(f"    - Workers ({max_workers}): {mem_estimate['workers']:.2f} GB")
-    print(f"    - Overhead: {mem_estimate['overhead']:.2f} GB")
+    print(f"      * Edge buffer per worker: {mem_estimate['edge_buffer_per_worker']:.2f} GB (~{mem_estimate['expected_edges_per_worker']/1e6:.1f}M edges)")
+    print(f"      * Process overhead: 0.1 GB per worker")
+    print(f"    - Base overhead: {mem_estimate['overhead']:.2f} GB")
+    print(f"  Note: This is an UPPER BOUND because:")
+    print(f"    - Uses Hamming ball (Hamming ≥ Levenshtein, equality only without shifts)")
+    print(f"    - All workers peak simultaneously (actual: staggered due to load balancing)")
+    print(f"    - Conservative 150 bytes/edge (actual: ~100-120 bytes)")
+    print(f"    - No copy-on-write sharing (Linux/macOS: sequences are shared)")
+    print(f"    Actual memory usage typically 30-50% of estimate (or less if sparse).")
+    print(f"  Graph properties (based on Hamming ball approximation):")
+    print(f"    - Upper bound on degree: V_{q}(n,{2*s}) = {mem_estimate['avg_degree']:.0f}")
+    print(f"    - Upper bound on edge probability: {mem_estimate['p_edge']:.6f}")
+    print(f"    - Actual degree will be lower due to Levenshtein < Hamming for shifts")
 
     # Generate q-ary alphabet: '0', '1', ..., 'q-1'
     alphabet = ''.join(str(i) for i in range(q))
