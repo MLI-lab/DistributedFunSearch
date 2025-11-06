@@ -48,15 +48,24 @@ def _compute_edges_chunk(args):
     Worker function to compute edges for a chunk of sequence pairs.
 
     Args:
-        args: Tuple of (start_i, end_i, sequences, n, s)
+        args: Tuple of (worker_id, start_i, end_i, sequences, n, s)
               Worker generates pairs from range [start_i, end_i) to save memory
 
     Returns:
         List of edges (seq1, seq2) that should be connected
     """
-    start_i, end_i, sequences, n, s = args
+    worker_id, start_i, end_i, sequences, n, s = args
     edges = []
     n_sequences = len(sequences)
+
+    # Create progress bar for this worker at a specific vertical position
+    pbar = tqdm(
+        total=end_i - start_i,
+        desc=f"  Worker {worker_id:2d}",
+        position=worker_id,
+        leave=True,
+        unit="idx"
+    )
 
     for i in range(start_i, end_i):
         for j in range(i + 1, n_sequences):
@@ -65,6 +74,9 @@ def _compute_edges_chunk(args):
             if has_common_subsequence(seq1, seq2, n, s):
                 edges.append((seq1, seq2))
 
+        pbar.update(1)
+
+    pbar.close()
     return edges
 
 
@@ -172,19 +184,16 @@ def generate_deletion_graph(n, s, q=2, max_workers=None):
                 end_i = n_sequences
 
         if start_i < n_sequences:
-            worker_args.append((start_i, end_i, sequences, n, s))
+            worker_args.append((worker_id, start_i, end_i, sequences, n, s))
 
         current_i = end_i
 
     # Process in parallel
     print(f"  Computing common subsequences in parallel...")
+    print(f"  Each worker will show its own progress bar below:\n")
     with Pool(max_workers) as pool:
-        results = list(tqdm(
-            pool.imap(_compute_edges_chunk, worker_args),
-            total=len(worker_args),
-            desc="  Progress",
-            unit="chunk"
-        ))
+        # Use imap without outer tqdm - each worker has its own progress bar
+        results = list(pool.imap(_compute_edges_chunk, worker_args))
 
     # Combine results into adjacency list
     edge_count = 0
