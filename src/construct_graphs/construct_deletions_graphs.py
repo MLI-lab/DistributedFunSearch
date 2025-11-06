@@ -19,6 +19,29 @@ import json
 import os
 import lmdb
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+
+
+def _compute_edges_chunk(args):
+    """
+    Worker function to compute edges for a chunk of sequence pairs.
+
+    Args:
+        args: Tuple of (pairs, sequences, n, s)
+
+    Returns:
+        List of edges (seq1, seq2) that should be connected
+    """
+    pairs, sequences, n, s = args
+    edges = []
+
+    for i, j in pairs:
+        seq1, seq2 = sequences[i], sequences[j]
+
+        if has_common_subsequence(seq1, seq2, n, s):
+            edges.append((seq1, seq2))
+
+    return edges
 
 
 def has_common_subsequence(seq1, seq2, n, s):
@@ -57,7 +80,7 @@ def has_common_subsequence(seq1, seq2, n, s):
     return False  # No LCS of adequate length was found
 
 
-def generate_deletion_graph(n, s, q=2):
+def generate_deletion_graph(n, s, q=2, max_workers=None):
     """
     Generate a graph where nodes are q-ary strings of length n.
     Two nodes are connected if they share a common subsequence of length >= n-s.
@@ -66,11 +89,16 @@ def generate_deletion_graph(n, s, q=2):
         n: Length of strings
         s: Number of deletions to correct
         q: Alphabet size (default: 2 for binary, 4 for DNA)
+        max_workers: Number of parallel workers (default: cpu_count())
 
     Returns:
         dict: Adjacency list representation {node: [list of neighbors]}
     """
+    if max_workers is None:
+        max_workers = cpu_count()
+
     print(f"Generating graph for n={n}, s={s}, q={q} (LCS threshold: {n-s})")
+    print(f"  Using {max_workers} workers for parallel computation")
 
     # Generate q-ary alphabet: '0', '1', ..., 'q-1'
     alphabet = ''.join(str(i) for i in range(q))
@@ -80,23 +108,34 @@ def generate_deletion_graph(n, s, q=2):
     # Build adjacency list
     adjacency = {seq: [] for seq in sequences}
 
-    edge_count = 0
-
-    # Compute pairwise LCS with progress bar
+    # Generate all pairs of indices
     total_pairs = len(sequences) * (len(sequences) - 1) // 2
+    all_pairs = [(i, j) for i in range(len(sequences)) for j in range(i + 1, len(sequences))]
 
-    with tqdm(total=total_pairs, desc="  Computing common subsequences", unit="pairs") as pbar:
-        for i in range(len(sequences)):
-            for j in range(i + 1, len(sequences)):
-                seq1, seq2 = sequences[i], sequences[j]
+    # Split pairs into chunks for workers
+    chunk_size = max(1, len(all_pairs) // max_workers)
+    chunks = [all_pairs[i:i + chunk_size] for i in range(0, len(all_pairs), chunk_size)]
 
-                # Check if sequences share a common subsequence of length >= n-s
-                if has_common_subsequence(seq1, seq2, n, s):
-                    adjacency[seq1].append(seq2)
-                    adjacency[seq2].append(seq1)
-                    edge_count += 1
+    # Prepare arguments for workers
+    worker_args = [(chunk, sequences, n, s) for chunk in chunks]
 
-                pbar.update(1)
+    # Process in parallel
+    print(f"  Computing common subsequences in parallel...")
+    with Pool(max_workers) as pool:
+        results = list(tqdm(
+            pool.imap(_compute_edges_chunk, worker_args),
+            total=len(chunks),
+            desc="  Progress",
+            unit="chunk"
+        ))
+
+    # Combine results into adjacency list
+    edge_count = 0
+    for edges in results:
+        for seq1, seq2 in edges:
+            adjacency[seq1].append(seq2)
+            adjacency[seq2].append(seq1)
+            edge_count += 1
 
     print(f"  Total edges: {edge_count}")
     return adjacency
@@ -126,7 +165,7 @@ def save_graph_to_lmdb(adjacency, output_path):
     print(f"  Graph saved successfully!")
 
 
-def construct_and_save_graph(n, s, q, output_dir):
+def construct_and_save_graph(n, s, q, output_dir, max_workers=None):
     """
     Construct a deletion-correcting code graph and save it to LMDB.
 
@@ -135,9 +174,10 @@ def construct_and_save_graph(n, s, q, output_dir):
         s: Number of deletions to correct
         q: Alphabet size (2 for binary, 4 for DNA)
         output_dir: Directory to save the graph
+        max_workers: Number of parallel workers (default: cpu_count())
     """
     # Generate graph
-    adjacency = generate_deletion_graph(n, s, q)
+    adjacency = generate_deletion_graph(n, s, q, max_workers=max_workers)
 
     # Create output path
     graph_name = f"graph_d_s{s}_n{n}_q{q}.lmdb"
@@ -162,6 +202,9 @@ if __name__ == "__main__":
     # Alphabet size: 2 for binary, 4 for DNA (quaternary)
     q = 4
 
+    # Number of parallel workers (set to None to use all available CPU cores)
+    max_workers = 16
+
     # Define (n, s) pairs to construct graphs for
     # Adjust these based on your experimental needs
     params = [
@@ -184,7 +227,7 @@ if __name__ == "__main__":
     ]
 
     for n, s in tqdm(params, desc="Overall progress", unit="graph"):
-        construct_and_save_graph(n, s, q, OUTPUT_DIR)
+        construct_and_save_graph(n, s, q, OUTPUT_DIR, max_workers=max_workers)
 
     print("=" * 70)
     print("All graphs constructed successfully!")
