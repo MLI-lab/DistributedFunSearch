@@ -17,7 +17,7 @@ Constructs graphs for finding codes that can correct deletions.
 
 1. Install required dependencies:
    ```bash
-   pip install tqdm
+   pip install tqdm lmdb
    ```
 
 2. Edit the `params` list and `q` value in the `__main__` block to specify which (n, s) pairs and alphabet size you want:
@@ -62,7 +62,7 @@ Constructs graphs for finding codes that can correct insertions, deletions, and 
 
 1. Install required dependencies:
    ```bash
-   pip install python-Levenshtein tqdm
+   pip install python-Levenshtein tqdm lmdb
    ```
 
 2. Edit the `params` list and `q` value in the `__main__` block to specify which (n, s) pairs and alphabet size you want:
