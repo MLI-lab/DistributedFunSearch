@@ -80,17 +80,22 @@ def estimate_memory_usage(n, s, q, max_workers):
     # Adjacency dict: pointers to neighbors (8 bytes per pointer)
     adjacency_gb = total_sequences * avg_degree * 8 / (1024**3)
 
-    # Per-worker memory: sequences copy + temp edges + process overhead
-    worker_memory_gb = max_workers * 0.5  # Conservative estimate: 500MB per worker
+    # Sequences list memory
+    sequences_gb = seq_memory_mb / 1024
 
-    # Total
-    total_gb = adjacency_gb + worker_memory_gb + 0.5  # +0.5 for base overhead
+    # Per-worker memory: minimal overhead due to copy-on-write and temp edge lists
+    # Based on profiling with n=7,q=4: ~10-50 MB per worker
+    worker_memory_gb = max_workers * 0.05  # Refined estimate: 50MB per worker
+
+    # Total (note: workers often share sequences via copy-on-write, so not fully additive)
+    total_gb = adjacency_gb + sequences_gb + worker_memory_gb + 0.2
 
     return {
         'total': total_gb,
         'adjacency': adjacency_gb,
+        'sequences': sequences_gb,
         'workers': worker_memory_gb,
-        'overhead': 0.5,
+        'overhead': 0.2,
         'avg_degree': avg_degree,
         'total_nodes': total_sequences
     }
@@ -101,15 +106,25 @@ def _compute_edges_chunk(args):
     Worker function to compute edges for a chunk of sequence pairs.
 
     Args:
-        args: Tuple of (start_i, end_i, sequences, threshold)
+        args: Tuple of (worker_id, start_i, end_i, sequences, threshold)
               Worker generates pairs from range [start_i, end_i) to save memory
 
     Returns:
         List of edges (seq1, seq2) that should be connected
     """
-    start_i, end_i, sequences, threshold = args
+    worker_id, start_i, end_i, sequences, threshold = args
     edges = []
     n_sequences = len(sequences)
+
+    # Create progress bar for this worker at a specific vertical position
+    # position=worker_id places each worker's bar at a different line
+    pbar = tqdm(
+        total=end_i - start_i,
+        desc=f"  Worker {worker_id:2d}",
+        position=worker_id,
+        leave=True,
+        unit="idx"
+    )
 
     for i in range(start_i, end_i):
         for j in range(i + 1, n_sequences):
@@ -119,6 +134,9 @@ def _compute_edges_chunk(args):
             if edit_dist < threshold:
                 edges.append((seq1, seq2))
 
+        pbar.update(1)
+
+    pbar.close()
     return edges
 
 
@@ -150,6 +168,7 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
     print(f"  Estimated memory usage:")
     print(f"    Total: {mem_estimate['total']:.2f} GB")
     print(f"    - Adjacency dict: {mem_estimate['adjacency']:.2f} GB (est. {mem_estimate['avg_degree']:.0f} neighbors/node)")
+    print(f"    - Sequences list: {mem_estimate['sequences']:.2f} GB")
     print(f"    - Workers ({max_workers}): {mem_estimate['workers']:.2f} GB")
     print(f"    - Overhead: {mem_estimate['overhead']:.2f} GB")
 
@@ -203,19 +222,16 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
                 end_i = n_sequences
 
         if start_i < n_sequences:
-            worker_args.append((start_i, end_i, sequences, threshold))
+            worker_args.append((worker_id, start_i, end_i, sequences, threshold))
 
         current_i = end_i
 
     # Process in parallel
     print(f"  Computing edit distances in parallel...")
+    print(f"  Each worker will show its own progress bar below:\n")
     with Pool(max_workers) as pool:
-        results = list(tqdm(
-            pool.imap(_compute_edges_chunk, worker_args),
-            total=len(worker_args),
-            desc="  Progress",
-            unit="chunk"
-        ))
+        # Use imap without outer tqdm - each worker has its own progress bar
+        results = list(pool.imap(_compute_edges_chunk, worker_args))
 
     # Combine results into adjacency list
     edge_count = 0
