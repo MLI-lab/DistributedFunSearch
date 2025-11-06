@@ -42,8 +42,65 @@ import math
 import lmdb
 import Levenshtein
 import tracemalloc
+import psutil
+import threading
+import time
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
+
+
+class MemoryMonitor:
+    """Monitor memory usage of process and all children."""
+
+    def __init__(self, interval=2.0):
+        """
+        Args:
+            interval: Sampling interval in seconds
+        """
+        self.interval = interval
+        self.peak_memory_gb = 0.0
+        self.current_memory_gb = 0.0
+        self.running = False
+        self.thread = None
+        self.process = psutil.Process(os.getpid())
+
+    def _get_total_memory(self):
+        """Get total memory (RSS) of this process and all children in GB."""
+        try:
+            total = self.process.memory_info().rss
+            for child in self.process.children(recursive=True):
+                try:
+                    total += child.memory_info().rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            return total / (1024**3)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return 0.0
+
+    def _monitor_loop(self):
+        """Background thread that samples memory periodically."""
+        while self.running:
+            self.current_memory_gb = self._get_total_memory()
+            if self.current_memory_gb > self.peak_memory_gb:
+                self.peak_memory_gb = self.current_memory_gb
+            time.sleep(self.interval)
+
+    def start(self):
+        """Start monitoring memory in background thread."""
+        self.running = True
+        self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        """Stop monitoring and return peak memory."""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=self.interval * 2)
+        # Final sample
+        final_memory = self._get_total_memory()
+        if final_memory > self.peak_memory_gb:
+            self.peak_memory_gb = final_memory
+        return self.peak_memory_gb
 
 
 def estimate_memory_usage(n, s, q, max_workers):
@@ -166,11 +223,13 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
     if max_workers is None:
         max_workers = cpu_count()
 
-    # Start memory tracking (only tracks this Python process, not other processes)
-    tracemalloc.start()
+    # Start memory monitoring (tracks main process + all worker processes)
+    memory_monitor = MemoryMonitor(interval=2.0)
+    memory_monitor.start()
 
     print(f"Generating graph for n={n}, s={s}, q={q} (min required distance: {2*s + 1})")
     print(f"  Using {max_workers} workers for parallel computation")
+    print(f"  Monitoring memory usage (sampling every 2s)...")
 
     # Print memory estimate
     mem_estimate = estimate_memory_usage(n, s, q, max_workers)
@@ -264,11 +323,15 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
 
     print(f"  Total edges: {edge_count}")
 
-    # Report actual memory usage
-    current, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    print(f"  Actual peak memory usage: {peak / (1024**3):.2f} GB")
-    print(f"    (Estimated: {mem_estimate['total']:.2f} GB, Difference: {(peak / (1024**3)) - mem_estimate['total']:.2f} GB)")
+    # Stop memory monitoring and report actual usage
+    peak_memory_gb = memory_monitor.stop()
+    print(f"\n  ACTUAL peak memory usage: {peak_memory_gb:.2f} GB (main + all {max_workers} workers)")
+    print(f"    Estimated upper bound: {mem_estimate['total']:.2f} GB")
+    print(f"    Actual vs estimate: {peak_memory_gb / mem_estimate['total'] * 100:.1f}% of upper bound")
+    if peak_memory_gb < mem_estimate['total']:
+        print(f"    Within estimate (saved {mem_estimate['total'] - peak_memory_gb:.2f} GB)")
+    else:
+        print(f"    WARNING: Exceeded estimate by {peak_memory_gb - mem_estimate['total']:.2f} GB")
 
     return adjacency
 
@@ -323,8 +386,7 @@ def construct_and_save_graph(n, s, q, output_dir, max_workers=None):
 if __name__ == "__main__":
     # Specify the output directory (relative to src/graphs)
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    #OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
-    OUTPUT_DIR="/mnt/graphs/ids_graphs"
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("=" * 70)
@@ -365,4 +427,10 @@ if __name__ == "__main__":
     print("=" * 70)
     print("All graphs constructed successfully!")
     print(f"Graphs saved to: {OUTPUT_DIR}")
+    print("=" * 70)
+    print()
+    print("SLURM Memory Reporting:")
+    print("  To get SLURM's memory report after job completion, use:")
+    print("    sacct -j <job_id> --format=JobID,MaxRSS,ReqMem,Elapsed")
+    print("  MaxRSS shows the actual peak memory used by the job")
     print("=" * 70)
