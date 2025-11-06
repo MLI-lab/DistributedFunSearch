@@ -17,7 +17,7 @@ Constructs graphs for finding codes that can correct deletions.
 
 1. Install required dependencies:
    ```bash
-   pip install tqdm lmdb
+   pip install tqdm
    ```
 
 2. Edit the `params` list and `q` value in the `__main__` block to specify which (n, s) pairs and alphabet size you want:
@@ -62,7 +62,7 @@ Constructs graphs for finding codes that can correct insertions, deletions, and 
 
 1. Install required dependencies:
    ```bash
-   pip install python-Levenshtein tqdm lmdb
+   pip install python-Levenshtein tqdm
    ```
 
 2. Edit the `params` list and `q` value in the `__main__` block to specify which (n, s) pairs and alphabet size you want:
@@ -129,3 +129,16 @@ To use IDS graphs in your experiments:
    ```
 
 **Note:** The config uses a helper function `get_spec_path()` that automatically constructs the full path. Simply comment/uncomment the appropriate return statement to switch between Deletions and IDS specifications.
+
+## Memory Tracking
+
+Both construction scripts include real-time memory monitoring:
+- **Before**: Shows estimated upper bound (based on Hamming ball formula)
+- **During**: Samples memory every 2s (main process + all workers)
+- **After**: Reports actual peak memory vs estimate
+
+For SLURM jobs, verify actual usage after completion:
+```bash
+sacct -j <job_id> --format=JobID,MaxRSS,ReqMem,Elapsed
+```
+
