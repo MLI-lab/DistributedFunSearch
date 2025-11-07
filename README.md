@@ -14,7 +14,7 @@ FunSearchMQ is designed for large-scale distributed execution:
 
 - **Multi-node execution**: Distributes across multiple nodes and allows adding workers to a running experiment from different nodes (see [Cluster Setup](docs/CLUSTER_SETUP.md) for SLURM/Enroot example)
 - **Asynchronous workers**: ProgramsDatabase, Samplers, and Evaluators work independently
-- **Dynamic scaling**: Automatically adjusts workers based on message load for maximum throughput
+- **Dynamic scaling**: Automatically adjusts workers based on message load for maximum throughput (see [Scaling Guide](docs/SCALING.md))
 
 In each iteration:
 
