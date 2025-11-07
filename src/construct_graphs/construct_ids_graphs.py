@@ -386,8 +386,7 @@ def construct_and_save_graph(n, s, q, output_dir, max_workers=None):
 if __name__ == "__main__":
     # Specify the output directory (relative to src/graphs)
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    #OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
-    OUTPUT_DIR="/mnt/graphs/ids_graphs"
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("=" * 70)
