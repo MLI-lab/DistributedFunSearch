@@ -1,14 +1,13 @@
 #!/bin/bash
-#SBATCH --partition=                               # Partition (queue) name
-#SBATCH --nodes=1                                                    # Number of nodes
-#SBATCH --mem=                                                 # Memory per node
+#SBATCH --partition=${PARTITION:-default}                            # Partition (queue) name
+#SBATCH --nodes=5                                                    # Number of nodes
+#SBATCH --mem=300GB                                                  # Memory per node
 #SBATCH --ntasks-per-node=1                                          # Number of tasks per node
-#SBATCH --cpus-per-task=                                          # CPU cores per node
-#SBATCH --gres=gpu:                                             # GPUs per node
+#SBATCH --cpus-per-task=92                                           # CPU cores per node
+#SBATCH --gres=gpu:4                                                 # GPUs per node
 #SBATCH -o DeCoSearch/src/experiments/experiment1/logs/experiment.out # Standard output log
 #SBATCH -e DeCoSearch/src/experiments/experiment1/logs/experiment.err # Standard error log
 #SBATCH --time=48:00:00                                              # Time limit
-
 
 # Extract node lists for node groups
 NODE_LIST=($(scontrol show hostnames $SLURM_JOB_NODELIST_HET_GROUP_0)) || { echo "Error fetching node list"; exit 1; }
@@ -26,9 +25,9 @@ CONFIG_NAME="config.py"
 RABBITMQ_CONF="rabbitmq.conf"
 PORT=15673
 PORT2=5673
-SSH_USER="ge74met"
+SSH_USER=" " # set user name
 SSH_HOST="login01.msv.ei.tum.de"   # set to your laptop’s public IP or server name from which you want to access interface (note needs to be on same network as cluster)
-SSH_PORT=3022
+SSH_PORT= #set to port at which to connect 
 
 
 # Get RabbitMQ hostname
@@ -36,8 +35,9 @@ RABBITMQ_HOSTNAME=$(srun -N1 -n1 --nodelist=$NODE_1 hostname -f) || { echo "Erro
 echo "RabbitMQ server hostname: $RABBITMQ_HOSTNAME"
 
 # Run the main setup process on Node 1
+# Set path to enroot image
 srun -N1 -n1 --nodelist=$NODE_1 \
-     --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
+     --container-image="" \
      --container-mounts="$PWD/DeCoSearch:/DeCoSearch,\
 $PWD/.ssh:/DeCoSearch/.ssh" \
      bash -c "
@@ -74,12 +74,13 @@ $PWD/.ssh:/DeCoSearch/.ssh" \
          # Set up reverse SSH tunnel for RabbitMQ management interface
          # Make sure to replace SSH_USER, SSH_HOST, and SSH_PORT with your actual SSH credentials
          # And keys are in .ssh folder for non-interactive login
-         # on server we reverse tunnel to and want to access the interface run: ssh -L 8888:localhost:PORT SSH_USER@SSH_HOST -p SSH_PORT
-         # access interface at localhost:8888 on server machine
+         # on server we reverse tunnel to and want to access the interface run: ssh -L PORT:localhost:PORT SSH_USER@SSH_HOST -p SSH_PORT
+         # access interface at  http://localhost:PORT on server machine
          ssh -R $PORT:localhost:$PORT $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel'; exit 1; }
 
          # Set up a reverse SSH tunnel for message passing, allowing external nodes to communicate with the main task running inside the cluster.
          ssh -R $PORT2:localhost:$PORT2  $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel for RabbitMQ AMQP'; exit 1; }
+
 
          # Export API credentials (implementation is for an Azure-based API)
 
@@ -89,9 +90,8 @@ $PWD/.ssh:/DeCoSearch/.ssh" \
         
          # Run DeCoSearch
          cd /DeCoSearch/src/experiments/$EXPERIMENT_NAME
-
-         python3 -m decos --save_checkpoints_path="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/decosearch/checkpoints/experiment1_checkpoints/" \
-                         --sandbox_base_path="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/sandbox/$EXPERIMENT_NAME/"
+         # Add command line arguments as needed
+         python3 -m decos 
      " &
 
 # Create a list of 10 times evenly spaced from 1800 to 3600 seconds

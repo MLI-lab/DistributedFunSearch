@@ -126,7 +126,7 @@ class LLM_model:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.checkpoint,
                     cache_dir=self.cache_dir,
-                    dtype=torch.float16,
+                    torch_dtype=torch.float16, 
                     local_files_only=False,
                     device_map="auto",
                 )
@@ -135,7 +135,7 @@ class LLM_model:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.checkpoint,
                     cache_dir=self.cache_dir,
-                    dtype=torch.float16,
+                    torch_dtype=torch.float16,
                     local_files_only=False,
                     device_map=None,
                 )
