@@ -134,7 +134,7 @@ class TaskManager:
 
     def initialize_logger(self, log_dir):
         logger = logging.getLogger('main_logger')
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
 
         # Create the log directory for the experiment
         os.makedirs(log_dir, exist_ok=True)
@@ -825,9 +825,9 @@ if __name__ == "__main__":
                 print(f"Sending SIGTERM to process {p.pid} ({p.name})")
                 p.terminate()          # SIGTERM first
 
-        # Give child processes 120 seconds to close connections gracefully
-        # (evaluator shutdown: up to 100s, sampler: up to 60s)
-        deadline = time.time() + 120
+        # Give child processes 30 seconds to close connections gracefully
+        # After manual interrupt, we want faster shutdown
+        deadline = time.time() + 30
         while any(p.is_alive() for p in children) and time.time() < deadline:
             await asyncio.sleep(0.5)
 
