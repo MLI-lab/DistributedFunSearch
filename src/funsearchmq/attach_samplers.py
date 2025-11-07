@@ -11,12 +11,13 @@ import signal
 import sys
 import time
 from typing import Sequence, Any
-from decos.scaling_utils import ResourceManager
-from decos import sampler
-from decos import process_utils
+from funsearchmq.scaling_utils import ResourceManager
+from funsearchmq import sampler
+from funsearchmq import process_utils
+from funsearchmq.__main__ import sampler_process_entry
 import importlib
 import socket
-from decos import gpt
+from funsearchmq import gpt
 
 
 def load_config(config_path):
@@ -39,15 +40,17 @@ def get_ip_address():
         return f"Error fetching IP address: {e}"
 
 class TaskManager:
-    def __init__(self, config, check_interval, log_dir):
+    def __init__(self, config, check_interval, log_dir, config_path):
         self.config = config
+        self.config_path = config_path  # Store for spawn compatibility
+        self.log_dir = log_dir  # Store for spawn compatibility
         self.logger = self.initialize_logger(log_dir)
         self.sampler_processes = []
         self.tasks = []
-        if self.config.sampler.gpt: 
-            self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True)
-        else: 
-            self.resource_manager = ResourceManager(log_dir=log_dir)
+        if self.config.sampler.gpt:
+            self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True, scaling_config=self.config.scaling)
+        else:
+            self.resource_manager = ResourceManager(log_dir=log_dir, scaling_config=self.config.scaling)
         self.process_to_device_map = {}
 
     def initialize_logger(self, log_dir):
@@ -106,14 +109,18 @@ class TaskManager:
             if enable_scaling:
                 scaling_task = asyncio.create_task(
                     self.resource_manager.run_scaling_loop(
-                        evaluator_queue=None, 
+                        evaluator_queue=None,
                         sampler_queue=sampler_queue,
                         evaluator_processes=None,
                         sampler_processes=self.sampler_processes,
-                        evaluator_function=None,
-                        sampler_function=self.sampler_process,
-                        evaluator_args=None,
-                        sampler_args=(amqp_url,),
+                        sampler_entry_function=sampler_process_entry,
+                        evaluator_entry_function=None,
+                        config_path=self.config_path,
+                        log_dir=self.log_dir,
+                        template=None,
+                        inputs=None,
+                        target_signatures=None,
+                        sandbox_base_path=None,
                         max_evaluators=None,
                         max_samplers=args.max_samplers,
                         check_interval=args.check_interval,
@@ -133,10 +140,11 @@ class TaskManager:
         # If self.config.sampler.gpt is True, just start samplers without GPU device assignment
         if self.config.sampler.gpt:
             self.logger.info("GPT mode enabled. Starting sampler processes without GPU device assignment.")
+            ctx = mp.get_context('spawn')
             for i in range(self.config.num_samplers):
                 device = None
                 try:
-                    proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
+                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir), name=f"Sampler-{i}")
                     proc.start()
                     self.logger.debug(f"Started Sampler Process {i} (GPT mode) with PID: {proc.pid}")
                     self.sampler_processes.append(proc)
@@ -146,22 +154,23 @@ class TaskManager:
                     continue
         else:
             assigned_gpus = set()
+            ctx = mp.get_context('spawn')
             # Use the ResourceManager's assign_gpu_device method for consistent GPU assignment.
             for i in range(self.config.num_samplers):
                 try:
                     assignment = self.resource_manager.assign_gpu_device(min_free_memory_gib=20, max_utilization=50, assigned_gpus=assigned_gpus)
-                except Exception as e: 
+                except Exception as e:
                     self.logger.error(f"Cannot start sampler {i}: No suitable GPU available and error {e}.")
 
                 if assignment is None:
                     self.logger.error("No suitable GPU available for sampler. Skipping or failing gracefully.")
                     continue
-                else: 
+                else:
                     host_gpu, device = assignment
                     assigned_gpus.add(device)
                 self.logger.info(f"Assigning sampler {i} to GPU {device} (host GPU: {host_gpu})")
                 try:
-                    proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
+                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir), name=f"Sampler-{i}")
                     proc.start()
                     self.sampler_processes.append(proc)
                     self.process_to_device_map[proc.pid] = device
@@ -171,7 +180,7 @@ class TaskManager:
                     continue
 
     def sampler_process(self, amqp_url, device=None):
-        from decos import sampler, gpt 
+        from funsearchmq import sampler, gpt 
         local_id = current_process().pid
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -308,7 +317,8 @@ if __name__ == "__main__":
         task_manager = TaskManager(
             config=config,
             check_interval=args.check_interval,
-            log_dir=args.log_dir
+            log_dir=args.log_dir,
+            config_path=args.config_path
         )
         task = asyncio.create_task(
             task_manager.main_task(enable_scaling=enable_dynamic_scaling)

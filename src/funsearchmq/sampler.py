@@ -46,8 +46,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import aio_pika
 import numpy as np
 
-from decos import programs_database
-from decos.profiling import async_time_execution
+from funsearchmq import programs_database
+from funsearchmq.profiling import async_time_execution
 
 logger = logging.getLogger('main_logger')
 

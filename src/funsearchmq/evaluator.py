@@ -39,8 +39,8 @@ import ast
 from typing import Any
 import copy
 import logging
-from decos import code_manipulation
-from decos import sandbox
+from funsearchmq import code_manipulation
+from funsearchmq import sandbox
 from pathlib import Path
 import json
 import aio_pika
@@ -54,7 +54,7 @@ import psutil
 import shutil
 import warnings
 import shutil
-from decos.profiling import async_time_execution
+from funsearchmq.profiling import async_time_execution
 import time
 
 

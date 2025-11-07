@@ -8,9 +8,9 @@ import logging
 import aio_pika
 import asyncio
 import json
-from decos import programs_database
+from funsearchmq import programs_database
 from typing import List
-from decos.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
+from funsearchmq.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
 from openai import AzureOpenAI
 import os
 import logging

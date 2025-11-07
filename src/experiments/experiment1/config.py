@@ -121,10 +121,10 @@ def get_spec_path() -> str:
 
     # Change this line to switch between specifications
     # Default: Deletion-only codes with pre-computed graphs
-    return os.path.join(decos_base, "src", "decos", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
+    return os.path.join(decos_base, "src", "funsearchmq", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
 
     # To use IDS codes (insertion/deletion/substitution), uncomment this instead:
-    #return os.path.join(decos_base, "src", "decos", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
+    #return os.path.join(decos_base, "src", "funsearchmq", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -201,11 +201,34 @@ class WandbConfig:
         tags: List of tags for this run.
     """
     enabled: bool = True
-    project: str = "decosSearch"
+    project: str = "funsearchmq"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = "exp1"  # Auto-generated if None
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=True)
+class ScalingConfig:
+    """Configuration for dynamic scaling of samplers and evaluators.
+
+    Attributes:
+        sampler_scale_up_threshold: Number of messages in sampler_queue to trigger scale-up (default: 50).
+        evaluator_scale_up_threshold: Number of messages in evaluator_queue to trigger scale-up (default: 10).
+        min_gpu_memory_gib: Minimum free GPU memory in GiB required to start a new sampler (default: 20).
+                            Adjust based on your LLM size: StarCoder2-15B needs ~30 GiB, smaller models need less.
+        max_gpu_utilization: Maximum GPU utilization percentage to allow starting a new sampler (default: 50).
+        min_system_memory_gib: Minimum free system RAM in GiB required for scaling (default: 30).
+        cpu_usage_threshold: Maximum average CPU usage percentage to allow evaluator scale-up (default: 99).
+        normalized_load_threshold: Maximum normalized system load (load/cores) to allow evaluator scale-up (default: 0.99).
+    """
+    sampler_scale_up_threshold: int = 50
+    evaluator_scale_up_threshold: int = 10
+    min_gpu_memory_gib: int = 20
+    max_gpu_utilization: int = 50
+    min_system_memory_gib: int = 30
+    cpu_usage_threshold: int = 99
+    normalized_load_threshold: float = 0.99
 
 
 @dataclasses.dataclass
@@ -219,6 +242,7 @@ class Config:
     evaluator: Configuration of the evaluators.
     prompt: Configuration for prompt generation and score display.
     wandb: Configuration for Weights & Biases logging.
+    scaling: Configuration for dynamic scaling of samplers and evaluators.
     num_samplers: Number of independent Samplers in the experiment.
     num_evaluators: Number of independent program Evaluators in the experiment.
     num_pdb: Number of independent program databases. Currently supports only one, but this does not create a bottleneck.
@@ -229,6 +253,7 @@ class Config:
   evaluator: EvaluatorConfig = dataclasses.field(default_factory=EvaluatorConfig)
   prompt: PromptConfig = dataclasses.field(default_factory=PromptConfig)
   wandb: WandbConfig = dataclasses.field(default_factory=WandbConfig)
+  scaling: ScalingConfig = dataclasses.field(default_factory=ScalingConfig)
   num_samplers: int = 2
   num_evaluators: int = 10
   num_pdb: int = 1

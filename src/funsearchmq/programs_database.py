@@ -39,7 +39,7 @@ import gc
 import os
 import multiprocessing
 from typing import Mapping, Any, List, Sequence, Optional
-from decos import code_manipulation
+from funsearchmq import code_manipulation
 import json
 import aio_pika
 import re
@@ -47,7 +47,7 @@ from logging.handlers import RotatingFileHandler
 import psutil
 from logging import FileHandler
 import datetime
-from decos.profiling import async_time_execution
+from funsearchmq.profiling import async_time_execution
 
 # Wandb import (optional)
 try:

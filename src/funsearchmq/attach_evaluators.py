@@ -11,10 +11,11 @@ import socket
 import argparse
 from typing import Sequence, Any
 import datetime
-from decos.scaling_utils import ResourceManager
-from decos import process_utils
+from funsearchmq.scaling_utils import ResourceManager
+from funsearchmq import process_utils
+from funsearchmq.__main__ import evaluator_process_entry
 from yarl import URL
-from decos import code_manipulation
+from funsearchmq import code_manipulation
 import importlib
 
 def load_config(config_path):
@@ -37,19 +38,22 @@ def get_ip_address():
         return f"Error fetching IP address: {e}"
 
 class TaskManager:
-    def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, target_signatures):
+    def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, target_signatures, config_path, sandbox_base_path):
         self.specification = specification
         self.inputs = inputs
         self.config = config
+        self.config_path = config_path  # Store for spawn compatibility
+        self.log_dir = log_dir  # Store for spawn compatibility
+        self.sandbox_base_path = sandbox_base_path  # Store for spawn compatibility
         self.logger = self.initialize_logger(log_dir)
         self.evaluator_processes = []
         self.database_processes = []
-        self.sampler_processes = []  
+        self.sampler_processes = []
         self.tasks = []
         self.channels = []
         self.queues = []
         self.connection = None
-        self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True)
+        self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True, scaling_config=self.config.scaling)
         self.target_signatures= target_signatures
 
     def initialize_logger(self, log_dir):
@@ -106,14 +110,18 @@ class TaskManager:
             if enable_scaling:
                 scaling_task = asyncio.create_task(
                     self.resource_manager.run_scaling_loop(
-                        evaluator_queue=evaluator_queue, 
+                        evaluator_queue=evaluator_queue,
                         sampler_queue=None,
                         evaluator_processes=self.evaluator_processes,
                         sampler_processes=None,
-                        evaluator_function=self.evaluator_process,
-                        sampler_function=None,
-                        evaluator_args=(self.template, self.inputs, amqp_url, self.target_signatures),
-                        sampler_args=None,
+                        sampler_entry_function=None,
+                        evaluator_entry_function=evaluator_process_entry,
+                        config_path=self.config_path,
+                        log_dir=self.log_dir,
+                        template=self.template,
+                        inputs=self.inputs,
+                        target_signatures=self.target_signatures,
+                        sandbox_base_path=self.sandbox_base_path,
                         max_evaluators=args.max_evaluators,
                         max_samplers=None,
                         check_interval=args.check_interval,
@@ -129,10 +137,11 @@ class TaskManager:
     def start_initial_processes(self, template, function_to_evolve, amqp_url):
         amqp_url = str(amqp_url)
         # Start initial evaluator processes
+        ctx = mp.get_context('fork')  # Use fork for evaluators
         for i in range(self.config.num_evaluators):
-            proc = mp.Process(
-                target=self.evaluator_process,
-                args=(template, self.inputs, amqp_url),
+            proc = ctx.Process(
+                target=evaluator_process_entry,
+                args=(self.config_path, template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path),
                 name=f"Evaluator-{i}"
             )
             proc.start()
@@ -140,7 +149,7 @@ class TaskManager:
             self.evaluator_processes.append(proc)
 
     def evaluator_process(self, template, inputs, amqp_url):
-        from decos import evaluator  # Import evaluator module dynamically
+        from funsearchmq import evaluator  # Import evaluator module dynamically
         local_id = mp.current_process().pid  # Use process ID as local identifier
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -330,8 +339,10 @@ if __name__ == "__main__":
             specification=specification,
             inputs=inputs,
             config=config,
-            log_dir=args.log_dir, 
-            target_signatures= target_signatures
+            log_dir=args.log_dir,
+            target_signatures=target_signatures,
+            config_path=args.config_path,
+            sandbox_base_path=args.sandbox_base_path
         )
 
         task = asyncio.create_task(

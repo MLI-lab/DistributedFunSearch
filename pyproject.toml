@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "decos"
+name = "funsearchmq"
 version = "0.1.0"
-description = "DeCoSearch package"
+description = "FunSearchMQ - Distributed implementation of FunSearch using RabbitMQ"
 requires-python = ">=3.10"
 dependencies = [
   "numpy",
@@ -35,4 +35,4 @@ dependencies = [
 where = ["src"]
 
 [project.scripts]
-decos = "decos.decos:main"
+funsearchmq = "funsearchmq.__main__:main"

@@ -5,8 +5,8 @@
 #SBATCH --ntasks-per-node=1                                          # Number of tasks per node
 #SBATCH --cpus-per-task=92                                           # CPU cores per node
 #SBATCH --gres=gpu:4                                                 # GPUs per node
-#SBATCH -o DeCoSearch/src/experiments/experiment1/logs/experiment.out # Standard output log
-#SBATCH -e DeCoSearch/src/experiments/experiment1/logs/experiment.err # Standard error log
+#SBATCH -o FunSearchMQ/src/experiments/experiment1/logs/experiment.out # Standard output log
+#SBATCH -e FunSearchMQ/src/experiments/experiment1/logs/experiment.err # Standard error log
 #SBATCH --time=48:00:00                                              # Time limit
 
 # Extract node lists for node groups
@@ -38,18 +38,18 @@ echo "RabbitMQ server hostname: $RABBITMQ_HOSTNAME"
 # Set path to enroot image
 srun -N1 -n1 --nodelist=$NODE_1 \
      --container-image="" \
-     --container-mounts="$PWD/DeCoSearch:/DeCoSearch,\
-$PWD/.ssh:/DeCoSearch/.ssh" \
+     --container-mounts="$PWD/FunSearchMQ:/FunSearchMQ,\
+$PWD/.ssh:/FunSearchMQ/.ssh" \
      bash -c "
          echo 'Running on $(hostname -f)'
 
          # Update the RabbitMQ configuration with the hostname of allocated node
-         python3 /DeCoSearch/src/decos/update_config_file.py /DeCoSearch/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
+         python3 /FunSearchMQ/src/funsearchmq/update_config_file.py /FunSearchMQ/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
 
          # Configure RabbitMQ environment
          export RABBITMQ_NODENAME=rabbit_${SLURM_JOB_ID}@localhost
          export RABBITMQ_USE_LONGNAME=true
-         export RABBITMQ_CONFIG_FILE=/DeCoSearch/src/experiments/$EXPERIMENT_NAME/rabbitmq.conf
+         export RABBITMQ_CONFIG_FILE=/FunSearchMQ/src/experiments/$EXPERIMENT_NAME/rabbitmq.conf
 
          # Start RabbitMQ in the foreground
          echo 'Starting RabbitMQ server...'
@@ -84,14 +84,14 @@ $PWD/.ssh:/DeCoSearch/.ssh" \
 
          # Export API credentials (implementation is for an Azure-based API)
 
-         # Install DeCoSearch
-         cd /DeCoSearch
+         # Install FunSearchMQ
+         cd /FunSearchMQ
          python3 -m pip install .
         
-         # Run DeCoSearch
-         cd /DeCoSearch/src/experiments/$EXPERIMENT_NAME
+         # Run FunSearchMQ
+         cd /FunSearchMQ/src/experiments/$EXPERIMENT_NAME
          # Add command line arguments as needed
-         python3 -m decos 
+         python3 -m funsearchmq 
      " &
 
 # Create a list of 10 times evenly spaced from 1800 to 3600 seconds
@@ -108,23 +108,23 @@ for i in "${!REMAINING[@]}"; do
     scaling_time_e=${scaling_intervals_e[$i]}  # Get scaling interval for evaluator
     srun -N1 -n1 --nodelist=$node \
      --container-image=desired/path/custom_name.sqsh \
-     --container-mounts="$PWD/DeCoSearch:/DeCoSearch,\
-$PWD/.ssh:/DeCoSearch/.ssh" \
+     --container-mounts="$PWD/FunSearchMQ:/FunSearchMQ,\
+$PWD/.ssh:/FunSearchMQ/.ssh" \
         bash -c "
             echo 'Running on $(hostname -f)'
 
             # Update the RabbitMQ configuration with the hostname
-            python /DeCoSearch/src/decos/update_config_file.py /DeCoSearch/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
+            python /FunSearchMQ/src/funsearchmq/update_config_file.py /FunSearchMQ/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
 
-            # Install DeCoSearch
-            cd /DeCoSearch
+            # Install FunSearchMQ
+            cd /FunSearchMQ
             pip install .
 
-            cd /DeCoSearch/src/experiments/$EXPERIMENT_NAME
+            cd /FunSearchMQ/src/experiments/$EXPERIMENT_NAME
 
-            python -m decos.attach_evaluators --check_interval=$scaling_time_e --sandbox_base_path=/workspace/sandboxstorage/ || { echo 'Error running attach_evaluators'; exit 1; } &
+            python -m funsearchmq.attach_evaluators --check_interval=$scaling_time_e --sandbox_base_path=/workspace/sandboxstorage/ || { echo 'Error running attach_evaluators'; exit 1; } &
 
-            python -m decos.attach_samplers --check_interval=$scaling_time_s || { echo 'Error running attach_sampler'; exit 1; } &
+            python -m funsearchmq.attach_samplers --check_interval=$scaling_time_s || { echo 'Error running attach_sampler'; exit 1; } &
             wait
         " &
 done
