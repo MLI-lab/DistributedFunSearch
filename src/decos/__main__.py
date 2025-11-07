@@ -148,13 +148,12 @@ class TaskManager:
 
         return logger
 
-    async def publish_initial_program_with_retry(self, amqp_url, initial_program_data, max_retries=5, delay=5):
+    async def publish_initial_program_with_retry(self, initial_program_data, max_retries=5, delay=5):
         attempt = 0
         while attempt < max_retries:
             try:
-                sampler_connection = await aio_pika.connect_robust(
-                    amqp_url,
-                    timeout=300,
+                sampler_connection = await process_utils.create_rabbitmq_connection(
+                    self.config, timeout=300, heartbeat=300
                 )
                 sampler_channel = await sampler_connection.channel()
 
@@ -207,19 +206,13 @@ class TaskManager:
 
     async def main_task(self, save_checkpoints_path, enable_scaling=True, checkpoint_file=None):
         try:
-            amqp_url = URL(
-                f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' #{self.config.rabbitmq.vhost}
-            ).update_query(heartbeat=300)
-            connection = await aio_pika.connect_robust(amqp_url)
+            connection = await process_utils.create_rabbitmq_connection(
+                self.config, timeout=300, heartbeat=300
+            )
         except Exception as e:
-            try:
-                self.logger.info("No vhost configured, connecting without.")
-                amqp_url = URL(
-                    f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/' #{self.config.rabbitmq.vhost}
-                ).update_query(heartbeat=300)
-                connection = await aio_pika.connect_robust(amqp_url)
-            except Exception as e: 
-                self.logger.info("Cannot connect to rabbitmq. Change config file.")
+            self.logger.error(f"Cannot connect to RabbitMQ: {e}")
+            self.logger.info("Cannot connect to rabbitmq. Change config file.")
+            raise
     
         pid = os.getpid()
         self.logger.info(f"Main_task is running in process with PID: {pid}")
@@ -237,10 +230,14 @@ class TaskManager:
 
         try:
             # Create connections and declare queues
-            self.sampler_connection = await aio_pika.connect_robust(amqp_url, timeout=300)
+            self.sampler_connection = await process_utils.create_rabbitmq_connection(
+                self.config, timeout=300, heartbeat=300
+            )
             self.sampler_channel = await self.sampler_connection.channel()
 
-            self.database_connection = await aio_pika.connect_robust(amqp_url, timeout=300)
+            self.database_connection = await process_utils.create_rabbitmq_connection(
+                self.config, timeout=300, heartbeat=300
+            )
             self.database_channel = await self.database_connection.channel()
 
             evaluator_queue = await process_utils.declare_standard_queue(self.sampler_channel, "evaluator_queue")
@@ -268,7 +265,7 @@ class TaskManager:
 
             # Start consumers before publishing
             try:
-                self.start_initial_processes(function_to_evolve, amqp_url, checkpoint_file)
+                self.start_initial_processes(function_to_evolve, checkpoint_file)
                 self.logger.info("Initial processes started successfully.")
             except Exception as e:
                 self.logger.error(f"Failed to start initial processes: {e}")
@@ -281,7 +278,7 @@ class TaskManager:
                 self.logger.info(f"consumer_count is {consumer_count} while config num_samplers is {self.config.num_samplers}")
 
                 if consumer_count >= 1 and checkpoint_file is None:
-                    await self.publish_initial_program_with_retry(amqp_url, initial_program_data)
+                    await self.publish_initial_program_with_retry(initial_program_data)
                     break
                 elif consumer_count >= 1:
                     await database.get_prompt()
@@ -306,8 +303,8 @@ class TaskManager:
                             sampler_processes=self.sampler_processes,
                             evaluator_function=self.evaluator_process,
                             sampler_function=self.sampler_process,
-                            evaluator_args=(self.template, self.inputs, amqp_url, self.target_signatures),
-                            sampler_args=(amqp_url,),
+                            evaluator_args=(self.template, self.inputs, self.target_signatures),
+                            sampler_args=(),
                             max_evaluators=args.max_evaluators,
                             max_samplers=args.max_samplers,
                             check_interval=args.check_interval,
@@ -327,8 +324,7 @@ class TaskManager:
             self.logger.error(f"Exception occurred in main_task: {e}")
 
 
-    def start_initial_processes(self, function_to_evolve, amqp_url, checkpoint_file):
-        amqp_url = str(amqp_url)
+    def start_initial_processes(self, function_to_evolve, checkpoint_file):
 
         # If self.config.sampler.gpt is True, just start samplers without GPU device assignment
         if self.config.sampler.gpt:
@@ -336,11 +332,15 @@ class TaskManager:
             for i in range(self.config.num_samplers):
                 device = None
                 try:
-                    proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
+                    proc = mp.Process(target=self.sampler_process, args=(device,), name=f"Sampler-{i}")
                     proc.start()
-                    self.logger.debug(f"Started Sampler Process {i} (GPT mode) with PID: {proc.pid}")
+                    self.logger.info(f"Started Sampler Process {i} (GPT mode) with PID: {proc.pid}")
                     self.sampler_processes.append(proc)
                     self.process_to_device_map[proc.pid] = device
+                    # Add delay between starting samplers to avoid race conditions
+                    if i < self.config.num_samplers - 1:
+                        self.logger.info(f"Waiting 10 seconds before starting next sampler to avoid race conditions...")
+                        time.sleep(10)
                 except Exception as e:
                     self.logger.error(f"Error starting sampler {i}: {e}")
                     continue
@@ -361,51 +361,65 @@ class TaskManager:
                     assigned_gpus.add(device)
                 self.logger.info(f"Assigning sampler {i} to GPU {device} (host GPU: {host_gpu})")
                 try:
-                    proc = mp.Process(target=self.sampler_process, args=(amqp_url, device), name=f"Sampler-{i}")
+                    proc = mp.Process(target=self.sampler_process, args=(device,), name=f"Sampler-{i}")
                     proc.start()
+                    self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid} on GPU {device}")
                     self.sampler_processes.append(proc)
                     self.process_to_device_map[proc.pid] = device
-                    self.logger.debug(f"Process-to-Device Map: {self.process_to_device_map}")
+                    self.logger.info(f"Process-to-Device Map updated: {self.process_to_device_map}")
+                    # Add delay between starting samplers to avoid race conditions
+                    if i < self.config.num_samplers - 1:
+                        self.logger.info(f"Waiting 10 seconds before starting next sampler to avoid race conditions...")
+                        time.sleep(10)
                 except Exception as e:
                     self.logger.error(f"Failed to start sampler {i} due to error: {e}")
                     continue
 
         # Start initial evaluator processes
         for i in range(self.config.num_evaluators):
-            proc = mp.Process(target=self.evaluator_process, args=(self.template, self.inputs, amqp_url, self.target_signatures), name=f"Evaluator-{i}")
+            proc = mp.Process(target=self.evaluator_process, args=(self.template, self.inputs, self.target_signatures), name=f"Evaluator-{i}")
             proc.start()
             self.logger.debug(f"Started Evaluator Process {i} with PID: {proc.pid}")
             self.evaluator_processes.append(proc)
 
 
 
-    def sampler_process(self, amqp_url, device=None):
+    def sampler_process(self, device=None):
         local_id = current_process().pid  # Use process ID as a local identifier
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         connection = None
         channel = None
         sampler_task = None
+        sampler_instance = None  # Make instance accessible for cleanup
         cleanup_done = False  # Track if cleanup has been done
 
-        async def graceful_shutdown(loop, connection, channel, sampler_task):
+        async def graceful_shutdown(loop, connection, channel, sampler_task, sampler_instance):
             nonlocal cleanup_done
             if cleanup_done:
                 return
 
             self.logger.info(f"Sampler {local_id}: Initiating graceful shutdown...")
-            if sampler_task:
+
+            # Cancel the consume task FIRST to stop processing
+            if sampler_task and not sampler_task.done():
+                self.logger.info(f"Sampler {local_id}: Cancelling consume task...")
+                sampler_task.cancel()
                 try:
-                    await asyncio.wait_for(sampler_task, timeout=60)
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"Sampler {local_id}: Task timed out. Cancelling...")
-                    sampler_task.cancel()
-                    try:
-                        await sampler_task  # Ensure task cancellation completes
-                    except Exception as e:
-                        self.logger.warning(f"Sampler {local_id}: Error after task cancellation: {e}")
+                    await asyncio.wait_for(sampler_task, timeout=2)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass  # Expected
                 except Exception as e:
-                    self.logger.info(f"Sampler {local_id}: Error during task closure: {e}")
+                    self.logger.warning(f"Sampler {local_id}: Error cancelling task: {e}")
+
+            # Then clean up LLM model to release GPU memory
+            if sampler_instance:
+                try:
+                    self.logger.info(f"Sampler {local_id}: Cleaning up LLM resources...")
+                    sampler_instance.cleanup()
+                    del sampler_instance
+                except Exception as e:
+                    self.logger.error(f"Sampler {local_id}: Error during sampler cleanup: {e}")
 
             if channel:
                 try:
@@ -426,46 +440,40 @@ class TaskManager:
 
 
         async def run_sampler():
-            nonlocal connection, channel, sampler_task, cleanup_done
+            nonlocal connection, channel, sampler_task, sampler_instance, cleanup_done
             try:
-                self.logger.debug(f"Sampler {local_id}: Starting connection to RabbitMQ.")
-                try:
-                    connection = await aio_pika.connect_robust(
-                        amqp_url,
-                        timeout=300,
-                        #client_properties={"connection_attempts": 1, "retry_delay": 0}
-                    )
-                except Exception as e:
-                    # If vhost connection fails, try without vhost
-                    self.logger.info(f"Sampler {local_id}: Vhost connection failed, connecting without vhost. Error: {e}")
-                    # Construct URL without vhost
-                    url_without_vhost = f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/'
-                    connection = await aio_pika.connect_robust(url_without_vhost, timeout=300)
-                self.logger.debug(f"Sampler {local_id}: Connected to RabbitMQ.")
+                self.logger.info(f"Sampler {local_id}: Starting connection to RabbitMQ on device {device}...")
+                connection = await process_utils.create_rabbitmq_connection(
+                    self.config, timeout=300, heartbeat=300
+                )
+                self.logger.info(f"Sampler {local_id}: Connected to RabbitMQ successfully.")
                 channel = await connection.channel()
-                self.logger.debug(f"Sampler {local_id}: Channel established.")
+                self.logger.info(f"Sampler {local_id}: Channel established.")
 
                 sampler_queue = await process_utils.declare_standard_queue(channel, "sampler_queue")
-                self.logger.debug(f"Sampler {local_id}: Declared sampler_queue.")
+                self.logger.info(f"Sampler {local_id}: Declared sampler_queue.")
 
                 evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
-                self.logger.debug(f"Sampler {local_id}: Declared evaluator_queue.")
+                self.logger.info(f"Sampler {local_id}: Declared evaluator_queue.")
 
                 try:
                     if self.config.sampler.gpt:
-                        self.logger.debug("Before initialization")
+                        self.logger.info(f"Sampler {local_id}: Initializing GPT sampler...")
                         sampler_instance = gpt.Sampler(
                             connection, channel, sampler_queue, evaluator_queue, self.config.sampler)
-                        self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
+                        self.logger.info(f"Sampler {local_id}: GPT Sampler instance initialized successfully.")
                     else:
+                        self.logger.info(f"Sampler {local_id}: Initializing LLM sampler on device {device}...")
                         sampler_instance = sampler.Sampler(
                             connection, channel, sampler_queue, evaluator_queue, self.config.sampler, device)
-                        self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
+                        self.logger.info(f"Sampler {local_id}: LLM Sampler instance initialized successfully on device {device}.")
                 except Exception as e:
-                    self.logger.error(f"Could not start Sampler instance {e}")
+                    self.logger.error(f"Sampler {local_id}: Could not start Sampler instance - {e}", exc_info=True)
                     return
 
+                self.logger.info(f"Sampler {local_id}: Starting consume_and_process task...")
                 sampler_task = asyncio.create_task(sampler_instance.consume_and_process())
+                self.logger.info(f"Sampler {local_id}: consume_and_process task created, now awaiting...")
                 await sampler_task
 
             except asyncio.CancelledError:
@@ -483,7 +491,7 @@ class TaskManager:
         # Set up signal handlers using utility function
         process_utils.setup_signal_handlers(
             loop, "Sampler", local_id, self.logger,
-            lambda: graceful_shutdown(loop, connection, channel, sampler_task)
+            lambda: graceful_shutdown(loop, connection, channel, sampler_task, sampler_instance)
         )
 
         try:
@@ -495,7 +503,7 @@ class TaskManager:
             sys.exit(0)
 
 
-    def evaluator_process(self, template, inputs, amqp_url, target_signatures):
+    def evaluator_process(self, template, inputs, target_signatures):
         import decos.evaluator
         import signal
         import asyncio
@@ -510,9 +518,10 @@ class TaskManager:
         connection = None
         channel = None
         evaluator_task = None
+        evaluator_instance = None  # Make instance accessible for cleanup
         cleanup_done = False  # Track if cleanup has been done
 
-        async def graceful_shutdown(loop, connection, channel, evaluator_task):
+        async def graceful_shutdown(loop, connection, channel, evaluator_task, evaluator_instance):
             """Gracefully shut down the evaluator task, AMQP channel, and connection."""
             nonlocal cleanup_done
             if cleanup_done:
@@ -520,19 +529,24 @@ class TaskManager:
 
             self.logger.info(f"Evaluator {local_id}: Initiating graceful shutdown...")
 
-            if evaluator_task:
+            # Cancel the consume task FIRST to stop processing
+            if evaluator_task and not evaluator_task.done():
+                self.logger.info(f"Evaluator {local_id}: Cancelling consume task...")
+                evaluator_task.cancel()
                 try:
-                    # Give the task time to finish cleanly
-                    await asyncio.wait_for(evaluator_task, timeout=60)
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"Evaluator {local_id}: Task timed out. Cancelling...")
-                    evaluator_task.cancel()
-                    try:
-                        await evaluator_task  # Ensure cancellation completes
-                    except Exception as e:
-                        self.logger.warning(f"Evaluator {local_id}: Error after task cancellation: {e}")
+                    await asyncio.wait_for(evaluator_task, timeout=2)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass  # Expected
                 except Exception as e:
-                    self.logger.info(f"Evaluator {local_id}: Error during task closure: {e}")
+                    self.logger.warning(f"Evaluator {local_id}: Error cancelling task: {e}")
+
+            # Then clean up executor and child processes
+            if evaluator_instance:
+                try:
+                    self.logger.info(f"Evaluator {local_id}: Shutting down evaluator instance...")
+                    await evaluator_instance.shutdown()
+                except Exception as e:
+                    self.logger.error(f"Evaluator {local_id}: Error during evaluator shutdown: {e}")
 
             if channel:
                 try:
@@ -552,17 +566,12 @@ class TaskManager:
 
         async def run_evaluator():
             """Main async entry: connects to AMQP, starts the evaluator task, etc."""
-            nonlocal connection, channel, evaluator_task, cleanup_done
+            nonlocal connection, channel, evaluator_task, evaluator_instance, cleanup_done
 
             try:
-                try:
-                    connection = await aio_pika.connect_robust(amqp_url, timeout=300)
-                except Exception as e:
-                    # If vhost connection fails, try without vhost
-                    self.logger.info(f"Evaluator {local_id}: Vhost connection failed, connecting without vhost. Error: {e}")
-                    # Construct URL without vhost
-                    url_without_vhost = f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/'
-                    connection = await aio_pika.connect_robust(url_without_vhost, timeout=300)
+                connection = await process_utils.create_rabbitmq_connection(
+                    self.config, timeout=300, heartbeat=300
+                )
                 channel = await connection.channel()
 
                 evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
@@ -599,7 +608,7 @@ class TaskManager:
         # Set up signal handlers using utility function
         process_utils.setup_signal_handlers(
             loop, "Evaluator", local_id, self.logger,
-            lambda: graceful_shutdown(loop, connection, channel, evaluator_task)
+            lambda: graceful_shutdown(loop, connection, channel, evaluator_task, evaluator_instance)
         )
 
         try:
@@ -825,29 +834,53 @@ if __name__ == "__main__":
                 print(f"Sending SIGTERM to process {p.pid} ({p.name})")
                 p.terminate()          # SIGTERM first
 
-        # Give child processes 30 seconds to close connections gracefully
-        # After manual interrupt, we want faster shutdown
+        # Phase 1: Give child processes 30 seconds to close connections gracefully
+        print("Phase 1: Waiting up to 30s for graceful shutdown...")
         deadline = time.time() + 30
+        last_count = len(children)
         while any(p.is_alive() for p in children) and time.time() < deadline:
+            alive = [p for p in children if p.is_alive()]
+            if len(alive) != last_count:
+                print(f"  {len(alive)} processes still alive...")
+                last_count = len(alive)
             await asyncio.sleep(0.5)
 
-        # SIGKILL anything that's still around
+        # Phase 2: Hard cleanup - immediately force kill everything including descendants
         still_alive = [p for p in children if p.is_alive()]
         if still_alive:
-            print(f"WARNING: {len(still_alive)} processes did not terminate gracefully, sending SIGKILL")
-            for p in still_alive:
-                print(f"  - Killing process {p.pid} ({p.name})")
-                p.kill()
+            print(f"\nPhase 2: Hard cleanup - Force killing {len(still_alive)} remaining processes immediately")
 
-            # Wait for killed processes to become zombies, then reap them
+            # First, recursively find and kill all descendants
+            for p in still_alive:
+                try:
+                    parent = psutil.Process(p.pid)
+                    descendants = parent.children(recursive=True)
+
+                    # Kill descendants first (bottom-up)
+                    for child in descendants:
+                        try:
+                            print(f"  - SIGKILL child process {child.pid}")
+                            child.kill()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+
+                    # Then kill the parent
+                    print(f"  - SIGKILL process {p.pid} ({p.name})")
+                    p.kill()
+                except (psutil.NoSuchProcess, Exception) as e:
+                    print(f"    Error killing {p.pid}: {e}")
+
+            # Reap zombies quickly without waiting
             print("Reaping killed processes...")
             for p in still_alive:
                 try:
-                    p.join(timeout=2)  # Reap zombie processes
+                    p.join(timeout=0.1)  # Very short timeout, just reap zombies
                 except Exception as e:
                     print(f"  - Error joining process {p.pid}: {e}")
+
+            print(f"Hard cleanup complete. {len(still_alive)} processes forcefully terminated.")
         else:
-            print("All child processes terminated gracefully.")
+            print("All child processes terminated gracefully within 30s.")
 
         # Join all terminated processes to prevent zombies
         print("Cleaning up all terminated processes...")
@@ -878,20 +911,24 @@ if __name__ == "__main__":
             print(f"Error closing main connection: {e}")
 
         # Explicitly delete queues to ensure cleanup even if consumers didn't disconnect cleanly
+        print("Attempting to delete RabbitMQ queues...")
         try:
-            cleanup_connection = await aio_pika.connect_robust(
-                f'amqp://{main.task_manager.config.rabbitmq.username}:{main.task_manager.config.rabbitmq.password}@'
-                f'{main.task_manager.config.rabbitmq.host}:{main.task_manager.config.rabbitmq.port}/',
-                timeout=5
+            cleanup_connection = await process_utils.create_rabbitmq_connection(
+                main.task_manager.config, timeout=5, heartbeat=300
             )
             cleanup_channel = await cleanup_connection.channel()
 
             for queue_name in ['evaluator_queue', 'sampler_queue', 'database_queue']:
                 try:
-                    queue = await cleanup_channel.get_queue(queue_name, ensure=False)
-                    if queue:
-                        await queue.delete(if_unused=False, if_empty=False)
-                        print(f"Deleted queue: {queue_name}")
+                    # Declare the queue first (passive=False) so we can delete it
+                    queue = await cleanup_channel.declare_queue(
+                        queue_name,
+                        durable=False,
+                        auto_delete=False,
+                        passive=False  # Create if doesn't exist, get if exists
+                    )
+                    await queue.delete(if_unused=False, if_empty=False)
+                    print(f"Deleted queue: {queue_name}")
                 except Exception as e:
                     print(f"Could not delete queue {queue_name}: {e}")
 
@@ -919,13 +956,20 @@ if __name__ == "__main__":
         loop.stop()
 
 
-    # run the loop  
+    # run the loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    # Use list to allow modification in nested function
+    shutdown_state = {'task': None}
+
+    def handle_shutdown(signame):
+        if shutdown_state['task'] is None:
+            shutdown_state['task'] = asyncio.create_task(_shutdown(loop, signame))
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(
-            sig, lambda s=sig: asyncio.create_task(_shutdown(loop, s.name))
+            sig, lambda s=sig: handle_shutdown(s.name)
         )
 
     try:
@@ -933,15 +977,22 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
-        # Ensure all tasks are completed before closing the loop
+        # If shutdown task was created, wait for it to complete
+        shutdown_task = shutdown_state['task']
+        if shutdown_task and not shutdown_task.done():
+            try:
+                print("Waiting for shutdown to complete...")
+                loop.run_until_complete(shutdown_task)
+            except Exception as e:
+                print(f"Error during shutdown: {e}")
+
+        # Now cancel any remaining tasks
         try:
-            # Get all remaining tasks
             pending = asyncio.all_tasks(loop)
             if pending:
-                # Cancel all pending tasks
                 for task in pending:
-                    task.cancel()
-                # Wait for them to complete with a reasonable timeout
+                    if task is not shutdown_task:  # Don't cancel shutdown task
+                        task.cancel()
                 loop.run_until_complete(asyncio.wait(pending, timeout=5.0))
         except Exception as e:
             print(f"Error during final cleanup: {e}")
