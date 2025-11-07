@@ -195,8 +195,6 @@ class ResourceManager:
         self.resource_logger.info("Starting scaling loop")
         evaluator_processes = evaluator_processes or []
         sampler_processes = sampler_processes or []
-        evaluator_args = evaluator_args or ()
-        sampler_args = sampler_args or ()
         max_evaluators = max_evaluators if max_evaluators is not None else 0
 
         try:
