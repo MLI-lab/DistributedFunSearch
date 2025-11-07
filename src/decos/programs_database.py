@@ -980,17 +980,23 @@ class ProgramsDatabase:
                 with open(tree_path, 'w') as f:
                     f.write(tree_content)
 
-                # Log both as W&B artifacts
-                artifact = wandb.Artifact(
-                    name=f"lineage_island{island_id}_step{self.total_prompts}",
-                    type="lineage_visualization",
-                    description=f"Evolutionary lineage for island {island_id}, program {program.program_id}"
-                )
-                artifact.add_file(html_path, name="detailed_with_code.html")
-                artifact.add_file(tree_path, name="tree_diagram.html")
-                wandb.log_artifact(artifact)
-
-                lineage_link = f"See artifact: lineage_island{island_id}_step{self.total_prompts}"
+                # Log both as W&B artifacts (only if W&B is enabled and initialized)
+                if self.wandb_enabled and self._wandb_initialized:
+                    try:
+                        artifact = wandb.Artifact(
+                            name=f"lineage_island{island_id}_step{self.total_prompts}",
+                            type="lineage_visualization",
+                            description=f"Evolutionary lineage for island {island_id}, program {program.program_id}"
+                        )
+                        artifact.add_file(html_path, name="detailed_with_code.html")
+                        artifact.add_file(tree_path, name="tree_diagram.html")
+                        wandb.log_artifact(artifact)
+                        lineage_link = f"See artifact: lineage_island{island_id}_step{self.total_prompts}"
+                    except Exception as e:
+                        logger.warning(f"Failed to upload lineage artifact to W&B: {e}")
+                        lineage_link = f"Local files: {html_filename}, {tree_filename}"
+                else:
+                    lineage_link = f"Local files: {html_filename}, {tree_filename}"
             except Exception as e:
                 logger.error(f"Error generating lineage HTML: {e}")
                 lineage_link = "Error generating lineage"

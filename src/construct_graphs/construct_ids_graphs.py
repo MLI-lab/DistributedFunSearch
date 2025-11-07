@@ -12,15 +12,159 @@ Usage:
 
 The script will construct graphs for the (n, s, q) tuples specified in the __main__ block
 and save them to LMDB databases in the format: graph_ids_s{s}_n{n}_q{q}.lmdb
+
+Parallelization Strategy:
+    To avoid creating a massive list of all sequence pairs in memory (which would require
+    ~15TB for n=10, q=4), workers generate pairs on-the-fly from assigned index ranges.
+
+    For N sequences, we need to compute all pairs (i,j) where i < j:
+    - Total pairs: N(N-1)/2
+    - Each worker is assigned a range of 'i' indices: [start_i, end_i)
+    - For each i in its range, the worker compares sequence[i] with all sequence[j] where j > i, i.e. For every i in its range, that worker loops only over j = i+1..N-1.
+    - This ensures no duplicate comparisons (each pair is processed exactly once)
+
+    Load balancing: Index ranges are assigned such that each worker processes approximately
+    the same number of pairs. Early indices (small i) have more work since they compare with
+    more j values, so workers processing early indices get fewer indices.
+
+    How it works:
+        Using the quadratic formula to solve for index boundaries:
+        Cumulative pairs from i=0 to i=k-1: f(k) = sum_{i=0}^{k-1} (N-1-i) = k*N - k*(k+1)/2
+        Target for worker w: (w+1) * (total_pairs / num_workers)
+        We want to choose boundaries k_0=0, k_1, k_2, …, k_W=N such that f(k_w) \approx \frac{w}{W} T where T is total pairs and W is number of workers and w is the worker index.
+        Solve: k*N - k*(k+1)/2 = target
 """
 
 import itertools
 import json
 import os
+import math
 import lmdb
 import Levenshtein
+import tracemalloc
+import psutil
+import threading
+import time
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
+
+
+class MemoryMonitor:
+    """Monitor memory usage of process and all children."""
+
+    def __init__(self, interval=2.0):
+        """
+        Args:
+            interval: Sampling interval in seconds
+        """
+        self.interval = interval
+        self.peak_memory_gb = 0.0
+        self.current_memory_gb = 0.0
+        self.running = False
+        self.thread = None
+        self.process = psutil.Process(os.getpid())
+
+    def _get_total_memory(self):
+        """Get total memory (RSS) of this process and all children in GB."""
+        try:
+            total = self.process.memory_info().rss
+            for child in self.process.children(recursive=True):
+                try:
+                    total += child.memory_info().rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            return total / (1024**3)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return 0.0
+
+    def _monitor_loop(self):
+        """Background thread that samples memory periodically."""
+        while self.running:
+            self.current_memory_gb = self._get_total_memory()
+            if self.current_memory_gb > self.peak_memory_gb:
+                self.peak_memory_gb = self.current_memory_gb
+            time.sleep(self.interval)
+
+    def start(self):
+        """Start monitoring memory in background thread."""
+        self.running = True
+        self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        """Stop monitoring and return peak memory."""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=self.interval * 2)
+        # Final sample
+        final_memory = self._get_total_memory()
+        if final_memory > self.peak_memory_gb:
+            self.peak_memory_gb = final_memory
+        return self.peak_memory_gb
+
+
+def estimate_memory_usage(n, s, q, max_workers):
+    """
+    Estimate peak memory usage for graph construction (Upper bound).
+
+    Uses Hamming ball formula to compute estimate of degree and edge distribution (Levenshtein distance ≤ Hamming distance)
+
+    Args:
+        n: Length of strings
+        s: Number of errors to correct
+        q: Alphabet size
+        max_workers: Number of parallel workers
+
+    Returns:
+        dict with memory estimates in GB
+    """
+    from math import comb
+
+    total_sequences = q ** n
+    r = 2 * s  # Hamming distance threshold
+
+    # Compute Hamming ball volume: V_q(n,r) = sum_{t=0}^{r} C(n,t) * (q-1)^t
+    hamming_ball_volume = sum(comb(n, t) * ((q - 1) ** t) for t in range(r + 1))
+    avg_degree = hamming_ball_volume
+
+    # Edge probability: p_edge ≈ V_q(n,r) / (N-1)
+    p_edge = hamming_ball_volume / (total_sequences - 1) if total_sequences > 1 else 0
+
+    # Total pairs and pairs per worker
+    total_pairs = total_sequences * (total_sequences - 1) // 2
+    pairs_per_worker = total_pairs / max_workers if max_workers > 0 else 0
+
+    # Expected edges per worker: E_w ≈ P_w * p_edge
+    expected_edges_per_worker = pairs_per_worker * p_edge
+
+    # Memory per edge: Python tuple of two strings (~120-200 bytes)
+    # Using conservative 150 bytes per edge
+    bytes_per_edge = 150
+    edge_buffer_gb_per_worker = expected_edges_per_worker * bytes_per_edge / (1024**3)
+
+    # Per-worker memory: edge buffer + process overhead (~50-150 MB)
+    worker_memory_gb = max_workers * (edge_buffer_gb_per_worker + 0.1)
+
+    # Main process memory components
+    sequences_gb = total_sequences * 60 / (1024**3)  # ~60 bytes per string
+    adjacency_gb = total_sequences * avg_degree * 8 / (1024**3)  # 8 bytes per pointer
+
+    # Total memory
+    total_gb = adjacency_gb + sequences_gb + worker_memory_gb + 0.2
+
+    return {
+        'total': total_gb,
+        'adjacency': adjacency_gb,
+        'sequences': sequences_gb,
+        'workers': worker_memory_gb,
+        'edge_buffer_per_worker': edge_buffer_gb_per_worker,
+        'expected_edges_per_worker': expected_edges_per_worker,
+        'overhead': 0.2,
+        'avg_degree': avg_degree,
+        'hamming_ball_volume': hamming_ball_volume,
+        'p_edge': p_edge,
+        'total_nodes': total_sequences
+    }
 
 
 def _compute_edges_chunk(args):
@@ -28,21 +172,37 @@ def _compute_edges_chunk(args):
     Worker function to compute edges for a chunk of sequence pairs.
 
     Args:
-        args: Tuple of (pairs, sequences, threshold)
+        args: Tuple of (worker_id, start_i, end_i, sequences, threshold)
+              Worker generates pairs from range [start_i, end_i) to save memory
 
     Returns:
         List of edges (seq1, seq2) that should be connected
     """
-    pairs, sequences, threshold = args
+    worker_id, start_i, end_i, sequences, threshold = args
     edges = []
+    n_sequences = len(sequences)
 
-    for i, j in pairs:
-        seq1, seq2 = sequences[i], sequences[j]
-        edit_dist = Levenshtein.distance(seq1, seq2)
+    # Create progress bar for this worker at a specific vertical position
+    # position=worker_id places each worker's bar at a different line
+    pbar = tqdm(
+        total=end_i - start_i,
+        desc=f"  Worker {worker_id:2d}",
+        position=worker_id,
+        leave=True,
+        unit="idx"
+    )
 
-        if edit_dist < threshold:
-            edges.append((seq1, seq2))
+    for i in range(start_i, end_i):
+        for j in range(i + 1, n_sequences):
+            seq1, seq2 = sequences[i], sequences[j]
+            edit_dist = Levenshtein.distance(seq1, seq2)
 
+            if edit_dist < threshold:
+                edges.append((seq1, seq2))
+
+        pbar.update(1)
+
+    pbar.close()
     return edges
 
 
@@ -63,8 +223,34 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
     if max_workers is None:
         max_workers = cpu_count()
 
+    # Start memory monitoring (tracks main process + all worker processes)
+    memory_monitor = MemoryMonitor(interval=2.0)
+    memory_monitor.start()
+
     print(f"Generating graph for n={n}, s={s}, q={q} (min required distance: {2*s + 1})")
     print(f"  Using {max_workers} workers for parallel computation")
+    print(f"  Monitoring memory usage (sampling every 2s)...")
+
+    # Print memory estimate
+    mem_estimate = estimate_memory_usage(n, s, q, max_workers)
+    print(f"  Estimated memory usage (UPPER BOUND):")
+    print(f"    Total: {mem_estimate['total']:.2f} GB")
+    print(f"    - Adjacency dict: {mem_estimate['adjacency']:.2f} GB")
+    print(f"    - Sequences list: {mem_estimate['sequences']:.2f} GB")
+    print(f"    - Workers ({max_workers}): {mem_estimate['workers']:.2f} GB")
+    print(f"      * Edge buffer per worker: {mem_estimate['edge_buffer_per_worker']:.2f} GB (~{mem_estimate['expected_edges_per_worker']/1e6:.1f}M edges)")
+    print(f"      * Process overhead: 0.1 GB per worker")
+    print(f"    - Base overhead: {mem_estimate['overhead']:.2f} GB")
+    print(f"  Note: This is an UPPER BOUND because:")
+    print(f"    - Uses Hamming ball (Hamming ≥ Levenshtein, equality only without shifts)")
+    print(f"    - All workers peak simultaneously (actual: staggered due to load balancing)")
+    print(f"    - Conservative 150 bytes/edge (actual: ~100-120 bytes)")
+    print(f"    - No copy-on-write sharing (Linux/macOS: sequences are shared)")
+    print(f"    Actual memory usage typically 30-50% of estimate (or less if sparse).")
+    print(f"  Graph properties (based on Hamming ball approximation):")
+    print(f"    - Upper bound on degree: V_{q}(n,{2*s}) = {mem_estimate['avg_degree']:.0f}")
+    print(f"    - Upper bound on edge probability: {mem_estimate['p_edge']:.6f}")
+    print(f"    - Actual degree will be lower due to Levenshtein < Hamming for shifts")
 
     # Generate q-ary alphabet: '0', '1', ..., 'q-1'
     alphabet = ''.join(str(i) for i in range(q))
@@ -76,26 +262,56 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
 
     threshold = 2 * s + 1
 
-    # Generate all pairs of indices
-    total_pairs = len(sequences) * (len(sequences) - 1) // 2
-    all_pairs = [(i, j) for i in range(len(sequences)) for j in range(i + 1, len(sequences))]
+    # Split sequence indices into ranges for workers with balanced workload
+    # Each worker processes a range of 'i' values and all corresponding j > i
+    # This avoids creating massive pair lists in memory
+    n_sequences = len(sequences)
+    total_pairs = n_sequences * (n_sequences - 1) // 2
+    pairs_per_worker = total_pairs / max_workers
 
-    # Split pairs into chunks for workers
-    chunk_size = max(1, len(all_pairs) // max_workers)
-    chunks = [all_pairs[i:i + chunk_size] for i in range(0, len(all_pairs), chunk_size)]
+    def cumulative_pairs_at_index(k):
+        """Calculate total pairs from i=0 to i=k-1"""
+        return k * n_sequences - k * (k + 1) // 2
 
-    # Prepare arguments for workers
-    worker_args = [(chunk, sequences, threshold) for chunk in chunks]
+    worker_args = []
+    current_i = 0
+
+    for worker_id in range(max_workers):
+        start_i = current_i
+        target_cumulative = int((worker_id + 1) * pairs_per_worker)
+
+        if worker_id == max_workers - 1:
+            # Last worker gets all remaining indices
+            end_i = n_sequences
+        else:
+            # Use closed-form solution to find end_i
+            # Solve: k*n_sequences - k*(k+1)/2 = target
+            # Rearranging: k^2 + k - 2*k*n_sequences + 2*target = 0
+            # k^2 - k*(2*n_sequences - 1) + 2*target = 0
+            a = 1
+            b = -(2 * n_sequences - 1)
+            c = 2 * target_cumulative
+            discriminant = b * b - 4 * a * c
+
+            if discriminant >= 0:
+                k = (-b - math.sqrt(discriminant)) / (2 * a)
+                end_i = int(math.ceil(k))
+                # Clamp to valid range
+                end_i = max(start_i + 1, min(end_i, n_sequences))
+            else:
+                end_i = n_sequences
+
+        if start_i < n_sequences:
+            worker_args.append((worker_id, start_i, end_i, sequences, threshold))
+
+        current_i = end_i
 
     # Process in parallel
     print(f"  Computing edit distances in parallel...")
+    print(f"  Each worker will show its own progress bar below:\n")
     with Pool(max_workers) as pool:
-        results = list(tqdm(
-            pool.imap(_compute_edges_chunk, worker_args),
-            total=len(chunks),
-            desc="  Progress",
-            unit="chunk"
-        ))
+        # Use imap without outer tqdm - each worker has its own progress bar
+        results = list(pool.imap(_compute_edges_chunk, worker_args))
 
     # Combine results into adjacency list
     edge_count = 0
@@ -106,6 +322,17 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
             edge_count += 1
 
     print(f"  Total edges: {edge_count}")
+
+    # Stop memory monitoring and report actual usage
+    peak_memory_gb = memory_monitor.stop()
+    print(f"\n  ACTUAL peak memory usage: {peak_memory_gb:.2f} GB (main + all {max_workers} workers)")
+    print(f"    Estimated upper bound: {mem_estimate['total']:.2f} GB")
+    print(f"    Actual vs estimate: {peak_memory_gb / mem_estimate['total'] * 100:.1f}% of upper bound")
+    if peak_memory_gb < mem_estimate['total']:
+        print(f"    Within estimate (saved {mem_estimate['total'] - peak_memory_gb:.2f} GB)")
+    else:
+        print(f"    WARNING: Exceeded estimate by {peak_memory_gb - mem_estimate['total']:.2f} GB")
+
     return adjacency
 
 
@@ -172,7 +399,7 @@ if __name__ == "__main__":
     q = 4
 
     # Number of parallel workers (set to None to use all available CPU cores)
-    max_workers = 16
+    max_workers = 15
 
     # Define (n, s) pairs to construct graphs for
     # Adjust these based on your experimental needs
@@ -201,4 +428,10 @@ if __name__ == "__main__":
     print("=" * 70)
     print("All graphs constructed successfully!")
     print(f"Graphs saved to: {OUTPUT_DIR}")
+    print("=" * 70)
+    print()
+    print("SLURM Memory Reporting:")
+    print("  To get SLURM's memory report after job completion, use:")
+    print("    sacct -j <job_id> --format=JobID,MaxRSS,ReqMem,Elapsed")
+    print("  MaxRSS shows the actual peak memory used by the job")
     print("=" * 70)

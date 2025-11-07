@@ -129,3 +129,16 @@ To use IDS graphs in your experiments:
    ```
 
 **Note:** The config uses a helper function `get_spec_path()` that automatically constructs the full path. Simply comment/uncomment the appropriate return statement to switch between Deletions and IDS specifications.
+
+## Memory Tracking
+
+Both construction scripts include real-time memory monitoring:
+- **Before**: Shows estimated upper bound (based on Hamming ball formula)
+- **During**: Samples memory every 2s (main process + all workers)
+- **After**: Reports actual peak memory vs estimate
+
+For SLURM jobs, verify actual usage after completion:
+```bash
+sacct -j <job_id> --format=JobID,MaxRSS,ReqMem,Elapsed
+```
+

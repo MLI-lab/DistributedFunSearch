@@ -57,8 +57,15 @@ from decos.scaling_utils import ResourceManager
 import importlib.util
 
 # Disable multi-threaded tokenization.
-# Our prompts are short and we run many parallel processes, so single-threaded tokenization is faster 
+# Our prompts are short and we run many parallel processes, so single-threaded tokenization is faster
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Set multiprocessing start method to 'spawn' for CUDA compatibility
+# Must be called before any multiprocessing to avoid CUDA context conflicts
+try:
+    mp.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
 
 def load_config(config_path):
     """
@@ -266,15 +273,16 @@ class TaskManager:
                 self.logger.error(f"Failed to start initial processes: {e}")
 
             # Publish the initial program with retry logic
+            # Only wait for at least 1 sampler to avoid blocking on slow model loading
             while True:
                 sampler_queue = await self.sampler_channel.declare_queue("sampler_queue", passive=True)
                 consumer_count = sampler_queue.declaration_result.consumer_count
                 self.logger.info(f"consumer_count is {consumer_count} while config num_samplers is {self.config.num_samplers}")
 
-                if consumer_count > self.config.num_samplers - 1 and checkpoint_file is None:
+                if consumer_count >= 1 and checkpoint_file is None:
                     await self.publish_initial_program_with_retry(amqp_url, initial_program_data)
                     break
-                elif consumer_count > self.config.num_samplers - 1:
+                elif consumer_count >= 1:
                     await database.get_prompt()
                     self.logger.info(f"Loading from checkpoint: {checkpoint_file}")
                     break
@@ -482,6 +490,8 @@ class TaskManager:
         finally:
             loop.close()
             self.logger.info(f"Sampler {local_id}: Event loop closed.")
+            # Explicitly exit the process to prevent hanging
+            sys.exit(0)
 
 
     def evaluator_process(self, template, inputs, amqp_url, target_signatures):
@@ -596,6 +606,8 @@ class TaskManager:
         finally:
             loop.close()
             self.logger.info(f"Evaluator {local_id}: Event loop closed.")
+            # Explicitly exit the process to prevent hanging
+            sys.exit(0)
 
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))

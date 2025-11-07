@@ -84,3 +84,6 @@ rabbitmq/
 # Ignore build directories
 build/
 dist/
+
+# Ignore SLURM job scripts
+src/experiments/experiment1/exp1.sh

@@ -43,18 +43,18 @@ async def create_rabbitmq_connection(config, timeout=300):
 async def declare_standard_queue(channel, queue_name: str):
     """
     Declare a queue with standard DeCoSearch settings.
-    
+
     Args:
         channel: aio_pika channel
         queue_name: Name of the queue to declare
-        
+
     Returns:
         aio_pika.Queue: Declared queue
     """
     return await channel.declare_queue(
         queue_name,
         durable=False,
-        auto_delete=True,
+        auto_delete=False,  # Changed to False to prevent queue deletion when consumers disconnect
         arguments={'x-consumer-timeout': 360000000}
     )
 
