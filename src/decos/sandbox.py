@@ -8,7 +8,8 @@ import time
 import subprocess
 import cloudpickle
 import warnings
-import hashlib  
+import hashlib
+import psutil  
 
 
 # Define the main container path
@@ -19,6 +20,38 @@ def ensure_dir_exists(path: pathlib.Path) -> pathlib.Path:
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
     return path
+
+def cleanup_orphaned_sandbox_processes(logger=None):
+    """
+    Kill any orphaned container_main.py processes that are running without a parent evaluator.
+    This is a safety mechanism to prevent zombie processes from consuming resources.
+
+    Returns the number of processes killed.
+    """
+    killed_count = 0
+    try:
+        for proc in psutil.process_iter(['pid', 'cmdline', 'cpu_percent', 'create_time']):
+            try:
+                cmdline = proc.info.get('cmdline')
+                if not cmdline:
+                    continue
+
+                # Check if this is a container_main.py process
+                if 'container_main.py' in ' '.join(cmdline):
+                    # Check if it's been running for more than 5 minutes (likely orphaned)
+                    uptime = time.time() - proc.info['create_time']
+                    if uptime > 300:  # 5 minutes
+                        if logger:
+                            logger.warning(f"Killing orphaned sandbox process PID {proc.info['pid']} (uptime: {uptime:.0f}s)")
+                        proc.kill()
+                        killed_count += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception as e:
+        if logger:
+            logger.error(f"Error during orphaned process cleanup: {e}")
+
+    return killed_count
 
 class DummySandbox:
     """Base class for Sandboxes that execute generated code contained in a string,
@@ -59,9 +92,11 @@ class ExternalProcessSandbox(DummySandbox):
 
     def _exec(self, call_data_path: pathlib.Path, input_path: pathlib.Path, error_file_path: pathlib.Path) -> bool:
         """
-        Use subprocess.run() to execute the Python container.
+        Use subprocess.Popen() to execute the Python container with proper process group management.
         The container (CONTAINER_MAIN) will execute the LLM-generated method from prog.pickle using input.pickle as input,
         writing the output to output.pickle.
+
+        Process group management ensures that if this process dies, all child processes are killed.
         """
         prog_path = call_data_path / "prog.pickle"   # Serialized Python function
         output_file = call_data_path / "output.pickle"  # Where output will be written
@@ -80,17 +115,55 @@ class ExternalProcessSandbox(DummySandbox):
             str(output_file)
         ]
 
+        process = None
         try:
-            # Run the command with a timeout
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=self.timeout_secs, cwd=os.getcwd())
+            # Use Popen with start_new_session=True to create a new process group
+            # This allows us to kill the entire process tree if needed
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=os.getcwd(),
+                start_new_session=True  # Creates new process group
+            )
+
+            # Wait for process with timeout
+            stdout, stderr = process.communicate(timeout=self.timeout_secs)
+
             # Always write stderr output to error_file (includes debug info like graph file paths)
-            if result.stderr:
+            if stderr:
                 with open(error_file_path, "wb") as ef:
-                    ef.write(result.stderr)
-            return (result.returncode == 0)
-        except subprocess.TimeoutExpired:        
+                    ef.write(stderr)
+
+            return (process.returncode == 0)
+
+        except subprocess.TimeoutExpired:
+            # Kill the entire process group on timeout
+            if process:
+                try:
+                    # Kill the process group (negative PID kills the entire group)
+                    os.killpg(os.getpgid(process.pid), 9)
+                except (ProcessLookupError, PermissionError):
+                    pass  # Process already dead
+                try:
+                    process.kill()  # Fallback
+                    process.wait(timeout=1)
+                except Exception:
+                    pass
             return False
+
         except Exception as e:
+            # Clean up on any error
+            if process and process.poll() is None:
+                try:
+                    os.killpg(os.getpgid(process.pid), 9)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                try:
+                    process.kill()
+                    process.wait(timeout=1)
+                except Exception:
+                    pass
             return False
 
     def _hash_input(self, test_input) -> str:

@@ -62,10 +62,11 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
 # Must be called before any multiprocessing to avoid CUDA context conflicts
-try:
-    mp.set_start_method('spawn', force=True)
-except RuntimeError:
-    pass  # Already set
+# Note: Disabled for now due to pickle issues with checkpoint loading
+# try:
+#     mp.set_start_method('spawn', force=True)
+# except RuntimeError:
+#     pass  # Already set
 
 def load_config(config_path):
     """
@@ -159,7 +160,7 @@ class TaskManager:
 
                 # Ensure the evaluator_queue is declared
                 await sampler_channel.declare_queue(
-                    "evaluator_queue", durable=False, auto_delete=True,
+                    "evaluator_queue", durable=False, auto_delete=False,
                     arguments={'x-consumer-timeout': 360000000}
                 )
 

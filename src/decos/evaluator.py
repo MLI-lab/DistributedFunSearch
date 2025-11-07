@@ -224,6 +224,11 @@ class Evaluator:
             else:
                 logger.info(f"Evaluator {self.local_id}: No running child processes to terminate.")
 
+            # Final cleanup of any orphaned sandbox processes
+            killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
+            if killed > 0:
+                logger.info(f"Evaluator {self.local_id}: Cleaned up {killed} orphaned sandbox processes during shutdown")
+
             # Run garbage collection to clean up resources
             gc.collect()
 
@@ -243,6 +248,7 @@ class Evaluator:
                 # Start consuming messages
                 async with self.evaluator_queue.iterator() as stream:
                     try:
+                        message_count = 0
                         async for message in stream:
                             # Start timing before processing the message
                             fetch_start_time = time.perf_counter()
@@ -259,6 +265,14 @@ class Evaluator:
                                     logger.warning("Processing message timed out.")
                                 except Exception as e:
                                     logger.error(f"Evaluator: Error while processing message: {e}")
+
+                            # Periodically clean up orphaned sandbox processes (every 10 messages)
+                            message_count += 1
+                            if message_count % 10 == 0:
+                                killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
+                                if killed > 0:
+                                    logger.info(f"Cleaned up {killed} orphaned sandbox processes")
+
                     except asyncio.CancelledError:
                         logger.info("Consumer was cancelled.")
                         raise  # Propagate the cancellation upwards
