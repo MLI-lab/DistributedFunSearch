@@ -41,8 +41,6 @@ conda create -n env python=3.11 pip numpy==1.26.4 -y
 conda activate env
 ```
 
-**Note**: Add `conda activate env` to your `~/.bashrc` inside the container to auto-activate on entry.
-
 ### 4. Install PyTorch (Skip if Using API-based LLM)
 
 If using a local LLM (e.g., StarCoder2):
@@ -55,8 +53,13 @@ If using OpenAI/Azure API (`sampler.gpt=True` in config), you can skip this step
 ### 5. Install FunSearchMQ
 
 ```bash
-cd /workspace/DeCoSearch
+cd /workspace/FunSearchMQ
+
+# Standard installation
 pip install .
+
+# OR: Editable/development mode (changes to source code take effect immediately)
+pip install -e .
 ```
 
 ### 6. (Optional) Pre-download LLM
@@ -80,7 +83,7 @@ python -m funsearchmq
 
 - **Internal communication**: The main container connects to RabbitMQ via `rabbitmq:5672` (Docker service name)
 - **External access**: RabbitMQ Management Interface is exposed on host port `15672`
-- **Volume mounts**: Project directory is mounted at `/workspace/DeCoSearch` (changes sync between host and container)
+- **Volume mounts**: Project directory is mounted at `/workspace/FunSearchMQ` (changes sync between host and container)
 
 ### RabbitMQ Connection
 
