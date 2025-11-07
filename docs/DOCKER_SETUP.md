@@ -160,18 +160,3 @@ services:
       - "15672:15672"  # Management interface
       - "5672:5672"    # AMQP message passing
 ```
-
-## Troubleshooting
-
-**Container can't connect to RabbitMQ:**
-- Verify RabbitMQ is running: `docker ps`
-- Check network connectivity: `docker exec decos-main ping rabbitmq`
-- Ensure `host='rabbitmq'` (not `localhost`) in config
-
-**GPU not available inside container:**
-- Install NVIDIA Container Toolkit on host
-- Verify GPU access: `docker exec decos-main nvidia-smi`
-
-**Conda environment not persisting:**
-- Add `conda activate env` to `~/.bashrc` inside container
-- Or use `docker exec -it decos-main bash -c "conda activate env && bash"`
