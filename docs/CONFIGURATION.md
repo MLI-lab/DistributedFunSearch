@@ -307,9 +307,6 @@ Pre-computed graphs are stored at `src/graphs/`:
 - Deletion codes: `graph_d_s{s}_n{n}_q{q}.lmdb`
 - IDS codes: `graph_ids_s{s}_n{n}_q{q}.lmdb`
 
-Where `d` indicates deletion codes, `s` is the error parameter, `n` is the code length, and `q` is the alphabet size.
+Where `d` indicates deletion correction, `ids` indicates insertion/deletion/substitution correction, `s` is the error parameter, `n` is the code length, and `q` is the alphabet size.
 
-To pre-compute IDS graphs:
-```bash
-python src/construct_graphs/construct_ids_graphs.py
-```
+To pre-compute graphs, see `src/construct_graphs/` which contains scripts and documentation for graph generation.
