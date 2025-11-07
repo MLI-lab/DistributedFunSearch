@@ -1,6 +1,6 @@
 # Configuration Guide
 
-FunSearchMQ is configured through two main mechanisms:
+FunSearchMQ is configured through:
 1. **Command-line arguments** - Runtime options (paths, scaling, termination)
 2. **Config file** - Experiment parameters (`config.py`)
 
@@ -59,13 +59,11 @@ export AZURE_OPENAI_API_VERSION=<your-version>
 python -m funsearchmq  # Ensure config.py has sampler.gpt=True
 ```
 
-## Configuration File (`config.py`)
+## Configuration File 
 
 Experiments are configured via `config.py` in the experiment directory (e.g., `src/experiments/experiment1/config.py`).
 
 ### Configuration Blocks
-
-Click each section to expand details.
 
 <details>
 <summary><b>RabbitMQConfig</b> - Message broker connection settings</summary>
@@ -123,15 +121,6 @@ Controls how the LLM generates new function variants.
   - When `True`, GPU device assignment is disabled
 
 
-**Example (OpenAI API):**
-```python
-sampler=SamplerConfig(
-    samples_per_prompt=2,
-    temperature=0.9,
-    gpt=True,  # Use API instead of local model
-)
-```
-
 </details>
 
 <details>
@@ -149,7 +138,6 @@ Controls how generated functions are tested and scored.
   - `"last"`: Use score from longest n
   - `"average"`: Average scores across all n
   - `"weighted"`: Weighted average
-  - `"relative_difference"`: Relative improvement
 - `timeout` (int): Sandbox timeout in seconds (default: `90`)
 - `max_workers` (int): Number of parallel CPU processes per evaluator (default: `2`)
 - `eval_code` (bool): Include evaluation script in prompt (default: `False`)
@@ -316,8 +304,10 @@ def get_spec_path() -> str:
 ### Graph Files
 
 Pre-computed graphs are stored at `src/graphs/`:
-- Deletion codes: `graph_s{s}_n{n}.lmdb`
-- IDS codes: `graph_ids_s{s}_n{n}.lmdb`
+- Deletion codes: `graph_d_s{s}_n{n}_q{q}.lmdb`
+- IDS codes: `graph_ids_s{s}_n{n}_q{q}.lmdb`
+
+Where `d` indicates deletion codes, `s` is the error parameter, `n` is the code length, and `q` is the alphabet size.
 
 To pre-compute IDS graphs:
 ```bash
