@@ -251,6 +251,20 @@ class LLM_model:
             logger.error(f"Error during batch generation: {e}")
             return [], [], []
 
+    def cleanup(self):
+        """Release GPU memory and clean up model resources."""
+        try:
+            if hasattr(self, 'model'):
+                del self.model
+            if hasattr(self, 'tokenizer'):
+                del self.tokenizer
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            logger.info("LLM_model: GPU memory cleaned up")
+        except Exception as e:
+            logger.error(f"LLM_model: Error during cleanup: {e}")
+
 
 class Sampler:
     """Node that samples program continuations and sends them for analysis."""
@@ -281,8 +295,11 @@ class Sampler:
 
     async def consume_and_process(self) -> None:
         try:
+            logger.info(f"Sampler on device {self.device}: Setting QoS prefetch_count=10...")
             await self.channel.set_qos(prefetch_count=10)
+            logger.info(f"Sampler on device {self.device}: Starting to consume messages from sampler_queue...")
             async with self.sampler_queue.iterator() as stream:
+                logger.info(f"Sampler on device {self.device}: Successfully registered as consumer, now listening for messages...")
                 batch = []
                 batch_timeout = 0.01
                 batch_start_time = asyncio.get_event_loop().time()
@@ -301,7 +318,7 @@ class Sampler:
                 except Exception as e:
                     logger.error(f"Error in consume_and_process loop: {e}")
         except asyncio.CancelledError:
-            logger.error("consume_and_process canceled.")
+            logger.info("consume_and_process canceled during shutdown.")
         except Exception as e:
             logger.error(f"Channel/iterator setup error: {e}")
 
@@ -388,3 +405,15 @@ class Sampler:
                     logger.debug("Published sample to evaluator_queue.")
                 except Exception as e:
                     logger.error(f"Error publishing sample: {e}")
+
+    def cleanup(self):
+        """Release LLM resources and GPU memory."""
+        import gc
+        try:
+            if hasattr(self, '_llm'):
+                self._llm.cleanup()
+                del self._llm
+            gc.collect()
+            logger.info("Sampler: Cleanup completed")
+        except Exception as e:
+            logger.error(f"Sampler: Error during cleanup: {e}")

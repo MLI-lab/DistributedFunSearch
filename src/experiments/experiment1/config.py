@@ -229,8 +229,8 @@ class Config:
   evaluator: EvaluatorConfig = dataclasses.field(default_factory=EvaluatorConfig)
   prompt: PromptConfig = dataclasses.field(default_factory=PromptConfig)
   wandb: WandbConfig = dataclasses.field(default_factory=WandbConfig)
-  num_samplers: int = 1
-  num_evaluators: int = 1
+  num_samplers: int = 2
+  num_evaluators: int = 10
   num_pdb: int = 1
 
 

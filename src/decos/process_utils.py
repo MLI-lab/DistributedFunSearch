@@ -14,14 +14,15 @@ import aio_pika
 from typing import Optional, Callable
 
 
-async def create_rabbitmq_connection(config, timeout=300):
+async def create_rabbitmq_connection(config, timeout=300, heartbeat=300):
     """
     Create a robust RabbitMQ connection with standard configuration.
-    
+
     Args:
         config: Configuration object with rabbitmq settings
         timeout: Connection timeout in seconds
-        
+        heartbeat: Heartbeat interval in seconds (default 300)
+
     Returns:
         aio_pika.Connection: Robust connection to RabbitMQ
     """
@@ -29,14 +30,14 @@ async def create_rabbitmq_connection(config, timeout=300):
         amqp_url = URL(
             f'amqp://{config.rabbitmq.username}:{config.rabbitmq.password}@'
             f'{config.rabbitmq.host}:{config.rabbitmq.port}/{config.rabbitmq.vhost}'
-        ).update_query(heartbeat=60)
+        ).update_query(heartbeat=heartbeat)
         return await aio_pika.connect_robust(amqp_url, timeout=timeout)
     except Exception:
         # Try without vhost if it fails
         amqp_url = URL(
             f'amqp://{config.rabbitmq.username}:{config.rabbitmq.password}@'
             f'{config.rabbitmq.host}:{config.rabbitmq.port}/'
-        ).update_query(heartbeat=60)
+        ).update_query(heartbeat=heartbeat)
         return await aio_pika.connect_robust(amqp_url, timeout=timeout)
 
 
