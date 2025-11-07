@@ -110,7 +110,7 @@ def backup_python_files(src, dest, exclude_dirs=[]):
 def initialize_process_logger(log_dir, process_type="Process"):
     """Initialize logger for child process (spawn-compatible)."""
     pid = os.getpid()
-    log_file_name = f"decos.log"
+    log_file_name = f"main.log"
     log_file_path = os.path.join(log_dir, log_file_name)
     logger = logging.getLogger('main_logger')
     logger.setLevel(logging.INFO)
@@ -161,7 +161,7 @@ class TaskManager:
         # Create the log directory for the experiment
         os.makedirs(log_dir, exist_ok=True)
 
-        log_file_path = os.path.join(log_dir, 'decos.log')
+        log_file_path = os.path.join(log_dir, 'main.log')
         handler = FileHandler(log_file_path, mode='w') 
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)

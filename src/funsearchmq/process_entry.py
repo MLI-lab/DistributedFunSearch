@@ -32,7 +32,7 @@ def load_config(config_path):
 def initialize_process_logger(log_dir, process_type="Process"):
     """Initialize logger for child process (spawn-compatible)."""
     pid = os.getpid()
-    log_file_name = f"decos.log"
+    log_file_name = f"main.log"
     log_file_path = os.path.join(log_dir, log_file_name)
     logger = logging.getLogger('main_logger')
     logger.setLevel(logging.INFO)
