@@ -13,19 +13,9 @@ from typing import Sequence, Any
 import datetime
 from funsearchmq.scaling_utils import ResourceManager
 from funsearchmq import process_utils
-from funsearchmq.__main__ import evaluator_process_entry
+from funsearchmq.process_entry import evaluator_process_entry, load_config
 from yarl import URL
 from funsearchmq import code_manipulation
-import importlib
-
-def load_config(config_path):
-    """
-    Load a configuration .py file from a specified path.
-    """
-    spec = importlib.util.spec_from_file_location("config", config_path)
-    config_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config_module)
-    return config_module.Config()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -148,84 +138,6 @@ class TaskManager:
             self.logger.info(f"Started Evaluator Process {i} with PID: {proc.pid}")
             self.evaluator_processes.append(proc)
 
-    def evaluator_process(self, template, inputs, amqp_url):
-        from funsearchmq import evaluator  # Import evaluator module dynamically
-        local_id = mp.current_process().pid  # Use process ID as local identifier
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        connection = None
-        channel = None
-        evaluator_task = None
-
-        async def graceful_shutdown(loop, connection, channel, evaluator_task):
-            self.logger.info(f"Evaluator {local_id}: Initiating graceful shutdown...")
-            if evaluator_task:
-                try:
-                    await asyncio.wait_for(evaluator_task, timeout=60)
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"Evaluator {local_id}: Task timed out. Cancelling...")
-                    evaluator_task.cancel()
-                    await evaluator_task
-                except Exception as e:
-                    self.logger.error(f"Evaluator {local_id}: Error during task cancellation: {e}")
-            if channel:
-                try:
-                    await channel.close()
-                except Exception as e:
-                    self.logger.error(f"Evaluator {local_id}: Error closing channel: {e}")
-            if connection:
-                try:
-                    await connection.close()
-                except Exception as e:
-                    self.logger.error(f"Evaluator {local_id}: Error closing connection: {e}")
-            loop.stop()
-            self.logger.info(f"Evaluator {local_id}: Graceful shutdown complete.")
-
-        async def run_evaluator():
-            nonlocal connection, channel, evaluator_task
-            try:
-                connection = await aio_pika.connect_robust(
-                    amqp_url,
-                    timeout=300,
-                    client_properties={"connection_attempts": 1, "retry_delay": 0}
-                )
-                channel = await connection.channel()
-                evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
-                database_queue = await process_utils.declare_standard_queue(channel, "database_queue")
-                evaluator_instance = evaluator.Evaluator(
-                    connection, channel, evaluator_queue, database_queue,
-                    self.template, 'priority', 'evaluate', inputs, args.sandbox_base_path,
-                    timeout_seconds=self.config.evaluator.timeout, local_id=local_id, target_signatures=self.target_signatures,
-                    max_workers=self.config.evaluator.max_workers
-                )
-                evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
-                await evaluator_task
-            except asyncio.CancelledError:
-                self.logger.info(f"Evaluator {local_id}: Process was cancelled.")
-            except Exception as e:
-                self.logger.error(f"Evaluator {local_id}: Error occurred: {e}")
-            finally:
-                if channel:
-                    await channel.close()
-                if connection:
-                    await connection.close()
-                self.logger.debug(f"Evaluator {local_id}: Connection closed.")
-
-        def signal_handler(sig, frame):
-            self.logger.info(f"Evaluator process {local_id} received signal {sig}. Initiating shutdown.")
-            loop.create_task(graceful_shutdown(loop, connection, channel, evaluator_task))
-
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-
-        try:
-            loop.run_until_complete(run_evaluator())
-        except Exception as e:
-            self.logger.info(f"Evaluator process {local_id}: Exception occurred: {e}")
-        finally:
-            loop.close()
-            self.logger.debug(f"Evaluator process {local_id} has been closed gracefully.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the TaskManager for evaluators with configurable scaling interval.")

@@ -14,20 +14,9 @@ from typing import Sequence, Any
 from funsearchmq.scaling_utils import ResourceManager
 from funsearchmq import sampler
 from funsearchmq import process_utils
-from funsearchmq.__main__ import sampler_process_entry
-import importlib
+from funsearchmq.process_entry import sampler_process_entry, load_config
 import socket
 from funsearchmq import gpt
-
-
-def load_config(config_path):
-    """
-    Dynamically load a configuration .py file from a specified path.
-    """
-    spec = importlib.util.spec_from_file_location("config", config_path)
-    config_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config_module)
-    return config_module.Config()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -179,92 +168,6 @@ class TaskManager:
                     self.logger.error(f"Failed to start sampler {i} due to error: {e}")
                     continue
 
-    def sampler_process(self, amqp_url, device=None):
-        from funsearchmq import sampler, gpt 
-        local_id = current_process().pid
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        connection = None
-        channel = None
-        sampler_task = None
-
-        async def graceful_shutdown(loop, connection, channel, sampler_task):
-            self.logger.info(f"Sampler {local_id}: Initiating graceful shutdown...")
-            if sampler_task:
-                try:
-                    await asyncio.wait_for(sampler_task, timeout=60)
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"Sampler {local_id}: Task timed out. Cancelling...")
-                    sampler_task.cancel()
-                    await sampler_task
-                except Exception as e:
-                    self.logger.error(f"Sampler {local_id}: Error during task cancellation: {e}")
-            if channel:
-                try:
-                    await channel.close()
-                except Exception as e:
-                    self.logger.error(f"Sampler {local_id}: Error closing channel: {e}")
-            if connection:
-                try:
-                    await connection.close()
-                except Exception as e:
-                    self.logger.error(f"Sampler {local_id}: Error closing connection: {e}")
-            loop.stop()
-            self.logger.info(f"Sampler {local_id}: Graceful shutdown complete.")
-
-        async def run_sampler():
-            nonlocal connection, channel, sampler_task
-            try:
-                connection = await aio_pika.connect_robust(
-                    amqp_url,
-                    timeout=300,
-                    client_properties={"connection_attempts": 1, "retry_delay": 0}
-                )
-                channel = await connection.channel()
-
-                sampler_queue = await process_utils.declare_standard_queue(channel, "sampler_queue")
-                evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
-
-                try:
-                    if self.config.sampler.gpt: 
-                        sampler_instance = gpt.Sampler(
-                            connection, channel, sampler_queue, evaluator_queue, self.config.sampler)
-                        self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
-                    else: 
-                        sampler_instance = sampler.Sampler(
-                            connection, channel, sampler_queue, evaluator_queue, self.config.sampler, device)
-                        self.logger.debug(f"Sampler {local_id}: Initialized Sampler instance.")
-                except Exception as e: 
-                    self.logger.error(f"Could not start Sampler instance {e}")
-                    return 
-
-                sampler_task = asyncio.create_task(sampler_instance.consume_and_process())
-                await sampler_task
-
-            except asyncio.CancelledError:
-                self.logger.info(f"Sampler {local_id}: Cancelled.")
-            except Exception as e:
-                self.logger.error(f"Sampler {local_id} error: {e}")
-            finally:
-                if channel:
-                    await channel.close()
-                if connection:
-                    await connection.close()
-                self.logger.debug(f"Sampler {local_id}: Connection closed.")
-
-        process_utils.setup_signal_handlers(
-            loop, "Sampler", local_id, self.logger,
-            lambda: graceful_shutdown(loop, connection, channel, sampler_task)
-        )
-
-        try:
-            loop.run_until_complete(run_sampler())
-        except Exception as e:
-            self.logger.info(f"Sampler process {local_id}: Exception occurred: {e}")
-        finally:
-            loop.close()
-            self.logger.debug(f"Sampler process {local_id} has been closed gracefully.")
 
 
 if __name__ == "__main__":
