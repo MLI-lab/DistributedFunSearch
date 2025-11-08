@@ -48,21 +48,23 @@ class ProgramsDatabaseConfig:
   Attributes:
     functions_per_prompt: Number of previous programs to include in current prompt.
     num_islands: Number of islands to maintain for diversity.
-    reset_period: The interval (in seconds) at which the weakest islands are reset. If None, resets occur only based on the number of stored programs.  
+    reset_period: The interval (in seconds) at which the weakest islands are reset. If None, resets occur only based on the number of stored programs.
     reset_programs: The number of stored programs after which the weakest islands are reset.
     cluster_sampling_temperature_init: Initial temperature for softmax sampling of clusters within an island.
     cluster_sampling_temperature_period: Period of linear decay of the cluster sampling temperature.
     prompts_per_batch: Batch size for processing prompts received from the database_queue
     no_deduplication: Disable deduplication (default: False, set True to disable).
+    save_lineage: Save evolutionary lineage HTML files and track lineage metrics (default: False).
   """
   functions_per_prompt: int = 2
   num_islands: int = 10
   reset_period: int = None
   reset_programs: int= 1200
-  cluster_sampling_temperature_init: float = 0.1 
-  cluster_sampling_temperature_period: int = 30_000 
+  cluster_sampling_temperature_init: float = 0.1
+  cluster_sampling_temperature_period: int = 30_000
   prompts_per_batch= 10
   no_deduplication: bool = False
+  save_lineage: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
