@@ -35,7 +35,7 @@ config = Config(
 )
 ```
 
-The `min_gpu_memory_gib` parameter should be adjusted based on the LLM's memory requirements:
+The `min_gpu_memory_gib` parameter should be adjusted based on the LLM's memory requirements.
 
 
 ## Scaling Behavior
@@ -56,13 +56,13 @@ The `min_gpu_memory_gib` parameter should be adjusted based on the LLM's memory 
 
 ### Evaluators
 
-**Scale up when:**
-1. `evaluator_queue` message count > `evaluator_scale_up_threshold` (default: 10)
-2. Current evaluator count < `max_evaluators` (CLI argument, default: 1000)
-3. Smoothed average CPU usage < `cpu_usage_threshold`% (default: 99%)
-4. Normalized load (1-min load avg / num cores) < `normalized_load_threshold` (default: 0.99)
+**Scale up when (all are true):**
+- `evaluator_queue` message count > `evaluator_scale_up_threshold` (default: 10)
+- Current evaluator count < `max_evaluators` (CLI argument, default: 1000)
+- Smoothed average CPU usage < `cpu_usage_threshold`% (default: 99%)
+- Normalized load (1-min load avg / num cores) < `normalized_load_threshold` (default: 0.99)
 
-**Scale down when:**
+**Scale down when (all are true):**
 - `evaluator_queue` is empty (0 messages)
 - Current evaluator count > `min_evaluators` (CLI argument, default: 1)
 
@@ -80,15 +80,7 @@ python -m funsearchmq \
 
 ## Monitoring Scaling Activity
 
-### 1. Resource Logs
-
-Check resource logs for scaling decisions:
+You can check the resource logs for scaling decisions:
 ```bash
 tail -f logs/resources_<hostname>_pid<pid>.log
 ```
-
-Look for messages like:
-- `"Can scale evaluators with messages in queue X"`
-- `"Can scale samplers with messages in queue X"`
-- `"Started Evaluator/Sampler process (PID: X)"`
-- `"Terminated Evaluator/Sampler process (PID: X)"`

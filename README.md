@@ -74,7 +74,7 @@ See [Configuration Guide](docs/CONFIGURATION.md) for all configuration options.
 
 ## Documentation
 
-- **[Configuration Guide](docs/CONFIGURATION.md)** - Detailed configuration options, CLI arguments, and config blocks
-- **[Scaling Guide](docs/SCALING.md)** - Explanation on how dynamic resource scaling is implemented
-- **[Docker Setup](docs/DOCKER_SETUP.md)** - Run FunSearchMQ in Docker containers
-- **[Cluster Setup](docs/CLUSTER_SETUP.md)** - Run FunSearchMQ on cluster with SLURM and enroot 
+- [Configuration Guide](docs/CONFIGURATION.md): Detailed configuration options, CLI arguments, and config blocks
+- [Scaling Guide](docs/SCALING.md): Explanation on how dynamic resource scaling is implemented
+- [Docker Setup](docs/DOCKER_SETUP.md): Setup with Docker containers
+- [Cluster Setup](docs/CLUSTER_SETUP.md): Setup on cluster with SLURM and enroot 
