@@ -6,7 +6,6 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=15
 #SBATCH --gres=gpu:2
-# NOTE: SBATCH lines do NOT expand shell variables.
 #SBATCH -o DeCoSearch/src/experiments/experiment1/logs/experiment.out
 #SBATCH -e DeCoSearch/src/experiments/experiment1/logs/experiment.err
 #SBATCH --time=00:20:00
@@ -105,11 +104,11 @@ echo "In experiment directory: ${PWD}"
 python3 -m funsearchmq
 REMOTE
 
-# ===== Worker timing (your values; keep or tune) =====
+# ===== Worker timing  =====
 scaling_intervals_s=($(seq 180000 200 360000))   # sampler intervals
 scaling_intervals_e=($(seq 200000 30 3000000))   # evaluator intervals
 
-# ===== Start evaluators & samplers ONLY if there are extra nodes =====
+# ===== Start evaluators & samplers only if there are extra nodes =====
 if ((${#REMAINING[@]} > 0)); then
   sleep 120  # allow primary node to come up
 
