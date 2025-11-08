@@ -91,13 +91,13 @@ def sampler_process_entry(config_path, device, log_dir):
             try:
                 await channel.close()
             except Exception as e:
-                logger.info(f"Sampler {local_id}: Error closing channel: {e}")
+                logger.info(f"Sampler {local_id}: Channel already closed during shutdown")
 
         if connection:
             try:
                 await connection.close()
             except Exception as e:
-                logger.info(f"Sampler {local_id}: Error closing connection: {e}")
+                logger.info(f"Sampler {local_id}: Connection already closed during shutdown")
 
         cleanup_done = True
         logger.info(f"Sampler {local_id}: Graceful shutdown complete.")
@@ -212,13 +212,13 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
             try:
                 await channel.close()
             except Exception as e:
-                logger.info(f"Evaluator {local_id}: Error closing channel: {e}")
+                logger.info(f"Evaluator {local_id}: Channel already closed during shutdown")
 
         if connection:
             try:
                 await connection.close()
             except Exception as e:
-                logger.info(f"Evaluator {local_id}: Error closing connection: {e}")
+                logger.info(f"Evaluator {local_id}: Connection already closed during shutdown")
 
         cleanup_done = True
         logger.info(f"Evaluator {local_id}: Graceful shutdown complete.")
