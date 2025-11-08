@@ -363,6 +363,7 @@ class ProgramsDatabase:
         # Store W&B config for later initialization (defer to avoid blocking)
         self.wandb_enabled = False
         self.wandb_config = wandb_config
+        self.wandb_run_id = None  # Will be set after wandb.init or loaded from checkpoint
         # Build comprehensive config for W&B
         self.wandb_init_config = {
             # ProgramsDatabase config
@@ -447,6 +448,11 @@ class ProgramsDatabase:
         self.prompts_since_optimal = checkpoint_data.get("prompts_since_optimal", 0)  # Restore flag
         logger.info(f"Prompts_since_optimal are {self.prompts_since_optimal}")
 
+        # Load W&B run ID if it exists in checkpoint
+        self.wandb_run_id = checkpoint_data.get("wandb_run_id", None)
+        if self.wandb_run_id:
+            logger.info(f"Will resume W&B run: {self.wandb_run_id}")
+
         for i, score in enumerate(checkpoint_data["best_score_per_island"]):
             self._best_score_per_island[i] = score
 
@@ -509,6 +515,7 @@ class ProgramsDatabase:
             "duplicates_discarded": self.duplicates_discarded,
             "found_optimal_solution": self.found_optimal_solution,
             "prompts_since_optimal":self.prompts_since_optimal,
+            "wandb_run_id": self.wandb_run_id,  # Save W&B run ID for resumption
             "islands_state": []
         }
 
@@ -1040,25 +1047,55 @@ class ProgramsDatabase:
         try:
             # Run wandb.init in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: wandb.init(
-                    project=self.wandb_config.project,
-                    entity=self.wandb_config.entity,
-                    name=self.wandb_config.run_name,
-                    tags=self.wandb_config.tags,
-                    config=self.wandb_init_config,
-                    settings=wandb.Settings(
-                        console='off',  # Don't capture console output
-                        _disable_stats=False,
-                        _disable_meta=False,
+
+            # Check if we're resuming from a checkpoint with an existing run ID
+            if self.wandb_run_id:
+                # Resume existing run
+                logger.info(f"Resuming W&B run with ID: {self.wandb_run_id}")
+                await loop.run_in_executor(
+                    None,
+                    lambda: wandb.init(
+                        project=self.wandb_config.project,
+                        entity=self.wandb_config.entity,
+                        id=self.wandb_run_id,
+                        resume="must",
+                        tags=self.wandb_config.tags,
+                        config=self.wandb_init_config,
+                        settings=wandb.Settings(
+                            console='off',  # Don't capture console output
+                            _disable_stats=False,
+                            _disable_meta=False,
+                        )
                     )
                 )
-            )
+            else:
+                # Start new run
+                await loop.run_in_executor(
+                    None,
+                    lambda: wandb.init(
+                        project=self.wandb_config.project,
+                        entity=self.wandb_config.entity,
+                        name=self.wandb_config.run_name,
+                        tags=self.wandb_config.tags,
+                        config=self.wandb_init_config,
+                        settings=wandb.Settings(
+                            console='off',  # Don't capture console output
+                            _disable_stats=False,
+                            _disable_meta=False,
+                        )
+                    )
+                )
+
             self.wandb_enabled = True
             self.wandb_log_interval = self.wandb_config.log_interval
             self._wandb_initialized = True
-            logger.info(f"W&B logging initialized: {wandb.run.url}")
+
+            # Store the run ID (either new or resumed)
+            if wandb.run:
+                self.wandb_run_id = wandb.run.id
+                logger.info(f"W&B logging initialized: {wandb.run.url}")
+            else:
+                logger.warning("W&B run object is None after initialization")
         except Exception as e:
             logger.error(f"Failed to initialize W&B: {e}")
             self.wandb_enabled = False
