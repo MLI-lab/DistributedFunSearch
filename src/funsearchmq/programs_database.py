@@ -344,10 +344,11 @@ class ProgramsDatabase:
         self.duplicates_discarded=0
         self.execution_failed = 0
 
-        # Evolutionary lineage tracking
+        # Evolutionary lineage tracking (optional, can be disabled via config)
+        self.save_lineage = config.save_lineage if hasattr(config, 'save_lineage') else False
         self.next_program_id = 1  # Counter for assigning unique program IDs
-        self.lineage_log = []  # List of dicts: {program_id, parent_ids, generation, score, island_id, timestamp}
-        self._prompt_to_parents = {}  # Maps prompt hash to list of parent program IDs
+        self.lineage_log = [] if self.save_lineage else None  # Only initialize if enabled
+        self._prompt_to_parents = {} if self.save_lineage else None
 
         for _ in range(config.num_islands):
             island = {}
@@ -648,8 +649,8 @@ class ProgramsDatabase:
         else:
             metrics["solution/found_optimal"] = 0
 
-        # 10. Evolutionary lineage tracking
-        if self.lineage_log:
+        # 10. Evolutionary lineage tracking (only if enabled)
+        if self.save_lineage and self.lineage_log:
             # Basic statistics
             generations = [entry['generation'] for entry in self.lineage_log]
             metrics["lineage/max_generation"] = max(generations)
@@ -952,8 +953,8 @@ class ProgramsDatabase:
             score = self._best_score_per_island[island_id]
             scores_per_test = self._best_scores_per_test_per_island[island_id]
 
-            # Get lineage
-            lineage = self._trace_lineage(program.program_id)
+            # Get lineage (only if enabled)
+            lineage = self._trace_lineage(program.program_id) if self.save_lineage else []
 
             # Format detailed scores
             scores_str = ", ".join(f"{k}:{v}" for k, v in scores_per_test.items()) if scores_per_test else "N/A"
@@ -961,45 +962,48 @@ class ProgramsDatabase:
             # Full code (not truncated)
             full_code = str(program)
 
-            # Generate and save HTML lineage (detailed with code)
-            try:
-                import os
-                os.makedirs(self.save_checkpoints_path, exist_ok=True)
+            # Generate and save HTML lineage (only if enabled)
+            if self.save_lineage:
+                try:
+                    import os
+                    os.makedirs(self.save_checkpoints_path, exist_ok=True)
 
-                # Generate detailed lineage HTML with code
-                html_content = self._generate_lineage_html(program.program_id, island_id)
-                html_filename = f"lineage_detailed_island{island_id}_program{program.program_id}.html"
-                html_path = f"{self.save_checkpoints_path}/{html_filename}"
-                with open(html_path, 'w') as f:
-                    f.write(html_content)
+                    # Generate detailed lineage HTML with code
+                    html_content = self._generate_lineage_html(program.program_id, island_id)
+                    html_filename = f"lineage_detailed_island{island_id}_program{program.program_id}.html"
+                    html_path = f"{self.save_checkpoints_path}/{html_filename}"
+                    with open(html_path, 'w') as f:
+                        f.write(html_content)
 
-                # Generate tree diagram HTML (structure only, no code)
-                tree_content = self._generate_lineage_tree_diagram(program.program_id, island_id)
-                tree_filename = f"lineage_tree_island{island_id}_program{program.program_id}.html"
-                tree_path = f"{self.save_checkpoints_path}/{tree_filename}"
-                with open(tree_path, 'w') as f:
-                    f.write(tree_content)
+                    # Generate tree diagram HTML (structure only, no code)
+                    tree_content = self._generate_lineage_tree_diagram(program.program_id, island_id)
+                    tree_filename = f"lineage_tree_island{island_id}_program{program.program_id}.html"
+                    tree_path = f"{self.save_checkpoints_path}/{tree_filename}"
+                    with open(tree_path, 'w') as f:
+                        f.write(tree_content)
 
-                # Log both as W&B artifacts (only if W&B is enabled and initialized)
-                if self.wandb_enabled and self._wandb_initialized:
-                    try:
-                        artifact = wandb.Artifact(
-                            name=f"lineage_island{island_id}_step{self.total_prompts}",
-                            type="lineage_visualization",
-                            description=f"Evolutionary lineage for island {island_id}, program {program.program_id}"
-                        )
-                        artifact.add_file(html_path, name="detailed_with_code.html")
-                        artifact.add_file(tree_path, name="tree_diagram.html")
-                        wandb.log_artifact(artifact)
-                        lineage_link = f"See artifact: lineage_island{island_id}_step{self.total_prompts}"
-                    except Exception as e:
-                        logger.warning(f"Failed to upload lineage artifact to W&B: {e}")
+                    # Log both as W&B artifacts (only if W&B is enabled and initialized)
+                    if self.wandb_enabled and self._wandb_initialized:
+                        try:
+                            artifact = wandb.Artifact(
+                                name=f"lineage_island{island_id}_step{self.total_prompts}",
+                                type="lineage_visualization",
+                                description=f"Evolutionary lineage for island {island_id}, program {program.program_id}"
+                            )
+                            artifact.add_file(html_path, name="detailed_with_code.html")
+                            artifact.add_file(tree_path, name="tree_diagram.html")
+                            wandb.log_artifact(artifact)
+                            lineage_link = f"See artifact: lineage_island{island_id}_step{self.total_prompts}"
+                        except Exception as e:
+                            logger.warning(f"Failed to upload lineage artifact to W&B: {e}")
+                            lineage_link = f"Local files: {html_filename}, {tree_filename}"
+                    else:
                         lineage_link = f"Local files: {html_filename}, {tree_filename}"
-                else:
-                    lineage_link = f"Local files: {html_filename}, {tree_filename}"
-            except Exception as e:
-                logger.error(f"Error generating lineage HTML: {e}")
-                lineage_link = "Error generating lineage"
+                except Exception as e:
+                    logger.error(f"Error generating lineage HTML: {e}")
+                    lineage_link = "Error generating lineage"
+            else:
+                lineage_link = "Disabled"
 
             table_data.append([
                 island_id,
@@ -1315,18 +1319,19 @@ class ProgramsDatabase:
         
             island['num_programs'] += 1
 
-            # Log lineage information for this program
-            score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.target_signatures)
-            self.lineage_log.append({
-                'program_id': program.program_id,
-                'parent_ids': program.parent_ids,
-                'generation': program.generation,
-                'score': score,
-                'island_id': island_id,
-                'timestamp': program.timestamp,
-                'signature': signature
-            })
-            logger.debug(f"Logged lineage: program_id={program.program_id}, parent_ids={program.parent_ids}, generation={program.generation}, score={score}")
+            # Log lineage information for this program (only if enabled)
+            if self.save_lineage:
+                score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.target_signatures)
+                self.lineage_log.append({
+                    'program_id': program.program_id,
+                    'parent_ids': program.parent_ids,
+                    'generation': program.generation,
+                    'score': score,
+                    'island_id': island_id,
+                    'timestamp': program.timestamp,
+                    'signature': signature
+                })
+                logger.debug(f"Logged lineage: program_id={program.program_id}, parent_ids={program.parent_ids}, generation={program.generation}, score={score}")
 
         except Exception as e:
             logger.error(f"Could not append program: {e}")
