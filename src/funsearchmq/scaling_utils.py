@@ -117,8 +117,12 @@ class ResourceManager:
 
                     # Disk I/O
                     disk_io = await asyncio.to_thread(psutil.disk_io_counters)
-                    disk_read_samples.append(disk_io.read_bytes / 1e6)  # Convert to MB
-                    disk_write_samples.append(disk_io.write_bytes / 1e6)
+                    if disk_io:  # Can be None on some systems (e.g., Docker containers)
+                        disk_read_samples.append(disk_io.read_bytes / 1e6)  # Convert to MB
+                        disk_write_samples.append(disk_io.write_bytes / 1e6)
+                    else:
+                        disk_read_samples.append(0)
+                        disk_write_samples.append(0)
 
                     # Memory & swap
                     memory = await asyncio.to_thread(psutil.virtual_memory)
