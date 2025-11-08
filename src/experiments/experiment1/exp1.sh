@@ -1,133 +1,151 @@
 #!/bin/bash
-#SBATCH --partition=${PARTITION:-default}                            # Partition (queue) name
-#SBATCH --nodes=5                                                    # Number of nodes
-#SBATCH --mem=300GB                                                  # Memory per node
-#SBATCH --ntasks-per-node=1                                          # Number of tasks per node
-#SBATCH --cpus-per-task=92                                           # CPU cores per node
-#SBATCH --gres=gpu:4                                                 # GPUs per node
-#SBATCH -o FunSearchMQ/src/experiments/experiment1/logs/experiment.out # Standard output log
-#SBATCH -e FunSearchMQ/src/experiments/experiment1/logs/experiment.err # Standard error log
-#SBATCH --time=48:00:00                                              # Time limit
+#SBATCH --partition=mcml-dgx-a100-40x8
+#SBATCH --qos=mcml
+#SBATCH --nodes=1
+#SBATCH --mem=80GB
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=15
+#SBATCH --gres=gpu:2
+# NOTE: SBATCH lines do NOT expand shell variables.
+#SBATCH -o DeCoSearch/src/experiments/experiment1/logs/experiment.out
+#SBATCH -e DeCoSearch/src/experiments/experiment1/logs/experiment.err
+#SBATCH --time=00:20:00
 
-# Extract node lists for node groups
-NODE_LIST=($(scontrol show hostnames $SLURM_JOB_NODELIST_HET_GROUP_0)) || { echo "Error fetching node list"; exit 1; }
+set -euo pipefail
 
-# Assign NODE_1 and remaining NODES
-NODE_1=${NODE_LIST[0]} || { echo "Error assigning NODE_1"; exit 1; }
-REMAINING=("${NODE_LIST[@]:1}")
-
-echo "Primary node: $NODE_1"
-echo "Remaining nodes: ${REMAINING[@]}"
-
-# Experiment-specific variables
+# ===== Experiment config (vars DO expand below) =====
 EXPERIMENT_NAME="experiment1"
 CONFIG_NAME="config.py"
 RABBITMQ_CONF="rabbitmq.conf"
-PORT=15673
-PORT2=5673
-SSH_USER=" " # set user name
-SSH_HOST="login01.msv.ei.tum.de"   # set to your laptop’s public IP or server name from which you want to access interface (note needs to be on same network as cluster)
-SSH_PORT= #set to port at which to connect 
+RABBITMQ_VHOST="${EXPERIMENT_NAME}"   # vhost = experiment name
 
+PORT="15673"   # RabbitMQ mgmt HTTP
+PORT2="5673"   # RabbitMQ AMQP
+SSH_USER="ge74met"
+SSH_HOST="login01.msv.ei.tum.de"
+SSH_PORT="3022"
 
-# Get RabbitMQ hostname
-RABBITMQ_HOSTNAME=$(srun -N1 -n1 --nodelist=$NODE_1 hostname -f) || { echo "Error getting RabbitMQ hostname"; exit 1; }
+# ===== Node selection (robust to non-hetero jobs) =====
+NODE_SOURCE="${SLURM_JOB_NODELIST_HET_GROUP_0:-${SLURM_JOB_NODELIST:-}}"
+if [[ -z "${NODE_SOURCE}" ]]; then
+  echo "Error: SLURM_JOB_NODELIST is empty. Are you running under Slurm?"
+  exit 1
+fi
+
+if ! mapfile -t NODE_LIST < <(scontrol show hostnames "$NODE_SOURCE"); then
+  echo "Error fetching node list"
+  exit 1
+fi
+if ((${#NODE_LIST[@]} == 0)); then
+  echo "Error: node list resolved to zero nodes."
+  exit 1
+fi
+
+NODE_1="${NODE_LIST[0]}"
+REMAINING=("${NODE_LIST[@]:1}")
+
+echo "Primary node: $NODE_1"
+echo "Remaining nodes: ${REMAINING[*]:-(none)}"
+
+# ===== Discover RabbitMQ host (fqdn of primary node) =====
+RABBITMQ_HOSTNAME=$(srun -N1 -n1 --nodelist="$NODE_1" hostname -f) || { echo "Error getting RabbitMQ hostname"; exit 1; }
+export RABBITMQ_HOSTNAME
 echo "RabbitMQ server hostname: $RABBITMQ_HOSTNAME"
 
-# Run the main setup process on Node 1
-# Set path to enroot image
-srun -N1 -n1 --nodelist=$NODE_1 \
-     --container-image="" \
-     --container-mounts="$PWD/FunSearchMQ:/FunSearchMQ,\
-$PWD/.ssh:/FunSearchMQ/.ssh" \
-     bash -c "
-         echo 'Running on $(hostname -f)'
+# ===== Primary node: start RabbitMQ & controller inside container =====
+srun -N1 -n1 --nodelist="$NODE_1" \
+  --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
+  --container-mounts="$PWD/DeCoSearch:/DeCoSearch,$PWD/.ssh:/DeCoSearch/.ssh,/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/decosearch:/external" \
+  --export=ALL,EXPERIMENT_NAME="$EXPERIMENT_NAME",CONFIG_NAME="$CONFIG_NAME",RABBITMQ_CONF="$RABBITMQ_CONF",RABBITMQ_VHOST="$RABBITMQ_VHOST",RABBITMQ_HOSTNAME="$RABBITMQ_HOSTNAME",PORT="$PORT",PORT2="$PORT2",SSH_USER="$SSH_USER",SSH_HOST="$SSH_HOST",SSH_PORT="$SSH_PORT" \
+  bash -s <<'REMOTE' &
+set -euo pipefail
 
-         # Update the RabbitMQ configuration with the hostname of allocated node
-         python3 /FunSearchMQ/src/funsearchmq/update_config_file.py /FunSearchMQ/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
+echo "Running on $(hostname -f)"
 
-         # Configure RabbitMQ environment
-         export RABBITMQ_NODENAME=rabbit_${SLURM_JOB_ID}@localhost
-         export RABBITMQ_USE_LONGNAME=true
-         export RABBITMQ_CONFIG_FILE=/FunSearchMQ/src/experiments/$EXPERIMENT_NAME/rabbitmq.conf
+# Update the RabbitMQ hostname in your experiment config
+python3 /DeCoSearch/src/funsearchmq/update_config_file.py \
+  "/DeCoSearch/src/experiments/${EXPERIMENT_NAME}/${CONFIG_NAME}" "${RABBITMQ_HOSTNAME}"
 
-         # Start RabbitMQ in the foreground
-         echo 'Starting RabbitMQ server...'
-         rabbitmq-server &
+# RabbitMQ env
+export RABBITMQ_NODENAME="rabbit_${SLURM_JOB_ID}@localhost"
+export RABBITMQ_USE_LONGNAME=true
+export RABBITMQ_CONFIG_FILE="/DeCoSearch/src/experiments/${EXPERIMENT_NAME}/${RABBITMQ_CONF}"
 
-         # Wait for RabbitMQ to fully start
-         sleep 30 || { echo 'Error during sleep waiting for RabbitMQ'; exit 1; }
+echo 'Starting RabbitMQ server...'
+rabbitmq-server &
 
-         # Create the virtual host
-         curl -s -u guest:guest -X PUT http://localhost:$PORT/api/vhosts/exp1 || { echo 'Error creating virtual host'; exit 1; }
+# Wait for mgmt API to come up
+sleep 30
 
-         # Create a new RabbitMQ user
-         curl -s -u guest:guest -X PUT -d '{\"password\":\"mypassword\",\"tags\":\"administrator\"}' \
-             -H 'content-type:application/json' http://localhost:$PORT/api/users/myuser || { echo 'Error creating RabbitMQ user'; exit 1; }
+# Create vhost, user, and permissions via mgmt API
+curl -s -u guest:guest -X PUT "http://localhost:${PORT}/api/vhosts/${RABBITMQ_VHOST}"
+curl -s -u guest:guest -X PUT \
+  -H 'content-type: application/json' \
+  -d '{"password":"mypassword","tags":"administrator"}' \
+  "http://localhost:${PORT}/api/users/myuser"
+curl -s -u guest:guest -X PUT \
+  -H 'content-type: application/json' \
+  -d '{"configure":".*","write":".*","read":".*"}' \
+  "http://localhost:${PORT}/api/permissions/${RABBITMQ_VHOST}/myuser"
 
-         # Set permissions for the new user on the virtual host
-         curl -s -u guest:guest -X PUT -d '{\"configure\":\".*\", \"write\":\".*\", \"read\":\".*\"}' \
-             -H 'content-type:application/json' http://localhost:$PORT/api/permissions/exp1/myuser || { echo 'Error setting permissions'; exit 1; }
+echo 'RabbitMQ setup complete.'
 
-         echo 'RabbitMQ setup complete.'
+# Reverse SSH tunnels (correct option order)
+ssh -p "${SSH_PORT}" -N -f -R "${PORT}:localhost:${PORT}"  "${SSH_USER}@${SSH_HOST}"
+ssh -p "${SSH_PORT}" -N -f -R "${PORT2}:localhost:${PORT2}" "${SSH_USER}@${SSH_HOST}"
 
-         # Set up reverse SSH tunnel for RabbitMQ management interface
-         # Make sure to replace SSH_USER, SSH_HOST, and SSH_PORT with your actual SSH credentials
-         # And keys are in .ssh folder for non-interactive login
-         # on server we reverse tunnel to and want to access the interface run: ssh -L PORT:localhost:PORT SSH_USER@SSH_HOST -p SSH_PORT
-         # access interface at  http://localhost:PORT on server machine
-         ssh -R $PORT:localhost:$PORT $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel'; exit 1; }
+# Install DeCoSearch
+cd /DeCoSearch
+python3 -m pip install .
+echo 'Installed successfully.'
 
-         # Set up a reverse SSH tunnel for message passing, allowing external nodes to communicate with the main task running inside the cluster.
-         ssh -R $PORT2:localhost:$PORT2  $SSH_USER@$SSH_HOST -p $SSH_PORT -N -f || { echo 'Error setting up SSH tunnel for RabbitMQ AMQP'; exit 1; }
+# Launch controller
+cd "/DeCoSearch/src/experiments/${EXPERIMENT_NAME}"
+echo "In experiment directory: ${PWD}"
+python3 -m funsearchmq
+REMOTE
 
+# ===== Worker timing (your values; keep or tune) =====
+scaling_intervals_s=($(seq 180000 200 360000))   # sampler intervals
+scaling_intervals_e=($(seq 200000 30 3000000))   # evaluator intervals
 
-         # Export API credentials (implementation is for an Azure-based API)
+# ===== Start evaluators & samplers ONLY if there are extra nodes =====
+if ((${#REMAINING[@]} > 0)); then
+  sleep 120  # allow primary node to come up
 
-         # Install FunSearchMQ
-         cd /FunSearchMQ
-         python3 -m pip install .
-        
-         # Run FunSearchMQ
-         cd /FunSearchMQ/src/experiments/$EXPERIMENT_NAME
-         # Add command line arguments as needed
-         python3 -m funsearchmq 
-     " &
-
-# Create a list of 10 times evenly spaced from 1800 to 3600 seconds
-scaling_intervals_s=($(seq 180000 200 360000))
-# Create a list of times from 200 to 300 with a step of 30 seconds
-scaling_intervals_e=($(seq 200000 30 3000000))
-sleep 120
-
-
-# Run tasks on remaining nodes (evaluator and sampler scripts)
-for i in "${!REMAINING[@]}"; do
+  for i in "${!REMAINING[@]}"; do
     node="${REMAINING[$i]}"
-    scaling_time_s=${scaling_intervals_s[$i]}  # Get scaling interval for sampler
-    scaling_time_e=${scaling_intervals_e[$i]}  # Get scaling interval for evaluator
-    srun -N1 -n1 --nodelist=$node \
-     --container-image=desired/path/custom_name.sqsh \
-     --container-mounts="$PWD/FunSearchMQ:/FunSearchMQ,\
-$PWD/.ssh:/FunSearchMQ/.ssh" \
-        bash -c "
-            echo 'Running on $(hostname -f)'
+    scaling_time_s=${scaling_intervals_s[$i]:-300}
+    scaling_time_e=${scaling_intervals_e[$i]:-300}
 
-            # Update the RabbitMQ configuration with the hostname
-            python /FunSearchMQ/src/funsearchmq/update_config_file.py /FunSearchMQ/src/experiments/$EXPERIMENT_NAME/$CONFIG_NAME \"$RABBITMQ_HOSTNAME\" || { echo 'Error running update_config_file.py'; exit 1; }
+    srun -N1 -n1 --nodelist="$node" \
+      --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
+      --container-mounts="$PWD/DeCoSearch:/DeCoSearch,$PWD/.ssh:/DeCoSearch/.ssh,/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/decosearch:/external" \
+      --export=ALL,EXPERIMENT_NAME="$EXPERIMENT_NAME",CONFIG_NAME="$CONFIG_NAME",RABBITMQ_HOSTNAME="$RABBITMQ_HOSTNAME",scaling_time_s="$scaling_time_s",scaling_time_e="$scaling_time_e" \
+      bash -s <<'REMOTE2' &
+set -euo pipefail
 
-            # Install FunSearchMQ
-            cd /FunSearchMQ
-            pip install .
+echo "Running on $(hostname -f)"
 
-            cd /FunSearchMQ/src/experiments/$EXPERIMENT_NAME
+# Ensure the experiment config points to the RabbitMQ host
+# (If your repo uses funsearchmq vs decos here, keep it consistent with your codebase)
+python3 /DeCoSearch/src/decos/update_config_file.py \
+  "/DeCoSearch/src/experiments/${EXPERIMENT_NAME}/${CONFIG_NAME}" "${RABBITMQ_HOSTNAME}"
 
-            python -m funsearchmq.attach_evaluators --check_interval=$scaling_time_e --sandbox_base_path=/workspace/sandboxstorage/ || { echo 'Error running attach_evaluators'; exit 1; } &
+# Install DeCoSearch
+cd /DeCoSearch
+python3 -m pip install .
 
-            python -m funsearchmq.attach_samplers --check_interval=$scaling_time_s || { echo 'Error running attach_sampler'; exit 1; } &
-            wait
-        " &
-done
+cd "/DeCoSearch/src/experiments/${EXPERIMENT_NAME}"
 
-wait  # Wait for all tasks to complete
+# Use the exported scaling vars from the outer shell
+python3 -m decos.attach_evaluators --check_interval="${scaling_time_e}" --sandbox_base_path="/workspace/sandboxstorage/" &
+python3 -m decos.attach_samplers   --check_interval="${scaling_time_s}" &
+wait
+REMOTE2
+  done
+else
+  echo "No extra nodes detected; skipping worker launches."
+fi
 
+wait  # Wait for all backgrounded srun tasks
