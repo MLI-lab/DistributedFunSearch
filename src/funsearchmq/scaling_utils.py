@@ -97,10 +97,10 @@ class ResourceManager:
                 ctx_switch_samples = []
                 mem_samples = []
                 swap_samples = []
-                
+
                 if not self.cpu_only:
-                    gpu_samples = []
-                
+                    gpu_samples = {}  # Dict of lists: {gpu_index: [sample1, sample2, ...]}
+
                 for _ in range(num_samples):
                     # CPU usage
                     cpu_samples.append(await self.async_get_cpu_usage())
@@ -138,7 +138,11 @@ class ResourceManager:
                     # GPU utilization (if available)
                     if not self.cpu_only:
                         try:
-                            gpu_samples.append(await self.async_get_gpu_usage())
+                            gpu_utils = await self.async_get_gpu_usage()
+                            for gpu_index, util in gpu_utils.items():
+                                if gpu_index not in gpu_samples:
+                                    gpu_samples[gpu_index] = []
+                                gpu_samples[gpu_index].append(util)
                         except Exception as e:
                             self.resource_logger.warning(f"GPU monitoring failed: {e}")
 
@@ -162,9 +166,12 @@ class ResourceManager:
                 )
 
                 # Include GPU if applicable
-                if not self.cpu_only:
-                    avg_gpu = statistics.mean(gpu_samples) if gpu_samples else 0
-                    log_message += f", GPU Usage: {avg_gpu:.2f}%"
+                if not self.cpu_only and gpu_samples:
+                    gpu_stats = []
+                    for gpu_index in sorted(gpu_samples.keys()):
+                        avg_gpu = statistics.mean(gpu_samples[gpu_index]) if gpu_samples[gpu_index] else 0
+                        gpu_stats.append(f"GPU {gpu_index}: {avg_gpu:.2f}%")
+                    log_message += f", {', '.join(gpu_stats)}"
 
                 self.resource_logger.info(log_message)
 
@@ -178,23 +185,38 @@ class ResourceManager:
         return await asyncio.to_thread(psutil.cpu_percent, interval=1)
 
     async def async_get_gpu_usage(self):
-        """Retrieves GPU utilization asynchronously."""
+        """Retrieves GPU utilization asynchronously for all available GPUs.
+
+        Returns:
+            dict: Mapping of GPU index to utilization percentage {0: 45.2, 1: 12.3, ...}
+                  Returns empty dict if cpu_only mode.
+        """
         if self.cpu_only:
-            return 0
+            return {}
+
+        gpu_utils = {}
         try:
-            handle = await asyncio.to_thread(pynvml.nvmlDeviceGetHandleByIndex, 0)
-            utilization = await asyncio.to_thread(pynvml.nvmlDeviceGetUtilizationRates, handle)
-            return utilization.gpu
+            device_count = await asyncio.to_thread(pynvml.nvmlDeviceGetCount)
+            for gpu_index in range(device_count):
+                try:
+                    handle = await asyncio.to_thread(pynvml.nvmlDeviceGetHandleByIndex, gpu_index)
+                    utilization = await asyncio.to_thread(pynvml.nvmlDeviceGetUtilizationRates, handle)
+                    gpu_utils[gpu_index] = utilization.gpu
+                except Exception as e:
+                    self.resource_logger.warning(f"GPU {gpu_index} monitoring failed: {e}")
+                    gpu_utils[gpu_index] = 0
         except Exception as e:
             self.resource_logger.warning(f"GPU monitoring failed: {e}")
-            return 0
+            return {}
+
+        return gpu_utils
 
 
     async def run_scaling_loop(self, evaluator_queue=None, sampler_queue=None, evaluator_processes=None,
                                sampler_processes=None, sampler_entry_function=None, evaluator_entry_function=None,
                                config_path=None, log_dir=None, template=None, inputs=None, target_signatures=None,
                                sandbox_base_path=None, max_evaluators=10000, min_evaluators=1,
-                               max_samplers=1000, min_samplers=1, check_interval=120):
+                               max_samplers=1000, min_samplers=1, check_interval=120, log_filename=None):
         """Scales evaluator and sampler processes dynamically based on queue sizes and system resources."""
         self.resource_logger.info("Starting scaling loop")
         evaluator_processes = evaluator_processes or []
@@ -214,7 +236,7 @@ class ResourceManager:
                         evaluator_threshold = self.scaling_config.evaluator_scale_up_threshold if self.scaling_config else 10
                         if evaluator_message_count > evaluator_threshold and len(evaluator_processes) < max_evaluators and can_scale_eval:
                             self.resource_logger.info(f"Can scale evaluators with messages in queue {evaluator_message_count}")
-                            self.start_evaluator_process(evaluator_entry_function, config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, evaluator_processes, "Evaluator")
+                            self.start_evaluator_process(evaluator_entry_function, config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, evaluator_processes, "Evaluator", log_filename)
                             evaluator_scaled = True
                         elif evaluator_message_count == 0 and len(evaluator_processes) > min_evaluators:
                             self.resource_logger.info(f"Zero messages in the queue and not last Evaluator, terminating ...")
@@ -231,7 +253,7 @@ class ResourceManager:
                         sampler_threshold = self.scaling_config.sampler_scale_up_threshold if self.scaling_config else 50
                         if sampler_message_count > sampler_threshold and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
                             self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
-                            started = self.start_sampler_process(sampler_entry_function, config_path, log_dir, sampler_processes, "Sampler", assignment=assignment)
+                            started = self.start_sampler_process(sampler_entry_function, config_path, log_dir, sampler_processes, "Sampler", assignment=assignment, log_filename=log_filename)
                             if not started:
                                 self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
                             sampler_scaled = True
@@ -253,7 +275,7 @@ class ResourceManager:
             self.resource_logger.info("Scaling loop cancelled, stopping gracefully...")
             raise  # Re-raise to properly propagate cancellation
 
-    def start_evaluator_process(self, entry_function, config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, processes, process_name):
+    def start_evaluator_process(self, entry_function, config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, processes, process_name, log_filename):
         """Starts a new evaluator process using 'fork' multiprocessing context.
 
         Uses fork because evaluators don't load ML models and only execute functions
@@ -262,7 +284,7 @@ class ResourceManager:
         ctx = mp.get_context('fork')
         proc = ctx.Process(
             target=entry_function,
-            args=(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path),
+            args=(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename),
             name=f"{process_name}-{len(processes)}"
         )
         proc.start()
@@ -337,17 +359,17 @@ class ResourceManager:
         return (avg_cpu_usage < cpu_usage_threshold) and (normalized_load < normalized_load_threshold)
 
 
-    def start_sampler_process(self, entry_function, config_path, log_dir, processes, process_name, assignment):
+    def start_sampler_process(self, entry_function, config_path, log_dir, processes, process_name, assignment, log_filename=None):
         """Starts a new sampler process using 'spawn' multiprocessing context.
 
         Uses spawn to avoid fork+threading deadlocks when loading ML models (StarCoder2/GPT).
         Spawn creates a clean process without inheriting thread state from parent.
         """
         ctx = mp.get_context('spawn')
-        if assignment is True:  # CPU-only mode, no GPU assignment
+        if assignment == True:  # CPU-only mode, no GPU assignment
             proc = ctx.Process(
                 target=entry_function,
-                args=(config_path, None, log_dir),  # No GPU device
+                args=(config_path, None, log_dir, log_filename),  # No GPU device
                 name=f"{process_name}-{len(processes)}"
             )
             proc.start()
@@ -360,7 +382,7 @@ class ResourceManager:
             host_gpu, container_device = assignment
             proc = ctx.Process(
                 target=entry_function,
-                args=(config_path, container_device, log_dir),
+                args=(config_path, container_device, log_dir, log_filename),
                 name=f"{process_name}-{len(processes)}"
             )
             proc.start()

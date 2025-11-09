@@ -16,8 +16,8 @@ CONFIG_NAME="config.py"
 RABBITMQ_CONF="rabbitmq.conf"
 RABBITMQ_VHOST="${EXPERIMENT_NAME}"
 
-PORT="15672"         # RabbitMQ mgmt HTTP
-PORT2="5672"         # RabbitMQ AMQP
+PORT="15673"         # RabbitMQ mgmt HTTP
+PORT2="5673"         # RabbitMQ AMQP
 SSH_USER="ge74met"
 SSH_HOST="login01.msv.ei.tum.de"
 SSH_PORT="3022"
@@ -68,7 +68,9 @@ python3 -m pip install .
 
 cd "/DeCoSearch/src/experiments/${EXPERIMENT_NAME}"
 
-python3 -m funsearchmq --sandbox_base_path "/mnt/sandboxstorage/${EXPERIMENT_NAME}"
+mkdir -p "/mnt/checkpoints/${EXPERIMENT_NAME}"
+
+python3 -m funsearchmq --save_checkpoints_path "/mnt/checkpoints/exp2 --sandbox_base_path "/mnt/sandboxstorage/${EXPERIMENT_NAME}"
 REMOTE
 
 # ===== Worker timing (tune as needed) =====

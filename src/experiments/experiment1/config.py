@@ -39,7 +39,7 @@ class RabbitMQConfig:
     port: int = 5672
     username: str = 'guest'
     password: str = 'guest'
-    vhost: str = 'exp1'  # Use '' for default vhost, or 'exp1', 'exp2', etc. for isolated experiments 
+    vhost: str = 'experiment1no'  # Use '' for default vhost, or 'exp1', 'exp2', etc. for isolated experiments 
     
 
 @dataclasses.dataclass(frozen=True)
