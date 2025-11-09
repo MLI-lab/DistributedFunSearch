@@ -6,15 +6,12 @@ FunSearchMQ is configured through:
 
 ## Command-Line Arguments
 
-Configure runtime behavior without editing code.
-
 ### General Arguments
 
 ```bash
 python -m funsearchmq \
   --config-path ./config.py \           # Path to config file (default: ./config.py)
-  --checkpoint ./checkpoint.pkl \       # Resume from checkpoint
-  --save_checkpoints_path ./Checkpoints \  # Checkpoint directory (default: ./Checkpoints)
+  --checkpoint ./checkpoint.pkl \       # Resume from checkpoint (restores run and continues W&B logging)
   --sandbox_base_path ./sandbox \       # Sandbox directory (default: ./sandbox)
   --log-dir ./logs                      # Log directory (default: ./logs)
 ```
@@ -225,18 +222,56 @@ scaling=ScalingConfig(
 </details>
 
 <details>
-<summary><b>WandbConfig</b> - Weights & Biases logging</summary>
+<summary><b>WandbConfig</b> - Weights & Biases logging and checkpoints</summary>
 
-Controls W&B experiment tracking.
+Controls W&B experiment tracking and checkpoint storage.
 
 **Attributes:**
 - `enabled` (bool): Enable W&B logging (default: `True`)
-- `project` (str): W&B project name (default: `"decosSearch"`)
+- `project` (str): W&B project name (default: `"funsearchmq"`)
 - `entity` (str): W&B username or team name (default: set in config)
-- `run_name` (str): Name for this run (default: `"exp1"`, auto-generated if `None`)
+- `run_name` (str): Name for this run (default: `None`)
+  - If `None`, auto-generates run name with timestamp: `run_YYYYMMDD_HHMMSS`
+  - This name is used for both W&B run and checkpoint folder
 - `log_interval` (int): Logging frequency in seconds (default: `300` = 5 minutes)
 - `tags` (List[str]): Tags for this run (default: `[]`)
+- `checkpoints_base_path` (str): Base directory for checkpoints (default: `"./Checkpoints"`)
+  - Actual checkpoint folder: `{checkpoints_base_path}/checkpoint_{run_name}/`
 
+
+**Run Name and Checkpoint Linking:**
+
+The same run name is used for both W&B and checkpoints, ensuring they're automatically linked:
+
+```python
+wandb=WandbConfig(
+    run_name=None,  # Auto-generates: run_20250108_143022
+    checkpoints_base_path="/mnt/checkpoints"
+)
+# Results in:
+# - W&B run name: run_20250108_143022
+# - Checkpoint folder: /mnt/checkpoints/checkpoint_run_20250108_143022/
+# - Checkpoints: checkpoint_run_20250108_143022/checkpoint_2025-01-08_14-30-22.pkl
+```
+
+**Resuming from Checkpoint:**
+
+When resuming with `--checkpoint`:
+1. Loads all experiment state (islands, scores, counters, etc.)
+2. Retrieves the saved W&B run ID
+3. Resumes the same W&B run (not creating a new one)
+4. Continues saving checkpoints to the same folder
+
+```bash
+# Resume experiment and continue W&B logging
+python -m funsearchmq --checkpoint /mnt/checkpoints/checkpoint_run_20250108_143022/checkpoint_2025-01-08_15-30-22.pkl
+```
+
+**Checkpoint Timing:**
+
+- First checkpoint is saved after 1 hour (3600 seconds)
+- Subsequent checkpoints are saved hourly
+- Checkpoint directory is created when the first checkpoint is saved
 
 </details>
 

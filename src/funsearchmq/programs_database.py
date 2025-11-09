@@ -290,7 +290,8 @@ class ProgramsDatabase:
         q=2,
         wandb_config=None,
         sampler_config=None,
-        evaluator_config=None
+        evaluator_config=None,
+        run_name=None
     ):
         self._islands = [] 
         self.connection = connection
@@ -363,6 +364,7 @@ class ProgramsDatabase:
         # Store W&B config for later initialization (defer to avoid blocking)
         self.wandb_enabled = False
         self.wandb_config = wandb_config
+        self.wandb_run_name = run_name  # Use the provided run_name (may be auto-generated)
         self.wandb_run_id = None  # Will be set after wandb.init or loaded from checkpoint
         # Build comprehensive config for W&B
         self.wandb_init_config = {
@@ -1051,14 +1053,15 @@ class ProgramsDatabase:
             # Check if we're resuming from a checkpoint with an existing run ID
             if self.wandb_run_id:
                 # Resume existing run
-                logger.info(f"Resuming W&B run with ID: {self.wandb_run_id}")
+                expected_run_id = self.wandb_run_id
+                logger.info(f"Resuming W&B run with ID: {expected_run_id}")
                 await loop.run_in_executor(
                     None,
                     lambda: wandb.init(
                         project=self.wandb_config.project,
                         entity=self.wandb_config.entity,
-                        id=self.wandb_run_id,
-                        resume="must",
+                        id=expected_run_id,
+                        resume="allow",  # Resume if exists, otherwise create new (changed from "must")
                         tags=self.wandb_config.tags,
                         config=self.wandb_init_config,
                         settings=wandb.Settings(
@@ -1068,6 +1071,12 @@ class ProgramsDatabase:
                         )
                     )
                 )
+                # Verify that we actually resumed the expected run
+                if wandb.run and wandb.run.id != expected_run_id:
+                    logger.warning(f"W&B created new run {wandb.run.id} instead of resuming {expected_run_id}. "
+                                   f"This may happen if the original run was already finished or doesn't exist.")
+                elif wandb.run and wandb.run.id == expected_run_id:
+                    logger.info(f"Successfully resumed W&B run: {expected_run_id}")
             else:
                 # Start new run
                 await loop.run_in_executor(
@@ -1075,7 +1084,7 @@ class ProgramsDatabase:
                     lambda: wandb.init(
                         project=self.wandb_config.project,
                         entity=self.wandb_config.entity,
-                        name=self.wandb_config.run_name,
+                        name=self.wandb_run_name,
                         tags=self.wandb_config.tags,
                         config=self.wandb_init_config,
                         settings=wandb.Settings(
@@ -1121,15 +1130,26 @@ class ProgramsDatabase:
                 except Exception as e:
                     logger.error(f"Error logging to W&B: {e}")
         except asyncio.CancelledError:
-            logger.info("W&B logging task cancelled, finishing W&B run...")
+            logger.info("W&B logging task cancelled. NOT finishing run to allow resumption from checkpoint.")
+            # Do NOT call wandb.finish() here - leave the run "running" so it can be resumed
+            # If the run is truly complete, the user should manually finish it in W&B UI
+            # or call wandb.finish() explicitly when termination conditions are met
             if self.wandb_enabled and wandb.run is not None:
-                try:
-                    wandb.finish()
-                    logger.info("W&B run finished successfully")
-                except Exception as e:
-                    logger.error(f"Error finishing W&B run: {e}")
+                logger.info(f"W&B run {wandb.run.id} left in resumable state. Resume with: --checkpoint <path>")
             raise
 
+    def finish_wandb_run(self):
+        """
+        Explicitly finish the W&B run when the experiment is truly complete.
+        Call this manually when you know the run should be marked as finished (not resumable).
+        """
+        if self.wandb_enabled and wandb.run is not None:
+            try:
+                logger.info(f"Finishing W&B run {wandb.run.id}...")
+                wandb.finish()
+                logger.info("W&B run finished successfully")
+            except Exception as e:
+                logger.error(f"Error finishing W&B run: {e}")
 
     async def consume_and_process(self) -> None:
         """ Continuously consumes messages in batches from the database queue and processes them. """
