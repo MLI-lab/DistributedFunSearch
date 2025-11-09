@@ -29,15 +29,19 @@ def load_config(config_path):
     return config_module.Config()
 
 
-def initialize_process_logger(log_dir, process_type="Process"):
-    """Initialize logger for child process (spawn-compatible)."""
-    pid = os.getpid()
-    log_file_name = f"main.log"
-    log_file_path = os.path.join(log_dir, log_file_name)
+def initialize_process_logger(log_dir, log_filename):
+    """Initialize logger for child process (spawn-compatible).
+
+    Args:
+        log_dir: Directory containing the log file
+        log_filename: Name of the log file to write to (shared with parent process)
+    """
+    log_file_path = os.path.join(log_dir, log_filename)
     logger = logging.getLogger('main_logger')
     logger.setLevel(logging.INFO)
     os.makedirs(log_dir, exist_ok=True)
-    handler = FileHandler(log_file_path)
+    # Use append mode so multiple processes can write to the same file
+    handler = FileHandler(log_file_path, mode='a')
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
@@ -45,13 +49,13 @@ def initialize_process_logger(log_dir, process_type="Process"):
     return logger
 
 
-def sampler_process_entry(config_path, device, log_dir):
+def sampler_process_entry(config_path, device, log_dir, log_filename):
     """Standalone sampler process entry point (spawn-compatible)."""
     from funsearchmq import sampler, gpt, process_utils
 
     # Reload config and logger in child process
     config = load_config(config_path)
-    logger = initialize_process_logger(log_dir, "Sampler")
+    logger = initialize_process_logger(log_dir, log_filename)
 
     local_id = current_process().pid
     loop = asyncio.new_event_loop()
@@ -166,14 +170,14 @@ def sampler_process_entry(config_path, device, log_dir):
         sys.exit(0)
 
 
-def evaluator_process_entry(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path):
+def evaluator_process_entry(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename):
     """Standalone evaluator process entry point (spawn-compatible)."""
     import funsearchmq.evaluator as evaluator_module
     from funsearchmq import process_utils
 
     # Reload config and logger in child process
     config = load_config(config_path)
-    logger = initialize_process_logger(log_dir, "Evaluator")
+    logger = initialize_process_logger(log_dir, log_filename)
 
     local_id = current_process().pid
     loop = asyncio.new_event_loop()

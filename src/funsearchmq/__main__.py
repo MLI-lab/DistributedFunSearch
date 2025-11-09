@@ -134,6 +134,7 @@ class TaskManager:
         self.config_path = config_path  # Store for spawn compatibility
         self.log_dir = log_dir  # Store for spawn compatibility
         self.sandbox_base_path = sandbox_base_path  # Store for spawn compatibility
+        self.log_filename = None  # Will store the shared log filename
         self.logger = self.initialize_logger(log_dir)
         self.evaluator_processes = []
         self.database_processes = []
@@ -161,8 +162,11 @@ class TaskManager:
         # Create the log directory for the experiment
         os.makedirs(log_dir, exist_ok=True)
 
-        log_file_path = os.path.join(log_dir, 'main.log')
-        handler = FileHandler(log_file_path, mode='w') 
+        pid = os.getpid()
+        # Create PID-based log file that will be shared with child processes
+        self.log_filename = f'main_pid{pid}.log'
+        log_file_path = os.path.join(log_dir, self.log_filename)
+        handler = FileHandler(log_file_path, mode='a')  # Changed to append mode for child processes
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -348,6 +352,7 @@ class TaskManager:
                             max_evaluators=args.max_evaluators,
                             max_samplers=args.max_samplers,
                             check_interval=args.check_interval,
+                            log_filename=self.log_filename,
                         )
                     )
                     self.tasks.append(scaling_task)
@@ -373,7 +378,8 @@ class TaskManager:
             for i in range(self.config.num_samplers):
                 device = None
                 try:
-                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir), name=f"Sampler-{i}")
+                    # Pass log filename so child processes write to same file
+                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir, self.log_filename), name=f"Sampler-{i}")
                     proc.start()
                     self.logger.info(f"Started Sampler Process {i} (GPT mode) with PID: {proc.pid}")
                     self.sampler_processes.append(proc)
@@ -403,7 +409,8 @@ class TaskManager:
                     assigned_gpus.add(device)
                 self.logger.info(f"Assigning sampler {i} to GPU {device} (host GPU: {host_gpu})")
                 try:
-                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir), name=f"Sampler-{i}")
+                    # Pass log filename so child processes write to same file
+                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir, self.log_filename), name=f"Sampler-{i}")
                     proc.start()
                     self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid} on GPU {device}")
                     self.sampler_processes.append(proc)
@@ -422,7 +429,8 @@ class TaskManager:
         for i in range(self.config.num_evaluators):
             proc = ctx.Process(
                 target=evaluator_process_entry,
-                args=(self.config_path, self.template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path),
+                # Pass log filename so child processes write to same file
+                args=(self.config_path, self.template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path, self.log_filename),
                 name=f"Evaluator-{i}"
             )
             proc.start()

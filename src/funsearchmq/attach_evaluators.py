@@ -35,6 +35,7 @@ class TaskManager:
         self.config_path = config_path  # Store for spawn compatibility
         self.log_dir = log_dir  # Store for spawn compatibility
         self.sandbox_base_path = sandbox_base_path  # Store for spawn compatibility
+        self.log_filename = None  # Will store the shared log filename
         self.logger = self.initialize_logger(log_dir)
         self.evaluator_processes = []
         self.database_processes = []
@@ -50,10 +51,11 @@ class TaskManager:
         logger = logging.getLogger('main_logger')
         logger.setLevel(logging.INFO)
         os.makedirs(log_dir, exist_ok=True)
-        hostname = socket.gethostname()
-        log_file_name = f'eval_{hostname}.log'
-        log_file_path = os.path.join(log_dir, log_file_name)
-        handler = FileHandler(log_file_path, mode='w')
+        pid = os.getpid()
+        # Create PID-based log file that will be shared with child processes
+        self.log_filename = f'attach_evaluators_pid{pid}.log'
+        log_file_path = os.path.join(log_dir, self.log_filename)
+        handler = FileHandler(log_file_path, mode='a')  # Changed to append mode for child processes
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -115,6 +117,7 @@ class TaskManager:
                         max_evaluators=args.max_evaluators,
                         max_samplers=None,
                         check_interval=args.check_interval,
+                        log_filename=self.log_filename,
                     )
                 )
                 self.tasks.append(scaling_task)
@@ -131,7 +134,8 @@ class TaskManager:
         for i in range(self.config.num_evaluators):
             proc = ctx.Process(
                 target=evaluator_process_entry,
-                args=(self.config_path, template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path),
+                # Pass log filename so child processes write to same file
+                args=(self.config_path, template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path, self.log_filename),
                 name=f"Evaluator-{i}"
             )
             proc.start()
