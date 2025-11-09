@@ -217,9 +217,31 @@ def save_graph_to_lmdb(adjacency, output_path):
     """
     print(f"Saving graph to {output_path}")
 
+    # Estimate database size
+    # Each entry: key (node string) + value (JSON list of neighbors)
+    # Conservative estimate: avg 200 bytes per node for key+value overhead + neighbor data
+    num_nodes = len(adjacency)
+    avg_neighbors = sum(len(neighbors) for neighbors in adjacency.values()) / num_nodes if num_nodes > 0 else 0
+    # Estimate: node_str (n bytes) + JSON overhead + neighbors * (n bytes + JSON chars)
+    estimated_bytes_per_node = 100 + avg_neighbors * 20
+    estimated_total_bytes = num_nodes * estimated_bytes_per_node
+
+    # Add 50% safety margin and round up to nearest GB
+    map_size_bytes = int(estimated_total_bytes * 1.5)
+    map_size_gb = (map_size_bytes // (1024**3)) + 1
+
+    # Minimum 10GB, maximum reasonable size based on system
+    map_size_gb = max(10, map_size_gb)
+    map_size_bytes = map_size_gb * 1024 * 1024 * 1024
+
+    print(f"  Database size estimate:")
+    print(f"    Nodes: {num_nodes:,}")
+    print(f"    Avg neighbors per node: {avg_neighbors:.1f}")
+    print(f"    Estimated size: {estimated_total_bytes / (1024**3):.2f} GB")
+    print(f"    LMDB map_size (with 50% margin): {map_size_gb} GB")
+
     # Create LMDB environment
-    # Map size: 10GB should be enough for most graphs
-    env = lmdb.open(output_path, map_size=10 * 1024 * 1024 * 1024)
+    env = lmdb.open(output_path, map_size=map_size_bytes)
 
     with env.begin(write=True) as txn:
         for node, neighbors in tqdm(adjacency.items(), desc="  Writing to LMDB", unit="nodes"):

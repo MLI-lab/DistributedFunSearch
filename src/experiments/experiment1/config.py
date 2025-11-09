@@ -15,11 +15,12 @@
 
 """Configuration of a FunSearch experiment. Only data classes no methods
 
-Adjusted to include RabbitMQ setup, deduplication option and set sepecification file for experiment. 
+Adjusted to include RabbitMQ setup, deduplication option and set sepecification file for experiment.
 """
 import dataclasses
 from typing import List
 import os
+from datetime import datetime
 
 
 
@@ -185,7 +186,7 @@ class PromptConfig:
     """
     show_eval_scores: bool = True
     display_mode: str = "relative" # "absolute" or "relative"
-    best_known_solutions: dict = dataclasses.field(default_factory=lambda: {(7, 2): 5, (8, 2): 7, (9, 2): 11, (10, 2): 16, (11, 2): 24, (12, 2): 32})  # use e.g. VT codes for single deletion or logn +loglogn + log3 for single IDS code rate (need to transform to code sizes) (from https://arxiv.org/pdf/2312.12717)
+    best_known_solutions: dict = dataclasses.field(default_factory=lambda: {(7, 2): 5, (8, 2): 7, (9, 2): 11, (10, 2): 16, (11, 2): 24, (12, 2): 37})  # use e.g. VT codes for single deletion or logn +loglogn + log3 for single IDS code rate (need to transform to code sizes) (from https://arxiv.org/pdf/2312.12717)
     absolute_label: str = "Absolute scores (format (n, s): set_size, larger is better):"
     relative_label: str = "Performance relative to baseline (format (n, s): improvement%):"
 
@@ -198,16 +199,19 @@ class WandbConfig:
         enabled: Enable W&B logging (default: False).
         project: W&B project name.
         entity: W&B entity (username or team name).
-        run_name: Name for this run (default: None, auto-generated).
+        run_name: Name for this run (default: None, auto-generated with timestamp).
         log_interval: How often to log metrics in seconds (default: 300 = 5 minutes).
         tags: List of tags for this run.
+        checkpoints_base_path: Base directory for checkpoints (default: "./Checkpoints").
+                               Actual checkpoint folder will be: {checkpoints_base_path}/checkpoint_{run_name}/
     """
     enabled: bool = True
     project: str = "funsearchmq"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
-    run_name: str = "exp1"  # Auto-generated if None
+    run_name: str = None  # Auto-generated with timestamp if None
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list)
+    checkpoints_base_path: str = "/mnt/graphs/Checkpoints" #"./Checkpoints" # Use "./Checkpoints" for local runs
 
 
 @dataclasses.dataclass(frozen=True)

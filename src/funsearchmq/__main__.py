@@ -226,7 +226,20 @@ class TaskManager:
                         self.logger.debug(f"Pending Task Frame: {frame}")
             await asyncio.sleep(60)
 
-    async def main_task(self, save_checkpoints_path, enable_scaling=True, checkpoint_file=None):
+    async def main_task(self, enable_scaling=True, checkpoint_file=None):
+        # Generate run name with timestamp if not provided in config
+        if self.config.wandb.run_name is None:
+            run_name = f"run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self.logger.info(f"Auto-generated run name: {run_name}")
+        else:
+            run_name = self.config.wandb.run_name
+            self.logger.info(f"Using configured run name: {run_name}")
+
+        # Construct checkpoint path: {base_path}/checkpoint_{run_name}/
+        checkpoints_base_path = self.config.wandb.checkpoints_base_path
+        save_checkpoints_path = os.path.join(checkpoints_base_path, f"checkpoint_{run_name}")
+        self.logger.info(f"Checkpoints will be saved to: {save_checkpoints_path}")
+
         try:
             connection = await process_utils.create_rabbitmq_connection(
                 self.config, timeout=300, heartbeat=300
@@ -235,7 +248,7 @@ class TaskManager:
             self.logger.error(f"Cannot connect to RabbitMQ: {e}")
             self.logger.info("Cannot connect to rabbitmq. Change config file.")
             raise
-    
+
         pid = os.getpid()
         self.logger.info(f"Main_task is running in process with PID: {pid}")
 
@@ -276,7 +289,8 @@ class TaskManager:
                     show_eval_scores=self.config.prompt.show_eval_scores, display_mode=self.config.prompt.display_mode, best_known_solutions=self.config.prompt.best_known_solutions, absolute_label=self.config.prompt.absolute_label, relative_label=self.config.prompt.relative_label, q=self.config.evaluator.q,
                     wandb_config=self.config.wandb,
                     sampler_config=self.config.sampler,
-                    evaluator_config=self.config.evaluator
+                    evaluator_config=self.config.evaluator,
+                    run_name=run_name
                 )
                 database_task = asyncio.create_task(database.consume_and_process())
             except Exception as e:
@@ -666,13 +680,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--save_checkpoints_path",
-        type=str,
-        default=os.path.join(os.getcwd(), "Checkpoints"),
-        help="Path to where the checkpoints should be written. Defaults to './Checkpoints'.",
-    )
-
-    parser.add_argument(
         "--checkpoint",
         type=str,
         default=None,
@@ -844,9 +851,8 @@ if __name__ == "__main__":
         main.task_manager = task_manager
         task = asyncio.create_task(
             task_manager.main_task(
-                save_checkpoints_path=args.save_checkpoints_path,
-                enable_scaling=enable_dynamic_scaling,                
-                checkpoint_file=args.checkpoint  
+                enable_scaling=enable_dynamic_scaling,
+                checkpoint_file=args.checkpoint
             )
         )
         await task  # Ensure the task is awaited

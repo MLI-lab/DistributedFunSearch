@@ -68,9 +68,7 @@ python3 -m pip install .
 
 cd "/DeCoSearch/src/experiments/${EXPERIMENT_NAME}"
 
-mkdir -p "/mnt/checkpoints/${EXPERIMENT_NAME}"
-
-python3 -m funsearchmq --save_checkpoints_path "/mnt/checkpoints/${EXPERIMENT_NAME}" --sandbox_base_path "/mnt/sandboxstorage/${EXPERIMENT_NAME}"
+python3 -m funsearchmq --sandbox_base_path "/mnt/sandboxstorage/${EXPERIMENT_NAME}"
 REMOTE
 
 # ===== Worker timing (tune as needed) =====
