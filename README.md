@@ -102,11 +102,11 @@ def priority(item, context):
 ```
 
 **Explanation:**
-- **Docstring**: Becomes the problem context in the LLM prompt
-- **Helper functions**: Defines your problem (graph construction, constraints, etc.)
-- **`evaluate(params)`**: Entry point called by evaluator
-- **`solve(...)`**: Implements evaluation logic using the evolved function
-- **`priority(item, context)`**: The function that the LLM evolves
+- Docstring: Becomes the problem context in the LLM prompt
+- Helper functions: Defines your problem (graph construction, constraints, etc.)
+- `evaluate(params)`: Entry point called by evaluator
+- `solve(...)`: Implements evaluation logic using the evolved function
+- `priority(item, context)`: The function that the LLM evolves
 
 The function names `evaluate` and `priority` are hardcoded in `__main__.py` (lines 284, 661). If you want to use different names, you also need to update them there.
 
