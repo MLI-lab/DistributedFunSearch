@@ -101,18 +101,20 @@ def priority(item, context):
     return 0.0  # Baseline implementation
 ```
 
-**Key points:**
+**Explanation:**
 - **Docstring**: Becomes the problem context in the LLM prompt
-- **Helper functions**: Define your problem (graph construction, constraints, etc.)
-- **`evaluate(params)`**: Entry point called by evaluator, **function name must be `evaluate`**
+- **Helper functions**: Defines your problem (graph construction, constraints, etc.)
+- **`evaluate(params)`**: Entry point called by evaluator
 - **`solve(...)`**: Implements evaluation logic using the evolved function
-- **`priority(item, context)`**: **The function that the LLM evolves**, **function name must be `priority`**
+- **`priority(item, context)`**: The function that the LLM evolves
 
 The function names `evaluate` and `priority` are hardcoded in `__main__.py` (lines 284, 661). If you want to use different names, you also need to update them there.
 
 The evaluator executes this entire script, calling `evaluate()` with evaluation inputs.
 
-### 2. Configure evaluation inputs
+### 2. Configure evaluation inputs and outputs
+
+**Evaluation inputs:**
 
 In `config.py`, specify what inputs to test your evolved function on:
 
