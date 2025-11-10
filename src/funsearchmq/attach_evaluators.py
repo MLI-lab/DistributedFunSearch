@@ -116,7 +116,7 @@ class TaskManager:
                         sandbox_base_path=self.sandbox_base_path,
                         max_evaluators=args.max_evaluators,
                         max_samplers=None,
-                        check_interval=args.check_interval,
+                        check_interval=self.config.scaling.check_interval if hasattr(self.config, 'scaling') and self.config.scaling else args.check_interval,
                         log_filename=self.log_filename,
                     )
                 )

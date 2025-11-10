@@ -63,12 +63,26 @@ python -m funsearchmq --checkpoint path/to/checkpoint.pkl
 Our implementation can be adapted to different applications with minimal changes:
 
 **Input format and evaluation logic:**
-Modify the input format of the function to be evolved in `src/experiments/experiment1/config.py` (via the `EvaluatorConfig` class). Optionally set a performance threshold using the `--target_solutions` argument to terminate the search once a function surpasses the current best-known solution.
+Modify the input format of the function to be evolved in `src/experiments/experiment1/config.py` (via the `EvaluatorConfig` class). Set termination conditions using `TerminationConfig`:
+
+```python
+termination=TerminationConfig(
+    prompt_limit=1_000_000,
+    target_solutions={(7, 2): 5}  # Stop when target scores reached, or {} to disable
+)
+```
 
 To adapt how functions are evaluated for your specific application, modify the logic in the `src/funsearchmq/specifications/` folder.
 
 **LLM:**
 Modify the `checkpoint` parameter in the sampler script (`src/funsearchmq/sampler.py`) to use a different open-source LLM that can be loaded from Hugging Face via `transformers.AutoModelForCausalLM`. For OpenAI models, set `sampler.gpt=True` in `config.py` and export your Azure OpenAI credentials.
+
+**Configuration:**
+All experiment parameters are configured in `config.py`. Key config blocks include:
+- `PathsConfig`: Log and sandbox directories
+- `ScalingConfig`: Dynamic scaling behavior (enable/disable, thresholds, resource limits)
+- `TerminationConfig`: When to stop the experiment
+- `WandbConfig`: Weights & Biases logging
 
 See [Configuration Guide](docs/CONFIGURATION.md) for all configuration options.
 
