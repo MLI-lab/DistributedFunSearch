@@ -18,10 +18,10 @@ FunSearchMQ is designed for large-scale distributed execution:
 
 In each iteration:
 
-- A few-shot prompt is constructed by sampling from the program database, which stores all previously generated functions and their metadata.
-- The LLM generates a new function variant.
-- The function is evaluated on user-defined test cases.
-- If the function is executable and logically distinct from previously stored ones, it is added to the program database along with its evaluation results.
+- A few-shot prompt is constructed by sampling from the program database, which stores all previously generated functions and their metadata
+- The LLM generates a new function variant
+- The function is evaluated on user-defined test cases
+- If the function is executable and logically distinct from previously stored ones, it is added to the program database along with its evaluation results
 
 Our implementation includes an example application for discovering large deletion-correcting codes. For details on this specific use case, see [our paper](https://arxiv.org/abs/2504.00613).
 
