@@ -134,7 +134,7 @@ evaluator=EvaluatorConfig(
 )
 ```
 
-The default configuration generates `(n, s, q)` tuples for the deletion-correcting codes problem. If your problem needs a different input structure, edit `__main__.py` line 897:
+The default configuration generates `(n, s, q)` tuples for the error-correcting codes problem. If your problem needs a different input structure, edit `__main__.py` line 897:
 
 ```python
 # Default (deletion codes):
