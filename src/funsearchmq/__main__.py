@@ -231,13 +231,37 @@ class TaskManager:
             await asyncio.sleep(60)
 
     async def main_task(self, enable_scaling=True, checkpoint_file=None):
-        # Generate run name with timestamp if not provided in config
-        if self.config.wandb.run_name is None:
-            run_name = f"run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            self.logger.info(f"Auto-generated run name: {run_name}")
-        else:
-            run_name = self.config.wandb.run_name
-            self.logger.info(f"Using configured run name: {run_name}")
+        # Determine run name: prefer checkpoint > config > auto-generate
+        run_name = None
+
+        # If resuming from checkpoint, try to extract/load the original run name
+        if checkpoint_file:
+            # Option 1: Try to extract from checkpoint file path
+            # e.g., /path/checkpoint_run_20251109_120115/checkpoint_*.pkl -> run_20251109_120115
+            import re
+            path_match = re.search(r'/checkpoint_(run_\d{8}_\d{6})/', checkpoint_file)
+            if path_match:
+                run_name = path_match.group(1)
+                self.logger.info(f"Extracted run name from checkpoint path: {run_name}")
+            else:
+                # Option 2: Load run name from checkpoint file
+                try:
+                    with open(checkpoint_file, 'rb') as f:
+                        checkpoint_data = pickle.load(f)
+                        run_name = checkpoint_data.get('wandb_run_name', None)
+                        if run_name:
+                            self.logger.info(f"Loaded run name from checkpoint: {run_name}")
+                except Exception as e:
+                    self.logger.warning(f"Could not extract run name from checkpoint: {e}")
+
+        # Fall back to config or auto-generate if not found in checkpoint
+        if not run_name:
+            if self.config.wandb.run_name is None:
+                run_name = f"run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                self.logger.info(f"Auto-generated run name: {run_name}")
+            else:
+                run_name = self.config.wandb.run_name
+                self.logger.info(f"Using configured run name: {run_name}")
 
         # Construct checkpoint path: {base_path}/checkpoint_{run_name}/
         checkpoints_base_path = self.config.wandb.checkpoints_base_path
@@ -289,7 +313,7 @@ class TaskManager:
                     sampler_queue, evaluator_queue, self.config.programs_database,
                     self.template_pdb, function_to_evolve, checkpoint_file, save_checkpoints_path,
                     mode=self.config.evaluator.mode, eval_code=self.config.evaluator.eval_code, include_nx=self.config.evaluator.include_nx,
-                    start_n=self.config.evaluator.start_n, end_n=self.config.evaluator.end_n, s_values=self.config.evaluator.s_values, no_deduplication=self.config.programs_database.no_deduplication, prompt_limit=args.prompt_limit, optimal_solution_programs=args.optimal_solution_programs, target_signatures=self.target_signatures,
+                    start_n=self.config.evaluator.start_n, end_n=self.config.evaluator.end_n, s_values=self.config.evaluator.s_values, no_deduplication=self.config.programs_database.no_deduplication, prompt_limit=self.config.termination.prompt_limit if hasattr(self.config, 'termination') and self.config.termination else 400_000_000, optimal_solution_programs=self.config.termination.optimal_solution_programs if hasattr(self.config, 'termination') and self.config.termination else 200_000, target_signatures=self.target_signatures,
                     show_eval_scores=self.config.prompt.show_eval_scores, display_mode=self.config.prompt.display_mode, best_known_solutions=self.config.prompt.best_known_solutions, absolute_label=self.config.prompt.absolute_label, relative_label=self.config.prompt.relative_label, q=self.config.evaluator.q,
                     wandb_config=self.config.wandb,
                     sampler_config=self.config.sampler,
@@ -349,9 +373,9 @@ class TaskManager:
                             inputs=self.inputs,
                             target_signatures=self.target_signatures,
                             sandbox_base_path=self.sandbox_base_path,
-                            max_evaluators=args.max_evaluators,
-                            max_samplers=args.max_samplers,
-                            check_interval=args.check_interval,
+                            max_evaluators=self.config.scaling.max_evaluators if hasattr(self.config, 'scaling') and self.config.scaling else 1000,
+                            max_samplers=self.config.scaling.max_samplers if hasattr(self.config, 'scaling') and self.config.scaling else 1000,
+                            check_interval=self.config.scaling.check_interval if hasattr(self.config, 'scaling') and self.config.scaling else 120,
                             log_filename=self.log_filename,
                         )
                     )
@@ -684,7 +708,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--backup",
         action="store_true",
-        help="Enable backup of Python files before running the task.",
+        help="Enable backup of Python files before running the task. Note: Also configurable via config.paths.backup_enabled.",
     )
 
     parser.add_argument(
@@ -705,14 +729,14 @@ if __name__ == "__main__":
         "--log-dir",
         type=str,
         default=os.path.join(os.getcwd(), "logs"),
-        help="Directory where logs will be stored. Defaults to './logs'.",
+        help="Directory where logs will be stored. Defaults to './logs'. Note: CLI arg takes precedence over config.paths.log_dir.",
     )
 
     parser.add_argument(
         "--sandbox_base_path",
         type=str,
         default=os.path.join(os.getcwd(), "sandbox"),
-        help="Path to the sandbox directory. Defaults to './sandbox'.",
+        help="Path to the sandbox directory. Defaults to './sandbox'. Note: CLI arg takes precedence over config.paths.sandbox_base_path.",
     )
 
 ########################################## Resources related arguments #############################################
@@ -720,28 +744,31 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-dynamic-scaling",
         action="store_true",
-        help="Disable dynamic scaling of evaluators and samplers (enabled by default).",
+        help="Disable dynamic scaling of evaluators and samplers (enabled by default). Note: Also configurable via config.scaling.enabled.",
     )
 
     parser.add_argument(
         "--check_interval",
         type=int,
         default=120,
-        help="Time interval (in seconds) between consecutive scaling checks for evaluators and samplers. Defaults to 120s (2 minutes)."
+        help="Time interval (in seconds) between consecutive scaling checks for evaluators and samplers. "
+             "Defaults to 120s (2 minutes). Note: config.scaling.check_interval takes precedence over this CLI argument."
     )
 
     parser.add_argument(
         "--max_evaluators",
         type=int,
         default=1000,
-        help="Maximum evaluators the system can scale up to. Adjust based on resource availability. Default no hard limit and based on dynamic resource checks."
+        help="Maximum evaluators the system can scale up to. Adjust based on resource availability. "
+             "Note: config.scaling.max_evaluators takes precedence if set to non-default value."
     )
 
     parser.add_argument(
         "--max_samplers",
         type=int,
-        default=1000, 
-        help="Maximum samplers the system can scale up to. Adjust based on resource availability. Default no hard limit and based on dynamic resource checks."
+        default=1000,
+        help="Maximum samplers the system can scale up to. Adjust based on resource availability. "
+             "Note: config.scaling.max_samplers takes precedence if set to non-default value."
     )
 
 ########################## Termination related arguments ###########################################
@@ -749,41 +776,65 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompt_limit",
         type=int,
-        default=400_000_000, 
-        help="Maximum number of prompts that can be generated before stopping further publishing. The system will continue processing remaining queue messages. Adjust based on computational constraints."
+        default=400_000_000,
+        help="Maximum number of prompts that can be generated before stopping further publishing. "
+             "The system will continue processing remaining queue messages. "
+             "Note: config.termination.prompt_limit takes precedence if set to non-default value."
     )
 
     parser.add_argument(
         "--optimal_solution_programs",
         type=int,
         default=200_000,
-        help="Number of additional programs to generate after the first optimal solution is found. Once this limit is reached, further publishing stops, but remaining queue messages continue processing."
+        help="Number of additional programs to generate after the first optimal solution is found. "
+             "Once this limit is reached, further publishing stops, but remaining queue messages continue processing. "
+             "Note: config.termination.optimal_solution_programs takes precedence if set to non-default value."
     )
 
     parser.add_argument(
         "--target_solutions",
         type=str,
-        default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',  # if different eval inputs used effectively will never terminate early
-        help="JSON string specifying target solutions for (n, s_value) to terminate search early. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'"
+        default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',
+        help="JSON string specifying target solutions for (n, s_value) to terminate search early when reached. "
+             "Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'. "
+             "Note: Config value (config.termination.target_solutions) takes precedence. "
+             "Set to empty dict {{}} in config to disable early termination based on optimal solutions."
     )
 
     args = parser.parse_args()
 
-    # Convert JSON string to dictionary
+    # Load config first to get defaults
+    config = load_config(args.config_path)
+
+    # Merge CLI args with config values (CLI takes precedence)
+    # Paths: CLI overrides config
+    log_dir = args.log_dir if args.log_dir != os.path.join(os.getcwd(), "logs") else config.paths.log_dir
+    sandbox_base_path = args.sandbox_base_path if args.sandbox_base_path != os.path.join(os.getcwd(), "sandbox") else config.paths.sandbox_base_path
+    backup_enabled = args.backup or config.paths.backup_enabled
+
+    # Scaling: CLI overrides config
+    enable_dynamic_scaling = not args.no_dynamic_scaling if args.no_dynamic_scaling else config.scaling.enabled
+    max_evaluators = args.max_evaluators if args.max_evaluators != 1000 else config.scaling.max_evaluators
+    max_samplers = args.max_samplers if args.max_samplers != 1000 else config.scaling.max_samplers
+
+    # Termination: CLI overrides config
+    prompt_limit = args.prompt_limit if args.prompt_limit != 400_000_000 else config.termination.prompt_limit
+    optimal_solution_programs = args.optimal_solution_programs if args.optimal_solution_programs != 200_000 else config.termination.optimal_solution_programs
+
+    # Target solutions: CLI overrides config
     try:
-        if args.target_solutions:
+        if args.target_solutions != '{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}':
+            # CLI arg was provided and is different from default
             target_signatures = json.loads(args.target_solutions)
             target_signatures = {eval(k): v for k, v in target_signatures.items()}  # Convert string keys to tuples
         else:
-            target_signatures = args.target_solutions
+            # Use config value
+            target_signatures = config.termination.target_solutions if config.termination.target_solutions else None
 
     except json.JSONDecodeError:
         raise ValueError("Invalid JSON format for --target_solutions. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'.")
 
-    # Invert the logic: dynamic scaling is True by default unless explicitly disabled
-    enable_dynamic_scaling = not args.no_dynamic_scaling
-
-    if args.backup:
+    if backup_enabled:
         # Define the source directory (current working directory)
         src_dir = os.getcwd()
 
@@ -805,9 +856,9 @@ if __name__ == "__main__":
     time_memory_logger = logging.getLogger('time_memory_logger')
     time_memory_logger.setLevel(logging.INFO)
 
-    os.makedirs(args.log_dir, exist_ok=True) 
+    os.makedirs(log_dir, exist_ok=True)
 
-    time_memory_log_file = os.path.join(args.log_dir, 'time_memory.log')  
+    time_memory_log_file = os.path.join(log_dir, 'time_memory.log')  
     file_handler = logging.FileHandler(time_memory_log_file, mode='w')  
     file_handler.setLevel(logging.INFO)
 
@@ -819,8 +870,7 @@ if __name__ == "__main__":
     time_memory_logger.addHandler(file_handler)
 
     async def main():
-        config = load_config(args.config_path)
-
+        # Config already loaded above, use the global one
         # Load the specification from the provided path or default
         spec_path = config.evaluator.spec_path
         try:
@@ -851,10 +901,10 @@ if __name__ == "__main__":
             specification=specification,
             inputs=inputs,
             config=config,
-            log_dir=args.log_dir,
+            log_dir=log_dir,
             target_signatures=target_signatures,
             config_path=args.config_path,
-            sandbox_base_path=args.sandbox_base_path
+            sandbox_base_path=sandbox_base_path
         )
         main.task_manager = task_manager
         task = asyncio.create_task(

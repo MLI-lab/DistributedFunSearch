@@ -351,6 +351,10 @@ class ProgramsDatabase:
         self.lineage_log = [] if self.save_lineage else None  # Only initialize if enabled
         self._prompt_to_parents = {} if self.save_lineage else None
 
+        # Lazy initialization of locks (will be created on first access)
+        self._island_locks = None
+        self._locks_initialized = False
+
         for _ in range(config.num_islands):
             island = {}
             island['clusters'] = {}
@@ -358,14 +362,15 @@ class ProgramsDatabase:
             island['num_programs'] = 0
             self._islands.append(island)
 
-        # Load checkpoint if provided
-        self.load_checkpoint_file(checkpoint_file)
-
         # Store W&B config for later initialization (defer to avoid blocking)
+        # IMPORTANT: Initialize these BEFORE loading checkpoint so checkpoint values aren't overwritten
         self.wandb_enabled = False
         self.wandb_config = wandb_config
         self.wandb_run_name = run_name  # Use the provided run_name (may be auto-generated)
         self.wandb_run_id = None  # Will be set after wandb.init or loaded from checkpoint
+
+        # Load checkpoint if provided (this may overwrite wandb_run_id)
+        self.load_checkpoint_file(checkpoint_file)
         # Build comprehensive config for W&B
         self.wandb_init_config = {
             # ProgramsDatabase config
@@ -450,10 +455,16 @@ class ProgramsDatabase:
         self.prompts_since_optimal = checkpoint_data.get("prompts_since_optimal", 0)  # Restore flag
         logger.info(f"Prompts_since_optimal are {self.prompts_since_optimal}")
 
-        # Load W&B run ID if it exists in checkpoint
+        # Load W&B run ID and name if they exist in checkpoint
         self.wandb_run_id = checkpoint_data.get("wandb_run_id", None)
         if self.wandb_run_id:
             logger.info(f"Will resume W&B run: {self.wandb_run_id}")
+
+        # Load W&B run name from checkpoint (for checkpoint directory continuity)
+        checkpoint_run_name = checkpoint_data.get("wandb_run_name", None)
+        if checkpoint_run_name:
+            self.wandb_run_name = checkpoint_run_name
+            logger.info(f"Restored run name from checkpoint: {checkpoint_run_name}")
 
         for i, score in enumerate(checkpoint_data["best_score_per_island"]):
             self._best_score_per_island[i] = score
@@ -518,6 +529,7 @@ class ProgramsDatabase:
             "found_optimal_solution": self.found_optimal_solution,
             "prompts_since_optimal":self.prompts_since_optimal,
             "wandb_run_id": self.wandb_run_id,  # Save W&B run ID for resumption
+            "wandb_run_name": self.wandb_run_name,  # Save run name for checkpoint directory continuity
             "islands_state": []
         }
 
@@ -1052,33 +1064,90 @@ class ProgramsDatabase:
 
             # Check if we're resuming from a checkpoint with an existing run ID
             if self.wandb_run_id:
-                # Resume existing run
+                # Try to resume existing run with strict mode
                 expected_run_id = self.wandb_run_id
-                logger.info(f"Resuming W&B run with ID: {expected_run_id}")
-                await loop.run_in_executor(
-                    None,
-                    lambda: wandb.init(
-                        project=self.wandb_config.project,
-                        entity=self.wandb_config.entity,
-                        id=expected_run_id,
-                        resume="allow",  # Resume if exists, otherwise create new (changed from "must")
-                        tags=self.wandb_config.tags,
-                        config=self.wandb_init_config,
-                        settings=wandb.Settings(
-                            console='off',  # Don't capture console output
-                            _disable_stats=False,
-                            _disable_meta=False,
+                logger.info(f"Attempting to resume W&B run with ID: {expected_run_id}")
+                logger.info(f"W&B project: {self.wandb_config.project}, entity: {self.wandb_config.entity}")
+
+                resume_failed = False
+                resume_error = None
+
+                try:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: wandb.init(
+                            project=self.wandb_config.project,
+                            entity=self.wandb_config.entity,
+                            id=expected_run_id,
+                            resume="must",  # Fail if run doesn't exist or can't be resumed
+                            tags=self.wandb_config.tags,
+                            config=self.wandb_init_config,
+                            settings=wandb.Settings(
+                                console='off',  # Don't capture console output
+                                _disable_stats=False,
+                                _disable_meta=False,
+                            )
                         )
                     )
-                )
-                # Verify that we actually resumed the expected run
-                if wandb.run and wandb.run.id != expected_run_id:
-                    logger.warning(f"W&B created new run {wandb.run.id} instead of resuming {expected_run_id}. "
-                                   f"This may happen if the original run was already finished or doesn't exist.")
-                elif wandb.run and wandb.run.id == expected_run_id:
-                    logger.info(f"Successfully resumed W&B run: {expected_run_id}")
+
+                    # Verify that we actually resumed the expected run
+                    if wandb.run and wandb.run.id == expected_run_id:
+                        logger.info(f"Successfully resumed W&B run: {expected_run_id}")
+                        logger.info(f"W&B run URL: {wandb.run.url}")
+                    else:
+                        # This shouldn't happen with resume="must", but check anyway
+                        logger.warning(f"Unexpected: W&B run ID mismatch. Expected {expected_run_id}, got {wandb.run.id if wandb.run else 'None'}")
+
+                except Exception as e:
+                    resume_failed = True
+                    resume_error = e
+                    logger.error(f"Failed to resume W&B run {expected_run_id}: {type(e).__name__}: {e}")
+
+                    # Provide specific guidance based on error type
+                    error_msg = str(e).lower()
+                    if "not found" in error_msg or "does not exist" in error_msg:
+                        logger.error(f"Reason: Run {expected_run_id} does not exist in project '{self.wandb_config.project}'")
+                        logger.error("Possible causes: Run was deleted, wrong project/entity, or run ID is incorrect")
+                    elif "finished" in error_msg or "completed" in error_msg:
+                        logger.error(f"Reason: Run {expected_run_id} is already marked as finished/completed")
+                        logger.error("Suggestion: Check W&B dashboard to verify run status")
+                    elif "permission" in error_msg or "access" in error_msg:
+                        logger.error(f"Reason: No permission to access run {expected_run_id}")
+                        logger.error("Suggestion: Verify entity/project permissions and API key")
+                    else:
+                        logger.error(f"Reason: Unknown error - {e}")
+
+                    # Close any partial W&B connection
+                    if wandb.run:
+                        wandb.finish()
+
+                    logger.info("Creating a new W&B run instead...")
+
+                # If resume failed, create a new run
+                if resume_failed:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: wandb.init(
+                            project=self.wandb_config.project,
+                            entity=self.wandb_config.entity,
+                            name=self.wandb_run_name,
+                            tags=self.wandb_config.tags,
+                            config=self.wandb_init_config,
+                            settings=wandb.Settings(
+                                console='off',
+                                _disable_stats=False,
+                                _disable_meta=False,
+                            )
+                        )
+                    )
+                    if wandb.run:
+                        logger.info(f"Created new W&B run: {wandb.run.id}")
+                        logger.info(f"New run URL: {wandb.run.url}")
+                        logger.warning(f"Note: This is a NEW run, not a resumption of {expected_run_id}")
+
             else:
-                # Start new run
+                # No checkpoint run ID - start fresh run
+                logger.info("No previous W&B run ID found. Creating a new run...")
                 await loop.run_in_executor(
                     None,
                     lambda: wandb.init(
@@ -1094,6 +1163,9 @@ class ProgramsDatabase:
                         )
                     )
                 )
+                if wandb.run:
+                    logger.info(f"Created new W&B run: {wandb.run.id}")
+                    logger.info(f"New run URL: {wandb.run.url}")
 
             self.wandb_enabled = True
             self.wandb_log_interval = self.wandb_config.log_interval
@@ -1267,7 +1339,16 @@ class ProgramsDatabase:
             logger.error(f"Database: Error processing message: {e}")
             raise
 
+    def _ensure_locks_initialized(self):
+        """Lazily initialize island locks when first needed."""
+        if not self._locks_initialized:
+            self._island_locks = [asyncio.Lock() for _ in range(len(self._islands))]
+            self._locks_initialized = True
+
     async def register_program(self, program: code_manipulation.Function, island_id: int, scores_per_test: ScoresPerTest, expected_version: int = None, hash_value: int = None, parent_ids: list[int] = None):
+        # Ensure locks are initialized before use
+        self._ensure_locks_initialized()
+
         # Check if reset period is defined
         if self._config.reset_period is not None:
             # Only check the timing if reset_period is not None
@@ -1295,22 +1376,24 @@ class ProgramsDatabase:
             else:
                 logger.debug("Reset period not defined, but not all islands have enough programs. Skipping reset for now.")
 
-        # Proceed with program registration logic
-        island = self._islands[island_id]
-        
-        if not self.no_deduplication and self.function_body_exists(island['clusters'], hash_value):
-            self.duplicates_discarded += 1 
-            logger.debug(f"Program with identical body already exists in island. Skipping registration.")
-            return
+        # Acquire lock for this island to prevent race conditions during deduplication check and registration
+        async with self._island_locks[island_id]:
+            # Proceed with program registration logic
+            island = self._islands[island_id]
 
-        if expected_version is not None:
-            current_version = island['version']
-            if current_version != expected_version:
-                logger.warning(f"Island {island_id} version mismatch. Expected: {expected_version}, Actual: {current_version}")
-                self.version_mismatch_discarded += 1 
+            if not self.no_deduplication and self.function_body_exists(island['clusters'], hash_value):
+                self.duplicates_discarded += 1
+                logger.debug(f"Program with identical body already exists in island. Skipping registration.")
                 return
 
-        self._register_program_in_island(program, island_id, scores_per_test, hash_value, parent_ids)
+            if expected_version is not None:
+                current_version = island['version']
+                if current_version != expected_version:
+                    logger.warning(f"Island {island_id} version mismatch. Expected: {expected_version}, Actual: {current_version}")
+                    self.version_mismatch_discarded += 1
+                    return
+
+            self._register_program_in_island(program, island_id, scores_per_test, hash_value, parent_ids)
 
 
     def _register_program_in_island(self, program: code_manipulation.Function, island_id: int, scores_per_test: ScoresPerTest, hash_value: int = None, parent_ids: list[int] = None):
@@ -1435,6 +1518,9 @@ class ProgramsDatabase:
         evolutionary link showing the program was "migrated" from another island rather than
         evolved from a prompt.
         """
+        # Ensure locks are initialized before resetting
+        self._ensure_locks_initialized()
+
         try:
             await self.sampler_queue.purge()
             await self.evaluator_queue.purge()
@@ -1451,18 +1537,19 @@ class ProgramsDatabase:
                 return
 
             for island_id in reset_islands_ids:
-                island = self._islands[island_id]
-                island['clusters'].clear()
-                island['version'] += 1
-                island['num_programs'] = 0
+                async with self._island_locks[island_id]:
+                    island = self._islands[island_id]
+                    island['clusters'].clear()
+                    island['version'] += 1
+                    island['num_programs'] = 0
 
-                self._best_score_per_island[island_id] = -float('inf')
-                founder_island_id = np.random.choice(keep_islands_ids)
-                founder = self._best_program_per_island[founder_island_id]
-                founder_scores = self._best_scores_per_test_per_island[founder_island_id]
-                # Founder inherits from the original program
-                founder_parent_ids = [founder.program_id] if founder.program_id is not None else []
-                self._register_program_in_island(founder, island_id, founder_scores, None, founder_parent_ids)
+                    self._best_score_per_island[island_id] = -float('inf')
+                    founder_island_id = np.random.choice(keep_islands_ids)
+                    founder = self._best_program_per_island[founder_island_id]
+                    founder_scores = self._best_scores_per_test_per_island[founder_island_id]
+                    # Founder inherits from the original program
+                    founder_parent_ids = [founder.program_id] if founder.program_id is not None else []
+                    self._register_program_in_island(founder, island_id, founder_scores, None, founder_parent_ids)
                 await self.get_prompt()
         except Exception as e:
             logger.error(f"Error during island reset: {e}")

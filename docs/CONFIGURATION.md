@@ -1,50 +1,122 @@
 # Configuration Guide
 
 FunSearchMQ is configured through:
-1. **Command-line arguments** - Runtime options (paths, scaling, termination)
-2. **Config file** - Experiment parameters (`config.py`)
+1. **Config file** (`config.py`) - **Primary**: All experiment parameters
+2. **Command-line arguments** - **Secondary**: Override config for specific runs
 
-## Command-Line Arguments
+**Recommended approach**: Set all parameters in `config.py` and use CLI arguments only for run-specific overrides (e.g., checkpoint path, log directory for multi-node setups).
 
-### General Arguments
+---
+
+## Quick Start
+
+**Minimal command** (all settings in config):
+```bash
+python -m funsearchmq
+```
+
+**With checkpoint** (most common):
+```bash
+python -m funsearchmq --checkpoint ./Checkpoints/checkpoint_latest.pkl
+```
+
+**Override config** (per-run adjustments):
+```bash
+python -m funsearchmq \
+  --log-dir /mnt/node2/logs \           # Override log location for this node
+  --max_evaluators 50                    # Override scaling limit
+```
+
+---
+
+## Configuration File (Primary)
+
+Experiments are configured via `config.py` in the experiment directory (e.g., `src/experiments/experiment1/config.py`).
+
+### Example Configuration
+
+```python
+import dataclasses
+from config import *
+
+config = Config(
+    paths=PathsConfig(
+        log_dir="./logs",
+        sandbox_base_path="./sandbox",
+        backup_enabled=False
+    ),
+    scaling=ScalingConfig(
+        enabled=True,
+        check_interval=120,
+        max_evaluators=50,
+        max_samplers=10,
+        evaluator_scale_up_threshold=10,
+        sampler_scale_up_threshold=50,
+        min_gpu_memory_gib=35,
+    ),
+    termination=TerminationConfig(
+        prompt_limit=1_000_000,
+        optimal_solution_programs=50_000,
+        target_solutions={(7, 2): 5, (8, 2): 7}  # Set to {} to disable
+    ),
+    wandb=WandbConfig(
+        enabled=True,
+        project="my-experiment",
+        entity="my-team"
+    ),
+    # ... other config blocks
+)
+```
+
+---
+
+## Command-Line Arguments (Overrides)
+
+### Essential Arguments
 
 ```bash
 python -m funsearchmq \
   --config-path ./config.py \           # Path to config file (default: ./config.py)
-  --checkpoint ./checkpoint.pkl \       # Resume from checkpoint (restores run and continues W&B logging)
-  --sandbox_base_path ./sandbox \       # Sandbox directory (default: ./sandbox)
-  --log-dir ./logs                      # Log directory (default: ./logs)
+  --checkpoint ./checkpoint.pkl         # Resume from checkpoint (optional)
 ```
 
-### Resource Management
+### Path Overrides
 
-Control dynamic scaling behavior:
+Override `config.paths.*` values for specific runs:
 
 ```bash
 python -m funsearchmq \
-  --check_interval 120 \                # Scaling check interval in seconds (default: 120)
-  --max_evaluators 1000 \               # Max evaluators for scaling (default: 1000)
-  --max_samplers 1000 \                 # Max samplers for scaling (default: 1000)
-  --no-dynamic-scaling                  # Disable automatic scaling (enabled by default)
+  --log-dir /mnt/node2/logs \           # Override config.paths.log_dir
+  --sandbox_base_path /tmp/sandbox \    # Override config.paths.sandbox_base_path
+  --backup                              # Enable backup (overrides config.paths.backup_enabled)
+```
+
+### Scaling Overrides
+
+Override `config.scaling.*` values:
+
+```bash
+python -m funsearchmq \
+  --no-dynamic-scaling \                # Disable scaling (overrides config.scaling.enabled)
+  --max_evaluators 100 \                # Override config.scaling.max_evaluators
+  --max_samplers 20 \                   # Override config.scaling.max_samplers
+  --check_interval 60                   # Override config.scaling.check_interval
 ```
 
 See [Scaling Guide](SCALING.md) for details on scaling behavior.
 
-### Termination Conditions
+### Termination Overrides
 
-Stop experiments automatically:
+Override `config.termination.*` values:
 
 ```bash
 python -m funsearchmq \
-  --prompt_limit 400000000 \            # Max prompts before stopping (default: 400,000,000)
-  --optimal_solution_programs 200000 \  # Programs to generate after finding optimal (default: 200,000)
-  --target_solutions '{"(7,2)": 5, "(8,2)": 7}'  # JSON dict of target solutions
+  --prompt_limit 500000 \               # Override config.termination.prompt_limit
+  --optimal_solution_programs 10000 \   # Override config.termination.optimal_solution_programs
+  --target_solutions '{"(7,2)": 5}'     # Override config.termination.target_solutions
 ```
 
-**Example**: Stop when you find a code with independent set size ≥ 5 for (n=7, s=2):
-```bash
-python -m funsearchmq --target_solutions '{"(7,2)": 5}'
-```
+**Note**: To disable early termination based on target solutions, set `target_solutions={}` in config.
 
 ### Azure OpenAI
 
@@ -53,14 +125,106 @@ For API-based LLMs instead of local models:
 ```bash
 export AZURE_OPENAI_API_KEY=<your-key>
 export AZURE_OPENAI_API_VERSION=<your-version>
-python -m funsearchmq  # Ensure config.py has sampler.gpt=True
+python -m funsearchmq  # Ensure config.sampler.gpt=True
 ```
 
-## Configuration File 
+---
 
-Experiments are configured via `config.py` in the experiment directory (e.g., `src/experiments/experiment1/config.py`).
+## Configuration Blocks Reference
 
 ### Configuration Blocks
+
+<details>
+<summary><b>PathsConfig</b> - File system paths ⭐ NEW</summary>
+
+File system paths for the experiment.
+
+**Attributes:**
+- `log_dir` (str): Directory for logs (default: `"./logs"`)
+  - Can be overridden by `--log-dir` CLI argument
+- `sandbox_base_path` (str): Directory for sandboxed code execution (default: `"./sandbox"`)
+  - Can be overridden by `--sandbox_base_path` CLI argument
+- `backup_enabled` (bool): Enable backup of Python files before running (default: `False`)
+  - Can be overridden by `--backup` CLI flag
+
+**Example:**
+```python
+paths=PathsConfig(
+    log_dir="/mnt/node1/logs",
+    sandbox_base_path="/tmp/sandbox",
+    backup_enabled=True
+)
+```
+
+</details>
+
+<details>
+<summary><b>ScalingConfig</b> - Dynamic scaling configuration ⭐ UPDATED</summary>
+
+Configuration for dynamic scaling of samplers and evaluators.
+
+**Attributes:**
+- `enabled` (bool): Enable dynamic scaling (default: `True`)
+  - Can be disabled with `--no-dynamic-scaling` CLI flag
+- `check_interval` (int): Time interval in seconds between consecutive scaling checks (default: `120`)
+  - Lower values = more responsive scaling but higher overhead
+- `max_samplers` (int): Maximum number of samplers (default: `1000`)
+- `max_evaluators` (int): Maximum number of evaluators (default: `1000`)
+- `sampler_scale_up_threshold` (int): Messages in sampler_queue to trigger scale-up (default: `50`)
+- `evaluator_scale_up_threshold` (int): Messages in evaluator_queue to trigger scale-up (default: `10`)
+- `min_gpu_memory_gib` (int): Minimum free GPU memory in GiB to start sampler (default: `20`)
+  - Adjust based on LLM size: StarCoder2-15B needs ~30 GiB
+- `max_gpu_utilization` (int): Maximum GPU utilization % to allow starting sampler (default: `50`)
+- `min_system_memory_gib` (int): Minimum free system RAM in GiB (default: `30`)
+- `cpu_usage_threshold` (int): Maximum average CPU usage % to allow evaluator scale-up (default: `99`)
+- `normalized_load_threshold` (float): Maximum normalized system load (load/cores) (default: `0.99`)
+
+**Example:**
+```python
+scaling=ScalingConfig(
+    enabled=True,
+    check_interval=60,
+    max_samplers=10,
+    max_evaluators=50,
+    min_gpu_memory_gib=35,
+    evaluator_scale_up_threshold=20
+)
+```
+
+See [Scaling Guide](SCALING.md) for detailed explanation.
+
+</details>
+
+<details>
+<summary><b>TerminationConfig</b> - Experiment termination conditions ⭐ NEW</summary>
+
+Conditions for experiment termination.
+
+**Attributes:**
+- `prompt_limit` (int): Maximum number of prompts before stopping publishing (default: `400_000_000`)
+  - System continues processing remaining queue messages
+- `optimal_solution_programs` (int): Additional programs to generate after finding optimal (default: `200_000`)
+- `target_solutions` (dict): Dict mapping (n, s_value) tuples to target scores for early termination
+  - Example: `{(6, 1): 10, (7, 1): 16, (8, 1): 30}`
+  - **Set to `{}` or `None` to disable early termination**
+
+**Example:**
+```python
+termination=TerminationConfig(
+    prompt_limit=1_000_000,
+    optimal_solution_programs=50_000,
+    target_solutions={(7, 2): 5, (8, 2): 7}  # Stop when these scores reached
+)
+```
+
+**To disable early termination:**
+```python
+termination=TerminationConfig(
+    target_solutions={}  # No target-based termination
+)
+```
+
+</details>
 
 <details>
 <summary><b>RabbitMQConfig</b> - Message broker connection settings</summary>

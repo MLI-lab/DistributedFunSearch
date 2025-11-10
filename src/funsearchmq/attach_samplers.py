@@ -114,7 +114,7 @@ class TaskManager:
                         sandbox_base_path=None,
                         max_evaluators=None,
                         max_samplers=args.max_samplers,
-                        check_interval=args.check_interval,
+                        check_interval=self.config.scaling.check_interval if hasattr(self.config, 'scaling') and self.config.scaling else args.check_interval,
                         log_filename=self.log_filename,
                     )
                 )
@@ -222,9 +222,11 @@ if __name__ == "__main__":
 
     async def main():
         config = load_config(args.config_path)
+        # Prefer config.scaling.check_interval over CLI argument
+        check_interval = config.scaling.check_interval if hasattr(config, 'scaling') and config.scaling else args.check_interval
         task_manager = TaskManager(
             config=config,
-            check_interval=args.check_interval,
+            check_interval=check_interval,
             log_dir=args.log_dir,
             config_path=args.config_path
         )

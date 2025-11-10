@@ -2,13 +2,13 @@
 #SBATCH --partition=mcml-dgx-a100-40x8
 #SBATCH --qos=mcml
 #SBATCH --nodes=2
-#SBATCH --mem=80GB
+#SBATCH --mem=480GB
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=15
-#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=242
+#SBATCH --gres=gpu:8
 #SBATCH -o DeCoSearch/src/experiments/experiment1/logs/experiment.out
 #SBATCH -e DeCoSearch/src/experiments/experiment1/logs/experiment.err
-#SBATCH --time=00:20:00
+#SBATCH --time=48:00:00
 
 # ===== Experiment config =====
 EXPERIMENT_NAME="experiment1"
@@ -68,18 +68,16 @@ python3 -m pip install .
 
 cd "/DeCoSearch/src/experiments/${EXPERIMENT_NAME}"
 
-mkdir -p "/mnt/checkpoints/${EXPERIMENT_NAME}"
-
-python3 -m funsearchmq --save_checkpoints_path "/mnt/checkpoints/exp2 --sandbox_base_path "/mnt/sandboxstorage/${EXPERIMENT_NAME}"
+python3 -m funsearchmq --sandbox_base_path "/mnt/sandboxstorage/${EXPERIMENT_NAME}" --checkpoint "/mnt/checkpoints/checkpoint_run_20251110_011412/checkpoint_2025-11-10_08-23-25.pkl"
 REMOTE
 
 # ===== Worker timing (tune as needed) =====
-scaling_intervals_s=($(seq 180000 200 360000))   # sampler intervals
-scaling_intervals_e=($(seq 200000 30 3000000))   # evaluator intervals
+scaling_intervals_s=($(seq 180 200 360))   # sampler intervals
+scaling_intervals_e=($(seq 100 30 300))   # evaluator intervals
 
 # ===== Start evaluators & samplers only if there are extra nodes =====
 if ((${#REMAINING[@]} > 0)); then
-  sleep 120 # Wait for RabbitMQ to be fully up and for config update from primary node
+  sleep 300 # Wait for RabbitMQ to be fully up and for config update from primary node
   for i in "${!REMAINING[@]}"; do
     node="${REMAINING[$i]}"
     scaling_time_s=${scaling_intervals_s[$i]:-300}

@@ -215,10 +215,31 @@ class WandbConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class PathsConfig:
+    """File system paths for the experiment.
+
+    Attributes:
+        log_dir: Directory for logs (default: ./logs). Can be overridden by --log-dir CLI argument.
+        sandbox_base_path: Directory for sandboxed code execution (default: ./sandbox).
+                          Can be overridden by --sandbox_base_path CLI argument.
+        backup_enabled: Enable backup of Python files before running (default: False).
+                       Can be overridden by --backup CLI flag.
+    """
+    log_dir: str = "./logs"
+    sandbox_base_path: str = "./sandbox"
+    backup_enabled: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
 class ScalingConfig:
     """Configuration for dynamic scaling of samplers and evaluators.
 
     Attributes:
+        enabled: Enable dynamic scaling (default: True). Can be disabled with --no-dynamic-scaling CLI flag.
+        check_interval: Time interval (in seconds) between consecutive scaling checks (default: 120).
+                       Lower values = more responsive scaling but higher overhead.
+        max_samplers: Maximum number of samplers the system can scale up to (default: 1000).
+        max_evaluators: Maximum number of evaluators the system can scale up to (default: 1000).
         sampler_scale_up_threshold: Number of messages in sampler_queue to trigger scale-up (default: 50).
         evaluator_scale_up_threshold: Number of messages in evaluator_queue to trigger scale-up (default: 10).
         min_gpu_memory_gib: Minimum free GPU memory in GiB required to start a new sampler (default: 20).
@@ -228,13 +249,42 @@ class ScalingConfig:
         cpu_usage_threshold: Maximum average CPU usage percentage to allow evaluator scale-up (default: 99).
         normalized_load_threshold: Maximum normalized system load (load/cores) to allow evaluator scale-up (default: 0.99).
     """
+    enabled: bool = True
+    check_interval: int = 120
+    max_samplers: int = 1000
+    max_evaluators: int = 1000
     sampler_scale_up_threshold: int = 50
     evaluator_scale_up_threshold: int = 10
-    min_gpu_memory_gib: int = 20
+    min_gpu_memory_gib: int = 35
     max_gpu_utilization: int = 50
     min_system_memory_gib: int = 30
     cpu_usage_threshold: int = 99
     normalized_load_threshold: float = 0.99
+
+
+@dataclasses.dataclass(frozen=True)
+class TerminationConfig:
+    """Conditions for experiment termination.
+
+    Attributes:
+        prompt_limit: Maximum number of prompts before stopping publishing (default: 400M).
+                     The system will continue processing remaining queue messages.
+        optimal_solution_programs: Number of additional programs to generate after finding
+                                  the first optimal solution (default: 200K).
+        target_solutions: Optional dict mapping (n, s_value) tuples to target scores for early termination.
+                         Example: {(6, 1): 10, (7, 1): 16, (8, 1): 30}
+                         If None or empty dict, early termination based on optimal solutions is disabled.
+    """
+    prompt_limit: int = 400_000_000
+    optimal_solution_programs: int = 200_000
+    target_solutions: dict = dataclasses.field(default_factory=lambda: {
+        (6, 1): 10,
+        (7, 1): 16,
+        (8, 1): 30,
+        (9, 1): 52,
+        (10, 1): 94,
+        (11, 1): 172
+    })
 
 
 @dataclasses.dataclass
@@ -249,6 +299,8 @@ class Config:
     prompt: Configuration for prompt generation and score display.
     wandb: Configuration for Weights & Biases logging.
     scaling: Configuration for dynamic scaling of samplers and evaluators.
+    paths: Configuration for file system paths (log_dir, sandbox_base_path, backup).
+    termination: Configuration for experiment termination conditions.
     num_samplers: Number of independent Samplers in the experiment.
     num_evaluators: Number of independent program Evaluators in the experiment.
     num_pdb: Number of independent program databases. Currently supports only one, but this does not create a bottleneck.
@@ -260,6 +312,8 @@ class Config:
   prompt: PromptConfig = dataclasses.field(default_factory=PromptConfig)
   wandb: WandbConfig = dataclasses.field(default_factory=WandbConfig)
   scaling: ScalingConfig = dataclasses.field(default_factory=ScalingConfig)
+  paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
+  termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
   num_samplers: int = 2
   num_evaluators: int = 10
   num_pdb: int = 1
