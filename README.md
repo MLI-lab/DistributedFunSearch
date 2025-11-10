@@ -46,7 +46,7 @@ pip install .
 
 See [Docker Setup](docs/DOCKER_SETUP.md) for container-based installation or [Cluster Setup](docs/CLUSTER_SETUP.md) for cluster execution.
 
-### Run Experiment
+### Run experiment
 
 This runs the example specification for discovering deletion-correcting codes:
 
@@ -58,33 +58,142 @@ python -m funsearchmq
 python -m funsearchmq --checkpoint path/to/checkpoint.pkl
 ```
 
-## Modifying for Other Applications
+## Adapting to your application
 
-Our implementation can be adapted to different applications with minimal changes:
+FunSearchMQ can be adapted to discover algorithms for other problems by defining a new **specification file**. The specification defines the function to evolve and how to evaluate it.
 
-**Input format and evaluation logic:**
-Modify the input format of the function to be evolved in `src/experiments/experiment1/config.py` (via the `EvaluatorConfig` class). Set termination conditions using `TerminationConfig`:
+### 1. Create your specification
+
+Add a new specification file to `src/funsearchmq/specifications/` (see existing examples in `Deletions/` or `IDS/` folders).
+
+**Specification structure:**
 
 ```python
-termination=TerminationConfig(
-    prompt_limit=1_000_000,
-    target_solutions={(7, 2): 5}  # Stop when target scores reached, or {} to disable
+"""
+[Problem description that becomes the LLM prompt]
+Improve the `your_function` function over its previous versions below.
+Keep the code short and comment for easy understanding.
+"""
+
+import your_dependencies
+
+# Helper functions and classes that define your problem
+def helper_function(...):
+    ...
+
+# Evaluation entry point, must be named "evaluate"
+# Called by evaluator with test inputs
+def evaluate(params):
+    input1, input2, input3 = params
+    result, hash_value = solve(input1, input2, input3)
+    return (score, hash_value)  # Score and hash for deduplication
+
+# Main evaluation logic which uses the evolved function
+def solve(input1, input2, input3):
+    # Your problem-specific logic that uses the priority function
+    priorities = {item: priority(item, ...) for item in items}
+    # ... use priorities to construct solution ...
+    return solution, hash_value
+
+# The function that gets evolved by the LLM, must be named "priority"
+def priority(item, context):
+    """Returns the priority/score for the given item."""
+    return 0.0  # Baseline implementation
+```
+
+**Key points:**
+- **Docstring**: Becomes the problem context in the LLM prompt
+- **Helper functions**: Define your problem (graph construction, constraints, etc.)
+- **`evaluate(params)`**: Entry point called by evaluator, **function name must be `evaluate`**
+- **`solve(...)`**: Implements evaluation logic using the evolved function
+- **`priority(item, context)`**: **The function that the LLM evolves**, **function name must be `priority`**
+
+The function names `evaluate` and `priority` are hardcoded in `__main__.py` (lines 284, 661). If you want to use different names, you also need to update them there.
+
+The evaluator executes this entire script, calling `evaluate()` with evaluation inputs.
+
+### 2. Configure evaluation inputs
+
+In `config.py`, specify what inputs to test your evolved function on:
+
+```python
+evaluator=EvaluatorConfig(
+    spec_path="src/funsearchmq/specifications/YourProblem/model/baseline.txt",
+    # Define test input ranges, will generate all combinations
+    s_values=[1, 2],        # Parameter 1 values
+    start_n=[5, 7],         # Parameter 2 start values (one per s_value)
+    end_n=[10, 12],         # Parameter 2 end values (one per s_value)
+    q=2,                    # Parameter 3 (if needed)
+    # Test inputs will be: (5,1,2), (6,1,2), ..., (10,1,2), (7,2,2), ..., (12,2,2)
+
+    mode="last",            # How to aggregate scores: "last", "average", "weighted"
+    timeout=90,             # Timeout per evaluation in seconds
+    max_workers=2,          # Parallel CPU processes per evaluator
 )
 ```
 
-To adapt how functions are evaluated for your specific application, modify the logic in the `src/funsearchmq/specifications/` folder.
+The default configuration generates `(n, s, q)` tuples for the deletion-correcting codes problem. If your problem needs a different input structure, edit `__main__.py` line 897:
 
-**LLM:**
-Modify the `checkpoint` parameter in the sampler script (`src/funsearchmq/sampler.py`) to use a different open-source LLM that can be loaded from Hugging Face via `transformers.AutoModelForCausalLM`. For OpenAI models, set `sampler.gpt=True` in `config.py` and export your Azure OpenAI credentials.
+```python
+# Default (deletion codes):
+inputs = [(n, s, config.evaluator.q) for s, start_n, end_n in zip(...) for n in range(start_n, end_n + 1)]
 
-**Configuration:**
-All experiment parameters are configured in `config.py`. Key config blocks include:
-- `PathsConfig`: Log and sandbox directories
-- `ScalingConfig`: Dynamic scaling behavior (enable/disable, thresholds, resource limits)
-- `TerminationConfig`: When to stop the experiment
-- `WandbConfig`: Weights & Biases logging
+# Example custom (2D grid search):
+inputs = [(w, h) for w in range(5, 15) for h in range(5, 15)]
+```
 
-See [Configuration Guide](docs/CONFIGURATION.md) for all configuration options.
+Your specification's `evaluate(params)` then receives these custom tuples.
+
+**Evaluation outputs:**
+
+The `evaluate()` function returns a tuple `(score, hash_value)`:
+- `score`: Numeric value measuring solution quality (higher is better by default)
+- `hash_value`: Optional hash for deduplication (set to `None` if not needed)
+
+The evaluator extracts `test_output[0]` as the score and `test_output[1]` as the hash (`evaluator.py` lines 349-351). If you need to extract more outputs or use them differently, modify `src/funsearchmq/evaluator.py` (to extract additional tuple elements) and `src/funsearchmq/programs_database.py` (to store/use them).
+
+### 3. Set termination conditions
+
+Define when the experiment should stop:
+
+```python
+termination=TerminationConfig(
+    prompt_limit=1_000_000,                      # Stop after N prompts
+    optimal_solution_programs=50_000,            # Generate N more after finding optimal
+    target_solutions={(10, 1): 94, (12, 2): 30}  # Stop when these scores reached
+    # Set target_solutions={} to disable early termination
+)
+```
+
+### 4. Change the LLM 
+
+**For different open-source models:**
+
+Edit `src/funsearchmq/sampler.py` line ~64:
+```python
+checkpoint = "bigcode/starcoder2-15b"  # Any HuggingFace model ID
+```
+
+**For OpenAI models:**
+
+In `config.py`, enable GPT mode:
+```python
+sampler=SamplerConfig(
+    gpt=True,
+    # ... other sampler config
+)
+```
+
+To use a different GPT model, edit `src/funsearchmq/gpt.py` line 22:
+```python
+def __init__(self, samples_per_prompt: int, model="gpt-4o-mini"):  # Change model here
+```
+
+Then export your Azure OpenAI credentials:
+```bash
+export AZURE_OPENAI_API_KEY=<your-key>
+export AZURE_OPENAI_API_VERSION=<your-version>
+```
 
 ## Documentation
 
