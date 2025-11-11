@@ -5,8 +5,8 @@
 #SBATCH --mem=400GB                                                  # Memory per node
 #SBATCH --ntasks-per-node=1                                          # Number of tasks per node
 #SBATCH --cpus-per-task=92                                           # CPU cores per node
-#SBATCH -o /dss/dsshome1/02/di38yur/DeCoSearch/src/experiments/construct_graphs/logs2/experiment.out # Standard output log
-#SBATCH -e /dss/dsshome1/02/di38yur/DeCoSearch/src/experiments/construct_graphs/logs2/experiment.err # Standard error log
+#SBATCH -o /dss/dsshome1/02/di38yur/DistributedFunSearch/src/experiments/construct_graphs/logs2/experiment.out # Standard output log
+#SBATCH -e /dss/dsshome1/02/di38yur/DistributedFunSearch/src/experiments/construct_graphs/logs2/experiment.err # Standard error log
 #SBATCH --time=48:00:00                                              # Time limit
 
 
@@ -28,7 +28,7 @@ echo "RabbitMQ server hostname: $RABBITMQ_HOSTNAME"
 # Run the main setup process on Node 1
 srun -N1 -n1 --nodelist="$NODE_1" \
   --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
-  --container-mounts="$PWD/DeCoSearch:/DeCoSearch,$PWD/.ssh:/DeCoSearch/.ssh,/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/decosearch:/mnt" \
+  --container-mounts="$PWD/DistributedFunSearch:/DistributedFunSearch,$PWD/.ssh:/DistributedFunSearch/.ssh,/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/decosearch:/mnt" \
   bash -lc '
     set -euo pipefail
     echo "Running on $(hostname -f)"
@@ -41,6 +41,6 @@ srun -N1 -n1 --nodelist="$NODE_1" \
     python3 -m pip install --upgrade pip
     python3 -m pip install python-Levenshtein tqdm lmdb psutil
 
-    cd /DeCoSearch/src/construct_graphs
-    python3 /DeCoSearch/src/construct_graphs/construct_ids_graphs.py
+    cd /DistributedFunSearch/src/construct_graphs
+    python3 /DistributedFunSearch/src/construct_graphs/construct_ids_graphs.py
   '
