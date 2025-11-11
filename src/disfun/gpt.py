@@ -8,9 +8,9 @@ import logging
 import aio_pika
 import asyncio
 import json
-from funsearchmq import programs_database
+from disfun import programs_database
 from typing import List
-from funsearchmq.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
+from disfun.profiling import sync_time_execution, sync_track_memory, async_track_memory, async_time_execution
 from openai import AzureOpenAI
 import os
 import logging
@@ -117,7 +117,7 @@ class Sampler:
         self.prefetch_count = 10
 
     async def consume_and_process(self):
-        from funsearchmq import process_utils
+        from disfun import process_utils
 
         async def _consume_loop():
             """Inner consume loop - will be wrapped with reconnection logic."""

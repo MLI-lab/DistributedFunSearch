@@ -1,6 +1,6 @@
 # Configuration Guide
 
-FunSearchMQ is configured through:
+DistributedFunSearch is configured through:
 1. **Config file** (`config.py`) - **Primary**: All experiment parameters
 2. **Command-line arguments** - **Secondary**: Override config for specific runs
 
@@ -12,17 +12,17 @@ FunSearchMQ is configured through:
 
 **Minimal command** (all settings in config):
 ```bash
-python -m funsearchmq
+python -m disfun
 ```
 
 **With checkpoint** (most common):
 ```bash
-python -m funsearchmq --checkpoint ./Checkpoints/checkpoint_latest.pkl
+python -m disfun --checkpoint ./Checkpoints/checkpoint_latest.pkl
 ```
 
 **Override config** (per-run adjustments):
 ```bash
-python -m funsearchmq \
+python -m disfun \
   --log-dir /mnt/node2/logs \           # Override log location for this node
   --max_evaluators 50                    # Override scaling limit
 ```
@@ -75,7 +75,7 @@ config = Config(
 ### Essential Arguments
 
 ```bash
-python -m funsearchmq \
+python -m disfun \
   --config-path ./config.py \           # Path to config file (default: ./config.py)
   --checkpoint ./checkpoint.pkl         # Resume from checkpoint (optional)
 ```
@@ -85,7 +85,7 @@ python -m funsearchmq \
 Override `config.paths.*` values for specific runs:
 
 ```bash
-python -m funsearchmq \
+python -m disfun \
   --log-dir /mnt/node2/logs \           # Override config.paths.log_dir
   --sandbox_base_path /tmp/sandbox \    # Override config.paths.sandbox_base_path
   --backup                              # Enable backup (overrides config.paths.backup_enabled)
@@ -96,7 +96,7 @@ python -m funsearchmq \
 Override `config.scaling.*` values:
 
 ```bash
-python -m funsearchmq \
+python -m disfun \
   --no-dynamic-scaling \                # Disable scaling (overrides config.scaling.enabled)
   --max_evaluators 100 \                # Override config.scaling.max_evaluators
   --max_samplers 20 \                   # Override config.scaling.max_samplers
@@ -110,7 +110,7 @@ See [Scaling Guide](SCALING.md) for details on scaling behavior.
 Override `config.termination.*` values:
 
 ```bash
-python -m funsearchmq \
+python -m disfun \
   --prompt_limit 500000 \               # Override config.termination.prompt_limit
   --optimal_solution_programs 10000 \   # Override config.termination.optimal_solution_programs
   --target_solutions '{"(7,2)": 5}'     # Override config.termination.target_solutions
@@ -125,7 +125,7 @@ For API-based LLMs instead of local models:
 ```bash
 export AZURE_OPENAI_API_KEY=<your-key>
 export AZURE_OPENAI_API_VERSION=<your-version>
-python -m funsearchmq  # Ensure config.sampler.gpt=True
+python -m disfun  # Ensure config.sampler.gpt=True
 ```
 
 ---
@@ -392,7 +392,7 @@ Controls W&B experiment tracking and checkpoint storage.
 
 **Attributes:**
 - `enabled` (bool): Enable W&B logging (default: `True`)
-- `project` (str): W&B project name (default: `"funsearchmq"`)
+- `project` (str): W&B project name (default: `"disfun"`)
 - `entity` (str): W&B username or team name (default: set in config)
 - `run_name` (str): Name for this run (default: `None`)
   - If `None`, auto-generates run name with timestamp: `run_YYYYMMDD_HHMMSS`
@@ -428,7 +428,7 @@ When resuming with `--checkpoint`:
 
 ```bash
 # Resume experiment and continue W&B logging
-python -m funsearchmq --checkpoint /mnt/checkpoints/checkpoint_run_20250108_143022/checkpoint_2025-01-08_15-30-22.pkl
+python -m disfun --checkpoint /mnt/checkpoints/checkpoint_run_20250108_143022/checkpoint_2025-01-08_15-30-22.pkl
 ```
 
 **Checkpoint Timing:**
@@ -468,7 +468,7 @@ Top-level config that combines all sub-configs.
 
 ## Specification Files
 
-The function to evolve is defined in specification files at `src/funsearchmq/specifications/`.
+The function to evolve is defined in specification files at `src/disfun/specifications/`.
 
 ### Directory Structure
 

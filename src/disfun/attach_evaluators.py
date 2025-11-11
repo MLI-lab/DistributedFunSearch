@@ -10,10 +10,10 @@ import socket
 import argparse
 from typing import Sequence, Any
 import datetime
-from funsearchmq.scaling_utils import ResourceManager
-from funsearchmq import process_utils
-from funsearchmq.process_entry import evaluator_process_entry, load_config
-from funsearchmq import code_manipulation
+from disfun.scaling_utils import ResourceManager
+from disfun import process_utils
+from disfun.process_entry import evaluator_process_entry, load_config
+from disfun import code_manipulation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

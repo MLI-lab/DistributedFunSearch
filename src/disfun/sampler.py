@@ -46,8 +46,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import aio_pika
 import numpy as np
 
-from funsearchmq import programs_database
-from funsearchmq.profiling import async_time_execution
+from disfun import programs_database
+from disfun.profiling import async_time_execution
 
 logger = logging.getLogger('main_logger')
 
@@ -294,7 +294,7 @@ class Sampler:
             # Optionally raise
 
     async def consume_and_process(self) -> None:
-        from funsearchmq import process_utils
+        from disfun import process_utils
 
         async def _consume_loop():
             """Inner consume loop - will be wrapped with reconnection logic."""

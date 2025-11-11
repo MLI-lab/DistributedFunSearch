@@ -58,13 +58,13 @@ PORT2=5672    # RabbitMQ AMQP message passing
 
 ### 3. Submit SLURM Job
 
-From the parent directory containing `FunSearchMQ/`:
+From the parent directory containing `DistributedFunSearch/`:
 
 ```bash
-sbatch FunSearchMQ/src/experiments/experiment1/exp1.sh
+sbatch DistributedFunSearch/src/experiments/experiment1/exp1.sh
 ```
 
-**Note**: The job must be submitted from the directory containing the `FunSearchMQ/` folder, not from inside it. The script mounts `$PWD/FunSearchMQ:/FunSearchMQ` into the container.
+**Note**: The job must be submitted from the directory containing the `DistributedFunSearch/` folder, not from inside it. The script mounts `$PWD/DistributedFunSearch:/DistributedFunSearch` into the container.
 
 ## How It Works
 
@@ -82,15 +82,15 @@ The primary node:
 3. Sets up user authentication
 4. Optionally creates SSH tunnels for remote access
 5. Updates `config.py` with RabbitMQ hostname
-6. Runs main experiment: `python -m funsearchmq`
+6. Runs main experiment: `python -m disfun`
 
 ### Worker Nodes
 
 Each remaining node:
 1. Updates `config.py` with RabbitMQ hostname
-2. Installs FunSearchMQ
-3. Attaches evaluators: `python -m funsearchmq.attach_evaluators`
-4. Attaches samplers: `python -m funsearchmq.attach_samplers`
+2. Installs DistributedFunSearch
+3. Attaches evaluators: `python -m disfun.attach_evaluators`
+4. Attaches samplers: `python -m disfun.attach_samplers`
 5. Uses different `--check_interval` values per node for staggered scaling
 
 ## Multi-Node Execution
@@ -101,12 +101,12 @@ Worker nodes use these commands to join an existing experiment:
 
 **Attach evaluators only:**
 ```bash
-python -m funsearchmq.attach_evaluators --config-path /path/to/config.py
+python -m disfun.attach_evaluators --config-path /path/to/config.py
 ```
 
 **Attach samplers only:**
 ```bash
-python -m funsearchmq.attach_samplers --config-path /path/to/config.py
+python -m disfun.attach_samplers --config-path /path/to/config.py
 ```
 
 Both commands support the same CLI arguments as the main script.
@@ -150,7 +150,7 @@ The script requires passwordless SSH access to establish reverse tunnels. Set up
 
 **1. Create `.ssh` directory and generate keys:**
 ```bash
-# In the parent directory containing FunSearchMQ/
+# In the parent directory containing DistributedFunSearch/
 mkdir -p .ssh
 chmod 700 .ssh
 cd .ssh
@@ -190,9 +190,9 @@ ssh -i cluster_key -p SSH_PORT SSH_USER@SSH_HOST "echo Connection successful"
 **5. Verify the mount path in `exp1.sh`:**
 The script should mount your `.ssh` directory:
 ```bash
---container-mounts="$PWD/FunSearchMQ:/FunSearchMQ,$PWD/.ssh:/FunSearchMQ/.ssh"
+--container-mounts="$PWD/DistributedFunSearch:/DistributedFunSearch,$PWD/.ssh:/DistributedFunSearch/.ssh"
 ```
 
-**Note**: The container sees the keys at `/FunSearchMQ/.ssh/`, so SSH commands inside the container use that path automatically.
+**Note**: The container sees the keys at `/DistributedFunSearch/.ssh/`, so SSH commands inside the container use that path automatically.
 
 

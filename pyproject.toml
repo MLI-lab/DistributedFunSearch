@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "funsearchmq"
+name = "disfun"
 version = "0.1.0"
-description = "FunSearchMQ - Distributed implementation of FunSearch using RabbitMQ"
+description = "DistributedFunSearch - Multi-node distributed implementation of FunSearch with cluster support via RabbitMQ"
 requires-python = ">=3.10"
 dependencies = [
   "numpy",
@@ -35,4 +35,4 @@ dependencies = [
 where = ["src"]
 
 [project.scripts]
-funsearchmq = "funsearchmq.__main__:main"
+disfun = "disfun.__main__:main"
