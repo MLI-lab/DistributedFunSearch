@@ -35,11 +35,11 @@ class RabbitMQConfig:
       password: Password for authentication with the RabbitMQ server.
       vhost: Virtual host for isolation between experiments. Use '' for default vhost.
     """
-    host: str = 'rabbitmq'
+    host: str = 'localhost' #localhost or rabbitmq for docker or node IP address
     port: int = 5672
     username: str = 'guest'
     password: str = 'guest'
-    vhost: str = 'experiment1no'  # Use '' for default vhost, or 'exp1', 'exp2', etc. for isolated experiments 
+    vhost: str = 'experiment1'  # Use '' for default vhost, or 'exp1', 'exp2', etc. for isolated experiments 
     
 
 @dataclasses.dataclass(frozen=True)

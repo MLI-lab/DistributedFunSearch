@@ -1,0 +1,2 @@
+[console_scripts]
+disfun = disfun.__main__:main

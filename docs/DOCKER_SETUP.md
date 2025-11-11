@@ -46,19 +46,19 @@ python load_llm.py  # Change cache_dir in load_llm.py to modify download locatio
 
 If you don't preload, the model downloads to `/mnt/models/` by default (change in `src/disfun/sampler.py:79`).
 
+Before running the experiment, update your config to use the Docker RabbitMQ service name:
+
+```bash
+# Edit src/experiments/experiment1/config.py
+# Change: host='localhost'
+# To:     host='rabbitmq'
+```
+
 Run an experiment:
 
 ```bash
 cd src/experiments/experiment1
 python -m disfun
-```
-
-## Configuration
-
-The main container connects to RabbitMQ via the Docker service name. In your `config.py`, set `host='rabbitmq'` (not `localhost`):
-
-```python
-rabbitmq=RabbitMQConfig(host='rabbitmq', port=5672)
 ```
 
 ## RabbitMQ Management Interface
