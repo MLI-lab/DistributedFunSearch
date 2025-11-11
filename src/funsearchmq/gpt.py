@@ -117,37 +117,49 @@ class Sampler:
         self.prefetch_count = 10
 
     async def consume_and_process(self):
-        await self.channel.set_qos(prefetch_count=self.prefetch_count) # Limit prefetched messages
+        from funsearchmq import process_utils
 
-        async with self.sampler_queue.iterator() as stream:
-            async for message in stream:
-                async with message.process():
-                    try:
-                        gpu_time=0
-                        data=json.loads(message.body.decode())
-                        prompt_data = data["prompt"]
-                        prompt = programs_database.Prompt.deserialize(prompt_data)
-                        total_registered_programs = data.get("total_registered_programs", 0)
-                        parent_ids = data.get("parent_ids", [])  # Extract parent IDs for lineage tracking
-                        responses = self._llm.draw_sample(prompt.code)
-                        logger.debug(f"responses is {responses}")
-                        for response in responses:
-                            message_data = {
-                                "sample": response,
-                                "island_id": prompt.island_id,
-                                "version_generated": prompt.version_generated,
-                                "expected_version": prompt.expected_version,
-                                "gpu_time": gpu_time,  # Include GPU time
-                                "parent_ids": parent_ids,  # Pass parent IDs for lineage tracking
-                            }
-                            serialized_message = json.dumps(message_data)
-                            await self.channel.default_exchange.publish(
-                                aio_pika.Message(body=serialized_message.encode()),
-                                routing_key='evaluator_queue'
-                            )
-                            logger.debug("Successfully published prompt to evaluator_queue")
-                    except Exception as e:
-                        logger.error(f"Error processing and sending message: {str(e)}")
+        async def _consume_loop():
+            """Inner consume loop - will be wrapped with reconnection logic."""
+            await self.channel.set_qos(prefetch_count=self.prefetch_count)
+
+            async with self.sampler_queue.iterator() as stream:
+                async for message in stream:
+                    async with message.process():
+                        try:
+                            gpu_time = 0
+                            data = json.loads(message.body.decode())
+                            prompt_data = data["prompt"]
+                            prompt = programs_database.Prompt.deserialize(prompt_data)
+                            total_registered_programs = data.get("total_registered_programs", 0)
+                            parent_ids = data.get("parent_ids", [])
+                            responses = self._llm.draw_sample(prompt.code)
+                            logger.debug(f"responses is {responses}")
+
+                            for response in responses:
+                                message_data = {
+                                    "sample": response,
+                                    "island_id": prompt.island_id,
+                                    "version_generated": prompt.version_generated,
+                                    "expected_version": prompt.expected_version,
+                                    "gpu_time": gpu_time,
+                                    "parent_ids": parent_ids,
+                                }
+                                serialized_message = json.dumps(message_data)
+                                await self.channel.default_exchange.publish(
+                                    aio_pika.Message(body=serialized_message.encode()),
+                                    routing_key='evaluator_queue'
+                                )
+                                logger.debug("Successfully published prompt to evaluator_queue")
+                        except Exception as e:
+                            logger.error(f"Error processing and sending message: {str(e)}")
+
+        # Wrap consume loop with automatic reconnection
+        await process_utils.with_reconnection(
+            _consume_loop,
+            logger,
+            component_name="GPT Sampler"
+        )
 
 if __name__ == "__main__":
     pass

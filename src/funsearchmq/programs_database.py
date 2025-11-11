@@ -1225,43 +1225,45 @@ class ProgramsDatabase:
 
     async def consume_and_process(self) -> None:
         """ Continuously consumes messages in batches from the database queue and processes them. """
+        from funsearchmq import process_utils
+
         batch_size = 10
-        batch = []
         batch_timeout = 0.01
 
         logger.info(f"Consume_and_process started")
 
-        try:
+        async def _consume_loop():
+            """Inner consume loop - will be wrapped with reconnection logic."""
             await self.channel.set_qos(prefetch_count=batch_size)
+
             async with self.database_queue.iterator() as stream:
+                batch = []
                 batch_start_time = time.time()
-                while True:
-                    try:
-                        async for message in stream:
-                            logger.debug(f"Received message: {message.body.decode()}")
-                            batch.append(message)
-                            current_time = time.time()
 
-                            # Check if the batch should be processed
-                            if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
-                                await self.process_batch(batch)
-                                batch.clear()
-                                batch_start_time = current_time  # Reset timer after batch processing
+                try:
+                    async for message in stream:
+                        logger.debug(f"Received message: {message.body.decode()}")
+                        batch.append(message)
+                        current_time = time.time()
 
-                    except asyncio.CancelledError:
-                        logger.info("Database task was canceled. Processing any remaining batch.")
-                        if batch:
+                        # Check if the batch should be processed
+                        if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
                             await self.process_batch(batch)
-                        raise  # Re-raise the CancelledError to ensure proper cancellation
+                            batch.clear()
+                            batch_start_time = current_time
 
-                    except Exception as e:
-                        logger.error(f"Error during message consumption: {e}")
+                except asyncio.CancelledError:
+                    logger.info("Database task was canceled. Processing any remaining batch.")
+                    if batch:
+                        await self.process_batch(batch)
+                    raise  # Re-raise to ensure proper cancellation
 
-        except asyncio.CancelledError:
-            logger.info("Database consume_and_process was canceled.")
-
-        except Exception as e:
-            logger.error(f"Error initializing the database consume_and_process: {e}")
+        # Wrap consume loop with automatic reconnection
+        await process_utils.with_reconnection(
+            _consume_loop,
+            logger,
+            component_name="ProgramsDatabase"
+        )
 
 
     #@async_time_execution

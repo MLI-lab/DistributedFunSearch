@@ -179,7 +179,7 @@ class TaskManager:
         while attempt < max_retries:
             try:
                 sampler_connection = await process_utils.create_rabbitmq_connection(
-                    self.config, timeout=300, heartbeat=300
+                    self.config, timeout=300
                 )
                 sampler_channel = await sampler_connection.channel()
 
@@ -270,7 +270,7 @@ class TaskManager:
 
         try:
             connection = await process_utils.create_rabbitmq_connection(
-                self.config, timeout=300, heartbeat=300
+                self.config, timeout=300
             )
         except Exception as e:
             self.logger.error(f"Cannot connect to RabbitMQ: {e}")
@@ -294,12 +294,12 @@ class TaskManager:
         try:
             # Create connections and declare queues
             self.sampler_connection = await process_utils.create_rabbitmq_connection(
-                self.config, timeout=300, heartbeat=300
+                self.config, timeout=300
             )
             self.sampler_channel = await self.sampler_connection.channel()
 
             self.database_connection = await process_utils.create_rabbitmq_connection(
-                self.config, timeout=300, heartbeat=300
+                self.config, timeout=300
             )
             self.database_channel = await self.database_connection.channel()
 
@@ -523,7 +523,7 @@ class TaskManager:
             try:
                 self.logger.info(f"Sampler {local_id}: Starting connection to RabbitMQ on device {device}...")
                 connection = await process_utils.create_rabbitmq_connection(
-                    self.config, timeout=300, heartbeat=300
+                    self.config, timeout=300
                 )
                 self.logger.info(f"Sampler {local_id}: Connected to RabbitMQ successfully.")
                 channel = await connection.channel()
@@ -649,7 +649,7 @@ class TaskManager:
 
             try:
                 connection = await process_utils.create_rabbitmq_connection(
-                    self.config, timeout=300, heartbeat=300
+                    self.config, timeout=300
                 )
                 channel = await connection.channel()
 
@@ -1019,7 +1019,7 @@ if __name__ == "__main__":
         print("Attempting to delete RabbitMQ queues...")
         try:
             cleanup_connection = await process_utils.create_rabbitmq_connection(
-                main.task_manager.config, timeout=5, heartbeat=300
+                main.task_manager.config, timeout=5
             )
             cleanup_channel = await cleanup_connection.channel()
 

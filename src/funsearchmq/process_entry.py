@@ -112,7 +112,7 @@ def sampler_process_entry(config_path, device, log_dir, log_filename):
         try:
             logger.info(f"Sampler {local_id}: Starting connection to RabbitMQ on device {device}...")
             connection = await process_utils.create_rabbitmq_connection(
-                config, timeout=300, heartbeat=300
+                config, timeout=300
             )
             logger.info(f"Sampler {local_id}: Connected to RabbitMQ successfully.")
             channel = await connection.channel()
@@ -233,7 +233,7 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
 
         try:
             connection = await process_utils.create_rabbitmq_connection(
-                config, timeout=300, heartbeat=300
+                config, timeout=300
             )
             channel = await connection.channel()
 

@@ -240,55 +240,51 @@ class Evaluator:
 
 
     async def consume_and_process(self):
-        try:
-            # Set channel QoS
+        from funsearchmq import process_utils
+
+        async def _consume_loop():
+            """Inner consume loop - will be wrapped with reconnection logic."""
             async with self.channel:
                 await self.channel.set_qos(prefetch_count=1)
 
-                # Start consuming messages
                 async with self.evaluator_queue.iterator() as stream:
-                    try:
-                        message_count = 0
-                        async for message in stream:
-                            # Start timing before processing the message
-                            fetch_start_time = time.perf_counter()
+                    message_count = 0
+                    async for message in stream:
+                        fetch_start_time = time.perf_counter()
 
-                            async with message.process():
-                                fetch_end_time = time.perf_counter()
-                                fetch_duration = fetch_end_time - fetch_start_time
-                                logger.debug(f"Time to fetch message from queue: {fetch_duration:.6f} seconds")
+                        async with message.process():
+                            fetch_end_time = time.perf_counter()
+                            fetch_duration = fetch_end_time - fetch_start_time
+                            logger.debug(f"Time to fetch message from queue: {fetch_duration:.6f} seconds")
 
-                                try:
-                                    # Set a reasonable timeout for processing each message
-                                    await asyncio.wait_for(self.process_message(message), timeout=300)
-                                except asyncio.TimeoutError:
-                                    logger.warning("Processing message timed out.")
-                                except Exception as e:
-                                    logger.error(f"Evaluator: Error while processing message: {e}")
+                            try:
+                                await asyncio.wait_for(self.process_message(message), timeout=300)
+                            except asyncio.TimeoutError:
+                                logger.warning("Processing message timed out.")
+                            except Exception as e:
+                                logger.error(f"Evaluator: Error while processing message: {e}")
 
-                            # Periodically clean up orphaned sandbox processes (every 10 messages)
-                            message_count += 1
-                            if message_count % 10 == 0:
-                                killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
-                                if killed > 0:
-                                    logger.info(f"Cleaned up {killed} orphaned sandbox processes")
+                        # Periodically clean up orphaned sandbox processes
+                        message_count += 1
+                        if message_count % 10 == 0:
+                            killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
+                            if killed > 0:
+                                logger.info(f"Cleaned up {killed} orphaned sandbox processes")
 
-                    except asyncio.CancelledError:
-                        logger.info("Consumer was cancelled.")
-                        raise  # Propagate the cancellation upwards
-                    except Exception as e:
-                        logger.error(f"Error in message stream: {e}")
+        # Wrap consume loop with automatic reconnection
+        await process_utils.with_reconnection(
+            _consume_loop,
+            logger,
+            component_name=f"Evaluator {self.local_id}"
+        )
+
+        # Cleanup after loop exits
+        try:
+            await asyncio.wait_for(self.shutdown(), timeout=100)
+        except asyncio.TimeoutError:
+            logger.warning("Shutdown took too long and timed out.")
         except Exception as e:
-            logger.error(f"Exception occurred in consume_and_process: {e}")
-            raise  # Re-raise the exception to be handled by the caller if needed
-        finally:
-            try:
-                # Call shutdown with a timeout
-                await asyncio.wait_for(self.shutdown(), timeout=100)
-            except asyncio.TimeoutError:
-                logger.warning("Shutdown took too long and timed out.")
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
+            logger.error(f"Error during shutdown: {e}")
 
 
     #async_time_execution

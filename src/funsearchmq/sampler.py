@@ -76,7 +76,7 @@ class LLM_model:
 
         # Set cache directory and environment variable
         try:
-            self.cache_dir = "/mnt/graphs/"
+            self.cache_dir = "/mnt/models/"
             os.makedirs(self.cache_dir, exist_ok=True)
             os.environ["TRANSFORMERS_CACHE"] = self.cache_dir
         except Exception as e:
@@ -294,33 +294,35 @@ class Sampler:
             # Optionally raise
 
     async def consume_and_process(self) -> None:
-        try:
+        from funsearchmq import process_utils
+
+        async def _consume_loop():
+            """Inner consume loop - will be wrapped with reconnection logic."""
             logger.info(f"Sampler on device {self.device}: Setting QoS prefetch_count=10...")
             await self.channel.set_qos(prefetch_count=10)
             logger.info(f"Sampler on device {self.device}: Starting to consume messages from sampler_queue...")
+
             async with self.sampler_queue.iterator() as stream:
                 logger.info(f"Sampler on device {self.device}: Successfully registered as consumer, now listening for messages...")
                 batch = []
                 batch_timeout = 0.01
                 batch_start_time = asyncio.get_event_loop().time()
-                try:
-                    async for message in stream:
-                        batch.append(message)
-                        current_time = asyncio.get_event_loop().time()
-                        # If we hit batch size or time threshold, process the batch
-                        if (len(batch) >= self.samples_per_batch or (current_time - batch_start_time) > batch_timeout):
-                            await self.process_batch_s(batch)
-                            batch = []
-                            batch_start_time = asyncio.get_event_loop().time()
-                except asyncio.CancelledError:
-                    logger.debug("Sampler task canceled.")
-                    raise
-                except Exception as e:
-                    logger.error(f"Error in consume_and_process loop: {e}")
-        except asyncio.CancelledError:
-            logger.info("consume_and_process canceled during shutdown.")
-        except Exception as e:
-            logger.error(f"Channel/iterator setup error: {e}")
+
+                async for message in stream:
+                    batch.append(message)
+                    current_time = asyncio.get_event_loop().time()
+                    # If we hit batch size or time threshold, process the batch
+                    if (len(batch) >= self.samples_per_batch or (current_time - batch_start_time) > batch_timeout):
+                        await self.process_batch_s(batch)
+                        batch = []
+                        batch_start_time = asyncio.get_event_loop().time()
+
+        # Wrap consume loop with automatic reconnection
+        await process_utils.with_reconnection(
+            _consume_loop,
+            logger,
+            component_name=f"Sampler on device {self.device}"
+        )
 
     async def process_batch_s(self, batch: List[aio_pika.IncomingMessage]):
         prompts = []
