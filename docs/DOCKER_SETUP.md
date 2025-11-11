@@ -2,7 +2,7 @@
 
 DistributedFunSearch uses **Docker Compose (v3.8)** to run two containers:
 
-- **decos-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) - Runs the evolutionary search with GPU support
+- **disfun-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) - Runs the evolutionary search with GPU support
 - **rabbitmq** (`rabbitmq:3.13.4-management`) - Message broker for asynchronous inter-process communication
 
 Both containers run inside a **Docker bridge network** (`app-network`) for internal communication.
@@ -24,7 +24,7 @@ This will:
 ### 2. Enter the Main Container
 
 ```bash
-docker exec -it decos-main bash
+docker exec -it disfun-main bash
 ```
 
 ### 3. Create Conda Environment

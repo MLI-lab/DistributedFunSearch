@@ -1,13 +1,13 @@
 version: '3.8'
 
 services:
-  decos-main:
+  disfun-main:
     build:
       context: ..  # Use project root as build context
       dockerfile: .devcontainer/Dockerfile
       args:
         - DEBIAN_FRONTEND=noninteractive
-    container_name: "decos-main"
+    container_name: "disfun-main"
     tty: true
     privileged: false 
     volumes:

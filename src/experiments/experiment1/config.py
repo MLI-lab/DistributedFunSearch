@@ -115,24 +115,19 @@ def get_spec_path() -> str:
     """
     # Get the absolute directory of this file
     base_dir = os.path.abspath(os.path.dirname(__file__))
-    # Look for the repository name in the path (try new name first, then legacy name)
+    # Look for the repository name in the path
     idx = base_dir.find("DistributedFunSearch")
     if idx != -1:
-        decos_base = base_dir[: idx + len("DistributedFunSearch")]
+        repo_base = base_dir[: idx + len("DistributedFunSearch")]
     else:
-        # Fallback to legacy name for backward compatibility
-        idx = base_dir.find("DeCoSearch")
-        if idx != -1:
-            decos_base = base_dir[: idx + len("DeCoSearch")]
-        else:
-            decos_base = base_dir
+        repo_base = base_dir
 
     # Change this line to switch between specifications
     # Default: Deletion-only codes with pre-computed graphs
-    return os.path.join(decos_base, "src", "disfun", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
+    return os.path.join(repo_base, "src", "disfun", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
 
     # To use IDS codes (insertion/deletion/substitution), uncomment this instead:
-    #return os.path.join(decos_base, "src", "disfun", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
+    #return os.path.join(repo_base, "src", "disfun", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
 
 
 @dataclasses.dataclass(frozen=True)

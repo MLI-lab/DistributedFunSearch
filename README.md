@@ -110,9 +110,9 @@ The evaluator executes this entire script, calling `evaluate()` with evaluation 
 
 ### Configure your evaluation inputs
 
-The specific problem instances that the evolved function is tested on are defined by **tuples**. Each tuple specifies one problem instance within a larger problem class. For example, for deletion-correcting codes, the tuple `(n=10, s=1, q=2)` specifies finding a binary code (q=2) of length n=10 that corrects s=1 deletion.
+The evolved function is tested on problem instances defined by **tuples** (the evaluation inputs). Each tuple specifies one problem instance. For example, `(n=10, s=1, q=2)` specifies a binary code of length n=10 that corrects s=1 deletion.
 
-The collection of all tuples forms the **evaluation inputs**. Each tuple contains problem-specific parameters that the `evaluate()` function receives. These parameters define the problem instance and may or may not be direct inputs to the evolved function.
+The `evaluate()` function in your specification receives each tuple and uses the parameters to define the problem instance. It may call the evolved function with some, all, or none of these parameters (they define the problem context, not necessarily the function inputs). 
 
 **Configuration example:**
 
