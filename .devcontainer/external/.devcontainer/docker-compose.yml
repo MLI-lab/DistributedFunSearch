@@ -7,7 +7,7 @@ services:
       dockerfile: .devcontainer/external/.devcontainer/Dockerfile
       args:
         - DEBIAN_FRONTEND=noninteractive
-    container_name: "fundcc-main"
+    container_name: "disfun-main"
     tty: true  # Allocate a pseudo-TTY
     privileged: true 
     volumes:

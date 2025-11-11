@@ -1,5 +1,5 @@
 {
-    "name": "fundcc-main",
+    "name": "disfun-main",
     "dockerComposeFile": "docker-compose.yml",
     "service": "devcontainer",
     "workspaceFolder": "/workspace/DistributedFunSearch/",
