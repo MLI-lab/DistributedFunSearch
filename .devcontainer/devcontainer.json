@@ -1,7 +1,7 @@
 {
-  "name": "decos-main",
+  "name": "disfun-main",
   "dockerComposeFile": "docker-compose.yml",
-  "service": "decos-main",
+  "service": "disfun-main",
   "workspaceFolder": "/workspace/DistributedFunSearch/",
   "overrideCommand": false, 
   "forwardPorts": [3000],
