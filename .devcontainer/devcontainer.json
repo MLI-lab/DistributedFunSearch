@@ -2,7 +2,7 @@
   "name": "decos-main",
   "dockerComposeFile": "docker-compose.yml",
   "service": "decos-main",
-  "workspaceFolder": "/workspace/DeCoSearch/",
+  "workspaceFolder": "/workspace/DistributedFunSearch/",
   "overrideCommand": false, 
   "forwardPorts": [3000],
   "customizations": {

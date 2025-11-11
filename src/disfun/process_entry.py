@@ -51,7 +51,7 @@ def initialize_process_logger(log_dir, log_filename):
 
 def sampler_process_entry(config_path, device, log_dir, log_filename):
     """Standalone sampler process entry point (spawn-compatible)."""
-    from funsearchmq import sampler, gpt, process_utils
+    from disfun import sampler, gpt, process_utils
 
     # Reload config and logger in child process
     config = load_config(config_path)
@@ -172,8 +172,8 @@ def sampler_process_entry(config_path, device, log_dir, log_filename):
 
 def evaluator_process_entry(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename):
     """Standalone evaluator process entry point (spawn-compatible)."""
-    import funsearchmq.evaluator as evaluator_module
-    from funsearchmq import process_utils
+    import disfun.evaluator as evaluator_module
+    from disfun import process_utils
 
     # Reload config and logger in child process
     config = load_config(config_path)

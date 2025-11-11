@@ -1,6 +1,6 @@
 # Docker Setup Guide
 
-FunSearchMQ uses **Docker Compose (v3.8)** to run two containers:
+DistributedFunSearch uses **Docker Compose (v3.8)** to run two containers:
 
 - **decos-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) - Runs the evolutionary search with GPU support
 - **rabbitmq** (`rabbitmq:3.13.4-management`) - Message broker for asynchronous inter-process communication
@@ -50,10 +50,10 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 If using OpenAI/Azure API (`sampler.gpt=True` in config), you can skip this step.
 
-### 5. Install FunSearchMQ
+### 5. Install DistributedFunSearch
 
 ```bash
-cd /workspace/FunSearchMQ
+cd /workspace/DistributedFunSearch
 
 # Standard installation
 pip install .
@@ -74,7 +74,7 @@ python load_llm.py  # Downloads to /workspace/models/
 
 ```bash
 cd src/experiments/experiment1
-python -m funsearchmq
+python -m disfun
 ```
 
 ## Docker-Specific Configuration
@@ -83,7 +83,7 @@ python -m funsearchmq
 
 - **Internal communication**: The main container connects to RabbitMQ via `rabbitmq:5672` (Docker service name)
 - **External access**: RabbitMQ Management Interface is exposed on host port `15672`
-- **Volume mounts**: Project directory is mounted at `/workspace/FunSearchMQ` (changes sync between host and container)
+- **Volume mounts**: Project directory is mounted at `/workspace/DistributedFunSearch` (changes sync between host and container)
 
 ### RabbitMQ Connection
 

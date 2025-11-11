@@ -1,6 +1,6 @@
 # Dynamic Scaling Configuration Guide
 
-FunSearchMQ includes a dynamic scaling system that automatically spawns and terminates sampler and evaluator processes based on queue load and available system resources.
+DistributedFunSearch includes a dynamic scaling system that automatically spawns and terminates sampler and evaluator processes based on queue load and available system resources.
 
 ## Overview
 
@@ -71,7 +71,7 @@ The `min_gpu_memory_gib` parameter should be adjusted based on the LLM's memory 
 Additional scaling control via command-line arguments:
 
 ```bash
-python -m funsearchmq \
+python -m disfun \
   --check_interval 120 \           # Scaling check interval (seconds)
   --max_evaluators 1000 \          # Maximum evaluators
   --max_samplers 1000 \            # Maximum samplers

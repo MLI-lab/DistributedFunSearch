@@ -39,7 +39,7 @@ import gc
 import os
 import multiprocessing
 from typing import Mapping, Any, List, Sequence, Optional
-from funsearchmq import code_manipulation
+from disfun import code_manipulation
 import json
 import aio_pika
 import re
@@ -47,7 +47,7 @@ from logging.handlers import RotatingFileHandler
 import psutil
 from logging import FileHandler
 import datetime
-from funsearchmq.profiling import async_time_execution
+from disfun.profiling import async_time_execution
 
 # Wandb import (optional)
 try:
@@ -1225,7 +1225,7 @@ class ProgramsDatabase:
 
     async def consume_and_process(self) -> None:
         """ Continuously consumes messages in batches from the database queue and processes them. """
-        from funsearchmq import process_utils
+        from disfun import process_utils
 
         batch_size = 10
         batch_timeout = 0.01

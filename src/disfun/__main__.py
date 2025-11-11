@@ -45,7 +45,7 @@ import psutil
 import GPUtil
 import pynvml
 
-from funsearchmq import (
+from disfun import (
     programs_database,
     sampler,
     code_manipulation,
@@ -53,8 +53,8 @@ from funsearchmq import (
     gpt,
     process_utils,
 )
-from funsearchmq.scaling_utils import ResourceManager
-from funsearchmq.process_entry import sampler_process_entry, evaluator_process_entry
+from disfun.scaling_utils import ResourceManager
+from disfun.process_entry import sampler_process_entry, evaluator_process_entry
 import importlib.util
 
 # Disable multi-threaded tokenization.
@@ -583,7 +583,7 @@ class TaskManager:
 
 
     def evaluator_process(self, template, inputs, target_signatures):
-        import funsearchmq.evaluator
+        import disfun.evaluator
         import signal
         import asyncio
 

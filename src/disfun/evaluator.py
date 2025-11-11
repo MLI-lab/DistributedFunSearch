@@ -39,8 +39,8 @@ import ast
 from typing import Any
 import copy
 import logging
-from funsearchmq import code_manipulation
-from funsearchmq import sandbox
+from disfun import code_manipulation
+from disfun import sandbox
 from pathlib import Path
 import json
 import aio_pika
@@ -54,7 +54,7 @@ import psutil
 import shutil
 import warnings
 import shutil
-from funsearchmq.profiling import async_time_execution
+from disfun.profiling import async_time_execution
 import time
 
 
@@ -240,7 +240,7 @@ class Evaluator:
 
 
     async def consume_and_process(self):
-        from funsearchmq import process_utils
+        from disfun import process_utils
 
         async def _consume_loop():
             """Inner consume loop - will be wrapped with reconnection logic."""

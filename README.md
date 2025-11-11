@@ -1,20 +1,16 @@
-# FunSearchMQ
+# DistributedFunSearch
 
 <div align="center">
-  <img src="fig/overview.png" alt="FunSearchMQ Overview" width="600">
+  <img src="fig/overview.png" alt="DistributedFunSearch Overview" width="600">
 </div>
 
 <p>&nbsp;</p>
 
-**FunSearchMQ** is a **distributed implementation of FunSearch** (Romera et al., 2024) that uses LLM-guided evolutionary search to discover novel algorithms. It supports multi-node execution via RabbitMQ for asynchronous message passing and works with both API-based LLMs (e.g., GPT-4o via Azure OpenAI) and locally hosted models (defaulting to StarCoder2).
+**DistributedFunSearch** (`disfun`) is a **multi-node distributed implementation of FunSearch** (Romera et al., 2024) that uses LLM-guided evolutionary search to discover novel algorithms. It uses RabbitMQ for asynchronous message passing and works with both API-based LLMs (e.g., GPT-4o via Azure OpenAI) and locally hosted models (defaulting to StarCoder2).
 
-## Features
-
-FunSearchMQ is designed for large-scale distributed execution:
-
-- **Multi-node execution**: Distributes across multiple nodes and allows adding workers to a running experiment from different nodes (see [Cluster Setup](docs/CLUSTER_SETUP.md) for SLURM/Enroot example)
-- **Asynchronous workers**: ProgramsDatabase, Samplers, and Evaluators work independently
-- **Dynamic scaling**: Automatically adjusts workers based on message load for maximum throughput (see [Scaling Guide](docs/SCALING.md))
+- **Independent workers**: ProgramsDatabase, Samplers, and Evaluators work independently and process tasks asynchronously to maximize throughput
+- **Multi-node execution**: Distributes across multiple nodes and allows adding Samplers or Evaluators from the same or different nodes to a running experiment (see [Cluster Setup](docs/CLUSTER_SETUP.md) for SLURM/Enroot example)
+- **Dynamic scaling**: Automatically spawns/terminates Samplers and Evaluators based on workload and available resources (see [Scaling Guide](docs/SCALING.md))
 
 In each iteration:
 
@@ -40,7 +36,7 @@ conda install pytorch==2.2.2 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 # 3. Start RabbitMQ
 sudo systemctl start rabbitmq-server
 
-# 4. Install FunSearchMQ
+# 4. Install DistributedFunSearch
 pip install .
 ```
 
@@ -52,19 +48,19 @@ This runs the example specification for discovering deletion-correcting codes:
 
 ```bash
 cd src/experiments/experiment1
-python -m funsearchmq
+python -m disfun
 
 # Resume from checkpoint (if needed)
-python -m funsearchmq --checkpoint path/to/checkpoint.pkl
+python -m disfun --checkpoint path/to/checkpoint.pkl
 ```
 
-## Adapting to your application
+## Evolve your problem
 
-FunSearchMQ can be adapted to discover algorithms for other problems by defining a new **specification file**. The specification defines the function to evolve and how to evaluate it.
+DistributedFunSearch can be adapted to discover algorithms for other problems by defining a new **specification file**. The specification defines the function to evolve and how to evaluate it.
 
 ### 1. Create your specification
 
-Add a new specification file to `src/funsearchmq/specifications/` (see existing examples in `Deletions/` or `IDS/` folders).
+Add a new specification file to `src/disfun/specifications/` (see existing examples in `Deletions/` or `IDS/` folders).
 
 **Specification structure:**
 

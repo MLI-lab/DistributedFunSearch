@@ -9,12 +9,12 @@ import signal
 import sys
 import time
 from typing import Sequence, Any
-from funsearchmq.scaling_utils import ResourceManager
-from funsearchmq import sampler
-from funsearchmq import process_utils
-from funsearchmq.process_entry import sampler_process_entry, load_config
+from disfun.scaling_utils import ResourceManager
+from disfun import sampler
+from disfun import process_utils
+from disfun.process_entry import sampler_process_entry, load_config
 import socket
-from funsearchmq import gpt
+from disfun import gpt
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

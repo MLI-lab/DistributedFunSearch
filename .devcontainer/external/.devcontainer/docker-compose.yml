@@ -12,7 +12,7 @@ services:
     privileged: true 
     volumes:
       - ~/.ssh:/root/.ssh  # Maps SSH folder (works across different users)
-      - ../../../:/workspace/DeCoSearch  
+      - ../../../:/workspace/DistributedFunSearch  
       - /media/:/media/
       - /srv/:/srv/
     network_mode: "host"  # Use host network mode

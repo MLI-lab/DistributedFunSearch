@@ -110,7 +110,7 @@ def get_spec_path() -> str:
        - Graph files: graph_ids_s{s}_n{n}.lmdb
        - Note: For IDS codes, s corrects s errors, requires min distance 2s+1
 
-    Graph files are loaded from: /workspace/DeCoSearch/src/graphs/
+    Graph files are loaded from: /workspace/DistributedFunSearch/src/graphs/
     To pre-compute IDS graphs, run: python src/construct_graphs/construct_ids_graphs.py
     """
     # Get the absolute directory of this file
