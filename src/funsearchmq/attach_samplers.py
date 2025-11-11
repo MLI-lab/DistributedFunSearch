@@ -3,8 +3,6 @@ import logging
 from logging import FileHandler
 from multiprocessing import current_process
 import argparse
-import aio_pika
-from yarl import URL
 import torch.multiprocessing as mp
 import os
 import signal
@@ -63,21 +61,6 @@ class TaskManager:
         Main async entry point. Establishes queue connections, starts initial processes,
         and optionally starts a scaling loop from ResourceManager.
         """
-        try: 
-            amqp_url = URL(
-                f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' #{self.config.rabbitmq.vhost}
-            ).update_query(heartbeat=480000)
-            connection = await aio_pika.connect_robust(amqp_url)
-        except Exception as e:
-            try:
-                self.logger.info("No vhost configured, connecting without.")
-                amqp_url = URL(
-                    f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/' #{self.config.rabbitmq.vhost}
-                ).update_query(heartbeat=480000)
-                connection = await aio_pika.connect_robust(amqp_url)
-            except Exception as e: 
-                self.logger.info(f"Cannot connect to rabbitmq. Change config file: {e}")
-
         resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
         self.tasks = [resource_logging_task]
 
@@ -86,11 +69,13 @@ class TaskManager:
 
         try:
             # Start initial sampler processes
-            self.start_initial_processes(amqp_url)
+            self.start_initial_processes()
 
-            # Create a connection/channel that ResourceManager can use to monitor queue sizes
+            # Create a connection/channel using utility function
             self.logger.info("Creating connection for scaling logic...")
-            connection = await aio_pika.connect_robust(str(amqp_url), timeout=300)
+            connection = await process_utils.create_rabbitmq_connection(
+                self.config, timeout=300
+            )
             channel = await connection.channel()
 
             # Declare the sampler queue (the queue we want to scale on)
@@ -126,9 +111,7 @@ class TaskManager:
         except Exception as e:
             self.logger.error(f"Exception in main_task: {e}")
 
-    def start_initial_processes(self, amqp_url):
-        amqp_url = str(amqp_url)
-
+    def start_initial_processes(self):
         # If self.config.sampler.gpt is True, just start samplers without GPU device assignment
         if self.config.sampler.gpt:
             self.logger.info("GPT mode enabled. Starting sampler processes without GPU device assignment.")

@@ -14,14 +14,18 @@ import aio_pika
 from typing import Optional, Callable
 
 
-async def create_rabbitmq_connection(config, timeout=300, heartbeat=300):
+async def create_rabbitmq_connection(config, timeout=300, heartbeat=172800):
     """
     Create a robust RabbitMQ connection with standard configuration.
 
     Args:
         config: Configuration object with rabbitmq settings
         timeout: Connection timeout in seconds
-        heartbeat: Heartbeat interval in seconds (default 300)
+        heartbeat: Heartbeat interval in seconds (default 172800 = 2 days)
+                   Set to 2 days for testing long-running experiments.
+                   If connection errors occur before this timeout, they are
+                   likely due to network issues or RabbitMQ server resource limits,
+                   not heartbeat timeouts.
 
     Returns:
         aio_pika.Connection: Robust connection to RabbitMQ
@@ -191,5 +195,66 @@ class ConnectionManager:
                 await self.connection.close()
             except Exception:
                 pass
-        
+
         return False  # Don't suppress exceptions
+
+
+async def with_reconnection(consume_func: Callable, logger: logging.Logger,
+                           component_name: str = "Component",
+                           initial_delay: float = 5.0,
+                           max_delay: float = 60.0):
+    """
+    Wrapper that adds automatic reconnection logic to consume functions.
+
+    When a connection error occurs, this wrapper will:
+    1. Log the error with helpful context
+    2. Wait with exponential backoff
+    3. Retry the consume function
+    4. Exit cleanly on cancellation signals
+
+    Args:
+        consume_func: Async function to wrap (should contain the consume loop)
+        logger: Logger instance for status messages
+        component_name: Name for log messages (e.g., "Evaluator", "Sampler")
+        initial_delay: Initial reconnection delay in seconds (default: 5)
+        max_delay: Maximum reconnection delay in seconds (default: 60)
+
+    Example:
+        async def consume_loop():
+            async with queue.iterator() as stream:
+                async for message in stream:
+                    await process(message)
+
+        await with_reconnection(consume_loop, logger, "Evaluator")
+    """
+    reconnect_delay = initial_delay
+
+    while True:  # Reconnection loop
+        try:
+            await consume_func()
+            # If consume_func exits normally, break the loop
+            break
+
+        except asyncio.CancelledError:
+            # Shutdown requested - exit reconnection loop
+            logger.info(f"{component_name} shutting down, exiting reconnection loop.")
+            break
+
+        except Exception as e:
+            # Connection error occurred - log details and retry
+            logger.error(
+                f"{component_name} connection error: {e}\n"
+                f"This can occur due to:\n"
+                f"  - RabbitMQ connection reset (network issues, heartbeat timeout)\n"
+                f"  - RabbitMQ server overload with many simultaneous connections\n"
+                f"  - Network interruptions in cluster environment\n"
+                f"Attempting to reconnect in {reconnect_delay:.1f} seconds..."
+            )
+
+            await asyncio.sleep(reconnect_delay)
+
+            # Exponential backoff up to max
+            reconnect_delay = min(reconnect_delay * 1.5, max_delay)
+
+            logger.info(f"{component_name} reconnecting after {type(e).__name__}...")
+            continue  # Retry connection

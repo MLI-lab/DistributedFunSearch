@@ -2,7 +2,6 @@ import asyncio
 import logging
 from logging import FileHandler
 import json
-import aio_pika
 import os
 import signal
 import sys
@@ -14,7 +13,6 @@ import datetime
 from funsearchmq.scaling_utils import ResourceManager
 from funsearchmq import process_utils
 from funsearchmq.process_entry import evaluator_process_entry, load_config
-from yarl import URL
 from funsearchmq import code_manipulation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -63,21 +61,6 @@ class TaskManager:
         return logger
 
     async def main_task(self, enable_scaling=True):
-        try: 
-            amqp_url = URL(
-                f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/{self.config.rabbitmq.vhost}' #{self.config.rabbitmq.vhost}
-            ).update_query(heartbeat=480000)
-            connection = await aio_pika.connect_robust(amqp_url)
-        except Exception as e:
-            try:
-                self.logger.info(f"No vhost configured, connecting without. Error message: {e}")
-                amqp_url = URL(
-                    f'amqp://{self.config.rabbitmq.username}:{self.config.rabbitmq.password}@{self.config.rabbitmq.host}:{self.config.rabbitmq.port}/' #{self.config.rabbitmq.vhost}
-                ).update_query(heartbeat=480000)
-                connection = await aio_pika.connect_robust(amqp_url)
-            except Exception as e: 
-                self.logger.info("Cannot connect to rabbitmq. Change config file.")
-
         resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
         self.tasks = [resource_logging_task]
 
@@ -88,11 +71,13 @@ class TaskManager:
             function_to_evolve = 'priority'
 
             # Start initial evaluator processes
-            self.start_initial_processes(self.template, function_to_evolve, amqp_url)
+            self.start_initial_processes(self.template, function_to_evolve)
 
-            # Create a connection/channel for scaling metrics
+            # Create a connection/channel for scaling metrics using utility function
             self.logger.info("Creating connection for scaling logic...")
-            connection = await aio_pika.connect_robust(str(amqp_url), timeout=300)
+            connection = await process_utils.create_rabbitmq_connection(
+                self.config, timeout=300
+            )
             channel = await connection.channel()
 
             # Declare the evaluator queue for scaling
@@ -127,8 +112,7 @@ class TaskManager:
         except Exception as e:
             self.logger.error(f"Exception occurred in main_task: {e}")
 
-    def start_initial_processes(self, template, function_to_evolve, amqp_url):
-        amqp_url = str(amqp_url)
+    def start_initial_processes(self, template, function_to_evolve):
         # Start initial evaluator processes
         ctx = mp.get_context('fork')  # Use fork for evaluators
         for i in range(self.config.num_evaluators):
