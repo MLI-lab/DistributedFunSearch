@@ -1,6 +1,6 @@
-# DeCoSearch Analysis Tools
+# DistributedFunSearch Analysis Tools
 
-This directory contains tools for analyzing checkpoint files generated during DeCoSearch experiments.
+This directory contains tools for analyzing checkpoint files generated during DistributedFunSearch experiments.
 
 ## Tools
 
@@ -58,12 +58,12 @@ python plot_evolution.py
 
 ## Installation
 
-The analysis tools use dependencies that are included in the main DeCoSearch package:
+The analysis tools use dependencies that are included in the main DistributedFunSearch package:
 - `matplotlib` (for plotting)
 - `tabulate` (for table formatting)
 - `numpy` (for computations)
 
-These are automatically installed when you run `pip install .` from the DeCoSearch root directory.
+These are automatically installed when you run `pip install .` from the DistributedFunSearch root directory.
 
 ## Checkpoint File Structure
 

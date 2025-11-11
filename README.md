@@ -56,7 +56,7 @@ python -m disfun --checkpoint path/to/checkpoint.pkl
 
 ## Evolve your problem
 
-DistributedFunSearch can be adapted to discover algorithms for other problems by defining a new **specification file**. The specification defines the function to evolve and how to evaluate it.
+Adapt DistributedFunSearch to your problem by defining a **specification file** (that specifies which function to evolve and how to evaluate it), **evaluation inputs** (what parameter values to test your evolved function on), and **evaluation outputs** (score and hash for deduplication, plus optional metrics like speed or memory).
 
 ### Create your specification
 
@@ -112,62 +112,55 @@ The evaluator executes this entire script, calling `evaluate()` with evaluation 
 
 **Evaluation inputs:**
 
-In `config.py`, specify what inputs to test your evolved function on:
+The specific problem instances that the evolved function is tested on are defined by **tuples**. Each tuple specifies one problem instance within a larger problem class. For example, for deletion-correcting codes, the tuple `(n=10, s=1, q=2)` specifies finding a binary code (q=2) of length n=10 that corrects s=1 deletion.
+
+The collection of all tuples forms the **evaluation inputs**. Each tuple contains problem-specific parameters that the `evaluate()` function receives. These parameters define the problem instance and may or may not be direct inputs to the evolved function.
+
+**Example configuration in `config.py`:**
 
 ```python
 evaluator=EvaluatorConfig(
-    spec_path="src/funsearchmq/specifications/YourProblem/model/baseline.txt",
-    # Define test input ranges, will generate all combinations
-    s_values=[1, 2],        # Parameter 1 values
-    start_n=[5, 7],         # Parameter 2 start values (one per s_value)
-    end_n=[10, 12],         # Parameter 2 end values (one per s_value)
-    q=2,                    # Parameter 3 (if needed)
-    # Test inputs will be: (5,1,2), (6,1,2), ..., (10,1,2), (7,2,2), ..., (12,2,2)
+    spec_path="src/disfun/specifications/Deletions/StarCoder2/load_graph/baseline.txt",
+    s_values=[1, 2],        # Scalar or list: error correction levels
+    start_n=[5, 7],         # Range start: code lengths (one per s_value)
+    end_n=[10, 12],         # Range end: code lengths (one per s_value)
+    q=2,                    # Scalar: alphabet size (2=binary, 4=DNA)
 
-    mode="last",            # How to aggregate scores: "last", "average", "weighted"
+    mode="last",            # How to aggregate scores: "last" = use largest n for each s, "average", "weighted"
     timeout=90,             # Timeout per evaluation in seconds
     max_workers=2,          # Parallel CPU processes per evaluator
 )
 ```
 
-The default configuration generates `(n, s, q)` tuples for the error-correcting codes problem. If your problem needs a different input structure, edit `__main__.py` line 897:
+**Customizing evaluation inputs:**
 
-```python
-# Default (deletion codes):
-inputs = [(n, s, config.evaluator.q) for s, start_n, end_n in zip(...) for n in range(start_n, end_n + 1)]
+To change which problem instances are tested, modify the `create_evaluation_inputs()` function in `src/disfun/__main__.py`. This function generates tuples from your config parameters. Customize it by:
+- Adding new parameters to `EvaluatorConfig` in `config.py`
+- Changing how parameters are combined into tuples in `create_evaluation_inputs()`
+- Updating your specification's `evaluate(params)` to unpack the tuple
 
-# Example custom (2D grid search):
-inputs = [(w, h) for w in range(5, 15) for h in range(5, 15)]
-```
-
-Your specification's `evaluate(params)` then receives these custom tuples.
+Your specification's `evaluate(params)` receives each tuple and uses it to define the problem instance.
 
 **Evaluation outputs:**
 
-The `evaluate()` function returns a tuple `(score, hash_value)`:
+The `evaluate()` function returns a tuple `(score, hash_value)` for each problem instance:
 - `score`: Numeric value measuring solution quality (higher is better by default)
 - `hash_value`: Optional hash for deduplication (set to `None` if not needed)
 
-The evaluator extracts `test_output[0]` as the score and `test_output[1]` as the hash (`evaluator.py` lines 349-351). If you need to extract more outputs or use them differently, modify `src/funsearchmq/evaluator.py` (to extract additional tuple elements) and `src/funsearchmq/programs_database.py` (to store/use them).
+**How scores are aggregated:**
 
-### Set termination conditions
+1. **Per problem instance** (in `src/disfun/evaluator.py` function `extract_evaluation_result()` line 66): Extracts `test_output[0]` as score and `test_output[1]` as hash, stores in `scores_per_test` dictionary with the full problem instance tuple as key (e.g., `(n, s, q)`)
 
-Define when the experiment should stop:
+2. **Across all problem instances** (in `src/disfun/programs_database.py` function `_reduce_score()` line 82): Aggregates the `scores_per_test` dictionary into a single score that determines sampling. Extracts `(n, s)` from full tuples and aggregates based on mode set in config (`"last"` = use largest n for each s, `"average"`, `"weighted"`)
 
-```python
-termination=TerminationConfig(
-    prompt_limit=1_000_000,                      # Stop after N prompts
-    optimal_solution_programs=50_000,            # Generate N more after finding optimal
-    target_solutions={(10, 1): 94, (12, 2): 30}  # Stop when these scores reached
-    # Set target_solutions={} to disable early termination
-)
-```
+To extract additional outputs (e.g., execution time, memory usage) or change how scores are combined, modify these two functions.
+
 
 ### Change the LLM 
 
 **For different open-source models:**
 
-Edit `src/funsearchmq/sampler.py` line ~64:
+Edit `src/disfun/sampler.py` line ~64:
 ```python
 checkpoint = "bigcode/starcoder2-15b"  # Any HuggingFace model ID
 ```
@@ -182,7 +175,7 @@ sampler=SamplerConfig(
 )
 ```
 
-To use a different GPT model, edit `src/funsearchmq/gpt.py` line 22:
+To use a different GPT model, edit `src/disfun/gpt.py` line 22:
 ```python
 def __init__(self, samples_per_prompt: int, model="gpt-4o-mini"):  # Change model here
 ```

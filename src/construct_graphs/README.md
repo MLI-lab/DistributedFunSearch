@@ -1,6 +1,6 @@
 # Graph Construction Scripts
 
-This directory contains standalone scripts for constructing graphs used in DeCoSearch experiments.
+This directory contains standalone scripts for constructing graphs used in DistributedFunSearch experiments.
 
 ## Deletion-Correcting Code Graphs
 
@@ -125,7 +125,7 @@ To use IDS graphs in your experiments:
 4. **Run your experiment**:
    ```bash
    cd src/experiments/experiment1
-   python -m decos
+   python -m disfun
    ```
 
 **Note:** The config uses a helper function `get_spec_path()` that automatically constructs the full path. Simply comment/uncomment the appropriate return statement to switch between Deletions and IDS specifications.

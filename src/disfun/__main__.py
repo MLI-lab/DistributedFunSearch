@@ -123,6 +123,33 @@ def initialize_process_logger(log_dir, process_type="Process"):
     return logger
 
 
+def create_evaluation_inputs(config):
+    """
+    Generate evaluation input tuples from config parameters.
+
+    Each tuple defines one problem instance. Customize this function to change
+    how config parameters are combined into evaluation inputs.
+
+    Args:
+        config: Configuration object with evaluator settings
+
+    Returns:
+        List of tuples, where each tuple contains problem-specific parameters
+
+    Example:
+        For config with s_values=[1, 2], start_n=[5, 7], end_n=[6, 8], q=2,
+        generates: [(5,1,2), (6,1,2), (7,2,2), (8,2,2)]
+    """
+    inputs = [
+        (n, s, config.evaluator.q)
+        for s, start_n, end_n in zip(
+            config.evaluator.s_values,
+            config.evaluator.start_n,
+            config.evaluator.end_n
+        )
+        for n in range(start_n, end_n + 1)
+    ]
+    return inputs
 
 
 class TaskManager:
@@ -894,7 +921,8 @@ if __name__ == "__main__":
         if not (len(config.evaluator.s_values) == len(config.evaluator.start_n) == len(config.evaluator.end_n)):
             raise ValueError("The number of elements in --s-values, --start-n, and --end-n must match.")
 
-        inputs = [(n, s, config.evaluator.q) for s, start_n, end_n in zip(config.evaluator.s_values, config.evaluator.start_n, config.evaluator.end_n) for n in range(start_n, end_n + 1)]
+        # Generate evaluation input tuples
+        inputs = create_evaluation_inputs(config)
  
         # Initialize the task manager
         task_manager = TaskManager(

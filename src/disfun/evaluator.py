@@ -63,6 +63,28 @@ import time
 logger = logging.getLogger('main_logger')
 
 
+def extract_evaluation_result(test_output, problem_instance):
+    """
+    Extract score and hash from evaluation output for a single problem instance.
+
+    Customize this function to change what gets extracted from each evaluation.
+
+    Args:
+        test_output: The output from evaluate(problem_instance)
+        problem_instance: The tuple defining the problem instance (e.g., (n, s, q))
+
+    Returns:
+        tuple: (score_key, score_value, hash_value) where:
+            - score_key: The key for storing this score (defaults to full problem instance tuple)
+            - score_value: Numeric score (test_output[0])
+            - hash_value: Hash for deduplication (test_output[1]) or None
+    """
+    score_key = problem_instance  # Use full tuple as key for consistency
+    score_value = test_output[0]
+    hash_value = test_output[1] if test_output[1] is not None else None
+    return score_key, score_value, hash_value
+
+
 class _FunctionLineVisitor(ast.NodeVisitor):
   """Visitor that finds the last line number of a function with a given name."""
 
@@ -340,11 +362,11 @@ class Evaluator:
                         self.cumulative_cpu_time += cpu_time
 
                     if runs_ok and test_output[0] is not None:
-                        # Store score with only (n, s) as key, stripping out q
-                        score_key = input[:2] if isinstance(input, tuple) and len(input) >= 3 else input
-                        scores_per_test[score_key] = test_output[0]
-                        if test_output[1] is not None:
-                            hash_value=test_output[1]
+                        # Extract score, key, and hash using the extraction function
+                        score_key, score_value, extracted_hash = extract_evaluation_result(test_output, input)
+                        scores_per_test[score_key] = score_value
+                        if extracted_hash is not None:
+                            hash_value = extracted_hash
                         logger.debug(f"Evaluator: scores_per_test {scores_per_test}")
                 except concurrent.futures.TimeoutError:
                     logger.warning(f"Task for input {input} timed out.")

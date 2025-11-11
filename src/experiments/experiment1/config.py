@@ -115,19 +115,24 @@ def get_spec_path() -> str:
     """
     # Get the absolute directory of this file
     base_dir = os.path.abspath(os.path.dirname(__file__))
-    # Look for the substring "DeCoSearch" in the path
-    idx = base_dir.find("DeCoSearch")
+    # Look for the repository name in the path (try new name first, then legacy name)
+    idx = base_dir.find("DistributedFunSearch")
     if idx != -1:
-        decos_base = base_dir[: idx + len("DeCoSearch")]
+        decos_base = base_dir[: idx + len("DistributedFunSearch")]
     else:
-        decos_base = base_dir
+        # Fallback to legacy name for backward compatibility
+        idx = base_dir.find("DeCoSearch")
+        if idx != -1:
+            decos_base = base_dir[: idx + len("DeCoSearch")]
+        else:
+            decos_base = base_dir
 
     # Change this line to switch between specifications
     # Default: Deletion-only codes with pre-computed graphs
-    return os.path.join(decos_base, "src", "funsearchmq", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
+    return os.path.join(decos_base, "src", "disfun", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
 
     # To use IDS codes (insertion/deletion/substitution), uncomment this instead:
-    #return os.path.join(decos_base, "src", "funsearchmq", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
+    #return os.path.join(decos_base, "src", "disfun", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -206,7 +211,7 @@ class WandbConfig:
                                Actual checkpoint folder will be: {checkpoints_base_path}/checkpoint_{run_name}/
     """
     enabled: bool = True
-    project: str = "funsearchmq"
+    project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
     log_interval: int = 300  # Log every 5 minutes

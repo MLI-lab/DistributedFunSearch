@@ -12,7 +12,7 @@ services:
     privileged: false 
     volumes:
       - ~/.ssh:/root/.ssh
-      - ../:/workspace/FunSearchMQ  # Mount project root (host) into /workspace/FunSearchMQ (container)
+      - ../:/workspace/DistributedFunSearch  # Mount project root (host) into /workspace/DistributedFunSearch (container)
       - /mnt/hdd_pool_zion/users/franziska/Checkpoints/Graphs:/mnt/graphs/    # optional graph dir
       - /srv/:/srv/
     networks:
@@ -24,7 +24,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    working_dir: /workspace/FunSearchMQ  
+    working_dir: /workspace/DistributedFunSearch  
     command: /bin/bash                 
 
   rabbitmq:

@@ -2,7 +2,7 @@
 Utility functions and classes for process and connection management.
 
 This module provides reusable patterns to reduce code duplication across
-the DeCoSearch codebase.
+the DistributedFunSearch codebase.
 """
 
 import asyncio
@@ -47,7 +47,7 @@ async def create_rabbitmq_connection(config, timeout=300, heartbeat=172800):
 
 async def declare_standard_queue(channel, queue_name: str):
     """
-    Declare a queue with standard DeCoSearch settings.
+    Declare a queue with standard DistributedFunSearch settings.
 
     Args:
         channel: aio_pika channel

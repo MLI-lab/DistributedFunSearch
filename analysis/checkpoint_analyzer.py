@@ -1,5 +1,5 @@
 """
-Checkpoint Analysis Tool for DeCoSearch
+Checkpoint Analysis Tool for DistributedFunSearch
 
 This script loads and analyzes pickled checkpoint files to inspect:
 - Island states and best programs
@@ -292,7 +292,7 @@ def main():
 
     print()
     print("╔════════════════════════════════════════════════════════════════════════════╗")
-    print("║                    DeCoSearch Checkpoint Analyzer                          ║")
+    print("║             DistributedFunSearch Checkpoint Analyzer                       ║")
     print("╚════════════════════════════════════════════════════════════════════════════╝")
     print()
 

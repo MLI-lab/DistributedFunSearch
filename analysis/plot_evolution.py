@@ -222,7 +222,7 @@ def main():
 
     print()
     print("╔════════════════════════════════════════════════════════════════════════════╗")
-    print("║                    DeCoSearch Evolution Plotter                            ║")
+    print("║             DistributedFunSearch Evolution Plotter                         ║")
     print("╚════════════════════════════════════════════════════════════════════════════╝")
     print()
 

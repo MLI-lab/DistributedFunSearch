@@ -1,5 +1,5 @@
 """
-DeCoSearch Analysis Package
+DistributedFunSearch Analysis Package
 
 Utilities for analyzing checkpoint files and visualizing evolution progress.
 """

@@ -82,15 +82,18 @@ import json
 def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], target_signatures=None) -> float:
     """
     Reduces per-test scores into a single score based on the specified mode.
-    Generates (n, s) pairs for each s in s_values, where n is in [start_n, end_n].
+    Extracts (n, s) from full problem instance tuples and aggregates for each s in s_values.
+
     Available modes:
-    - "last": Uses the score of the largest n for each s.
-    - "average": Averages scores across all (n, s) pairs.
-    - "weighted": Weighs scores by n to prioritize larger n-values.
+    - "last": Uses the score for the largest n (end_n) for each s value.
+    - "average": Averages scores across all n values for each s, then averages across s values.
+    - "weighted": Weights scores by n to prioritize larger n-values.
     - "relative_difference": Uses relative difference (actual - target) / target to normalize across targets.
 
     Args:
-        scores_per_test (dict): Dictionary mapping (n, s) tuples to scores.
+        scores_per_test (dict): Dictionary mapping problem instance tuples to scores.
+                               Keys can be full tuples like (n, s, q) or (n, s, q, k, ...).
+                               The first two elements are used as (n, s) for aggregation.
         mode (str): Scoring method to use.
         start_n (list): Start values for n per s-value.
         end_n (list): End values for n per s-value.
@@ -101,8 +104,13 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
         float: Final reduced score.
     """
     try:
-        # Convert string keys in scores_per_test to (int, int) tuples
-        parsed_scores = {eval(k): v for k, v in scores_per_test.items()}
+        # Convert string keys to tuples and extract (n, s) from full problem instance tuples
+        parsed_scores = {}
+        for k, v in scores_per_test.items():
+            key = eval(k) if isinstance(k, str) else k
+            # Extract (n, s) from full tuple: take first two elements
+            ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
+            parsed_scores[ns_key] = v
     except Exception as e:
         raise ValueError(f"Failed to parse scores_per_test keys: {e}")
 
