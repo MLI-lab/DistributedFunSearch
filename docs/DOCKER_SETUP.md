@@ -2,7 +2,7 @@
 
 DistributedFunSearch uses Docker Compose to run two containers: **disfun-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) for the evolutionary search with GPU support, and **rabbitmq** (`rabbitmq:3.13.4-management`) for message passing. Both containers communicate via a Docker bridge network.
 
-## CUDA Compatibility
+#### CUDA Compatibility
 
 The devcontainer uses PyTorch 2.2.2 with CUDA 12.1. Check your server's CUDA version with `nvidia-smi` and look for the version in the top-right corner. If it differs from 12.1, update the base image in `.devcontainer/Dockerfile` to match (e.g., `cuda11.8` or `cuda12.4`). Find compatible PyTorch Docker images [here](https://pytorch.org/get-started/previous-versions/).
 
