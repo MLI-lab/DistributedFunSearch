@@ -58,7 +58,7 @@ python -m disfun --checkpoint path/to/checkpoint.pkl
 
 DistributedFunSearch can be adapted to discover algorithms for other problems by defining a new **specification file**. The specification defines the function to evolve and how to evaluate it.
 
-### 1. Create your specification
+### Create your specification
 
 Add a new specification file to `src/disfun/specifications/` (see existing examples in `Deletions/` or `IDS/` folders).
 
@@ -108,7 +108,7 @@ The function names `evaluate` and `priority` are hardcoded in `__main__.py` (lin
 
 The evaluator executes this entire script, calling `evaluate()` with evaluation inputs.
 
-### 2. Configure evaluation inputs and outputs
+### Configure evaluation inputs and outputs
 
 **Evaluation inputs:**
 
@@ -150,7 +150,7 @@ The `evaluate()` function returns a tuple `(score, hash_value)`:
 
 The evaluator extracts `test_output[0]` as the score and `test_output[1]` as the hash (`evaluator.py` lines 349-351). If you need to extract more outputs or use them differently, modify `src/funsearchmq/evaluator.py` (to extract additional tuple elements) and `src/funsearchmq/programs_database.py` (to store/use them).
 
-### 3. Set termination conditions
+### Set termination conditions
 
 Define when the experiment should stop:
 
@@ -163,7 +163,7 @@ termination=TerminationConfig(
 )
 ```
 
-### 4. Change the LLM 
+### Change the LLM 
 
 **For different open-source models:**
 
