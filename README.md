@@ -54,6 +54,8 @@ python -m disfun
 python -m disfun --checkpoint path/to/checkpoint.pkl
 ```
 
+You can monitor message load in real time at `http://localhost:15672` (login: guest/guest). Enable the management plugin first with `sudo rabbitmq-plugins enable rabbitmq_management`.
+
 ## Evolve your problem
 
 Adapt DistributedFunSearch to your problem by defining a **specification file** (that specifies which function to evolve and how to evaluate it), **evaluation inputs** (what parameter values to test your evolved function on), and **evaluation outputs** (score and hash for deduplication, plus optional metrics like speed or memory).
