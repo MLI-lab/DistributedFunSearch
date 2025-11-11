@@ -6,7 +6,7 @@
 
 <p>&nbsp;</p>
 
-**DistributedFunSearch** (`disfun`) is a **multi-node distributed implementation of FunSearch** (Romera et al., 2024) that uses LLM-guided evolutionary search to discover novel algorithms. It uses RabbitMQ for asynchronous message passing and works with both API-based LLMs (e.g., GPT-4o via Azure OpenAI) and locally hosted models (defaulting to StarCoder2).
+**DistributedFunSearch** (`disfun`) is a **multi-node distributed implementation of [FunSearch](https://github.com/google-deepmind/funsearch)** ([Romera et al., 2024](https://www.nature.com/articles/s41586-023-06924-6)) that uses LLM-guided evolutionary search to discover novel algorithms. It uses RabbitMQ for asynchronous message passing and works with both API-based LLMs (e.g., GPT-4o via Azure OpenAI) and locally hosted models (defaulting to StarCoder2).
 
 - **Independent workers**: ProgramsDatabase, Samplers, and Evaluators work independently and process tasks asynchronously to maximize throughput
 - **Multi-node execution**: Distributes across multiple nodes and allows adding Samplers or Evaluators from the same or different nodes to a running experiment (see [Cluster Setup](docs/CLUSTER_SETUP.md) for SLURM/Enroot example)
