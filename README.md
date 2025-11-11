@@ -108,15 +108,13 @@ The function names `evaluate` and `priority` are hardcoded in `__main__.py` (lin
 
 The evaluator executes this entire script, calling `evaluate()` with evaluation inputs.
 
-### Configure evaluation inputs and outputs
-
-**Evaluation inputs:**
+### Configure your evaluation inputs
 
 The specific problem instances that the evolved function is tested on are defined by **tuples**. Each tuple specifies one problem instance within a larger problem class. For example, for deletion-correcting codes, the tuple `(n=10, s=1, q=2)` specifies finding a binary code (q=2) of length n=10 that corrects s=1 deletion.
 
 The collection of all tuples forms the **evaluation inputs**. Each tuple contains problem-specific parameters that the `evaluate()` function receives. These parameters define the problem instance and may or may not be direct inputs to the evolved function.
 
-**Example configuration in `config.py`:**
+**Configuration example:**
 
 ```python
 evaluator=EvaluatorConfig(
@@ -125,14 +123,12 @@ evaluator=EvaluatorConfig(
     start_n=[5, 7],         # Range start: code lengths (one per s_value)
     end_n=[10, 12],         # Range end: code lengths (one per s_value)
     q=2,                    # Scalar: alphabet size (2=binary, 4=DNA)
-
-    mode="last",            # How to aggregate scores: "last" = use largest n for each s, "average", "weighted"
     timeout=90,             # Timeout per evaluation in seconds
     max_workers=2,          # Parallel CPU processes per evaluator
 )
 ```
 
-**Customizing evaluation inputs:**
+**Customizing:**
 
 To change which problem instances are tested, modify the `create_evaluation_inputs()` function in `src/disfun/__main__.py`. This function generates tuples from your config parameters. Customize it by:
 - Adding new parameters to `EvaluatorConfig` in `config.py`
@@ -141,11 +137,22 @@ To change which problem instances are tested, modify the `create_evaluation_inpu
 
 Your specification's `evaluate(params)` receives each tuple and uses it to define the problem instance.
 
+### Configure your evaluation outputs and scoring
+
 **Evaluation outputs:**
 
 The `evaluate()` function returns a tuple `(score, hash_value)` for each problem instance:
 - `score`: Numeric value measuring solution quality (higher is better by default)
 - `hash_value`: Optional hash for deduplication (set to `None` if not needed)
+
+**Scoring configuration:**
+
+```python
+evaluator=EvaluatorConfig(
+    # ... evaluation input parameters ...
+    mode="last",  # How to aggregate scores: "last" = use largest n for each s, "average", "weighted"
+)
+```
 
 **How scores are aggregated:**
 
