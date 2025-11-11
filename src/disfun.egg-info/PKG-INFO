@@ -1,0 +1,26 @@
+Metadata-Version: 2.4
+Name: disfun
+Version: 0.1.0
+Summary: DistributedFunSearch - Multi-node distributed implementation of FunSearch with cluster support via RabbitMQ
+Requires-Python: >=3.10
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: transformers
+Requires-Dist: openai
+Requires-Dist: aio-pika
+Requires-Dist: yarl
+Requires-Dist: psutil
+Requires-Dist: GPUtil
+Requires-Dist: memory-profiler
+Requires-Dist: cloudpickle
+Requires-Dist: nvidia-ml-py
+Requires-Dist: accelerate
+Requires-Dist: lmdb
+Requires-Dist: python-Levenshtein
+Requires-Dist: tqdm
+Requires-Dist: wandb
+Requires-Dist: matplotlib
+Requires-Dist: pandas
+Requires-Dist: seaborn
+Requires-Dist: tabulate
+Requires-Dist: networkx
