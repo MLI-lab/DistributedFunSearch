@@ -35,7 +35,7 @@ class RabbitMQConfig:
       password: Password for authentication with the RabbitMQ server.
       vhost: Virtual host for isolation between experiments. Use '' for default vhost.
     """
-    host: str = 'localhost' #localhost or rabbitmq for docker or node IP address
+    host: str = 'rabbitmq' #localhost or rabbitmq for docker or node IP address
     port: int = 5672
     username: str = 'guest'
     password: str = 'guest'
@@ -205,9 +205,9 @@ class WandbConfig:
         checkpoints_base_path: Base directory for checkpoints (default: "./Checkpoints").
                                Actual checkpoint folder will be: {checkpoints_base_path}/checkpoint_{run_name}/
     """
-    enabled: bool = True
+    enabled: bool = False
     project: str = "disfun"
-    entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
+    entity: str = ""  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list)
@@ -314,8 +314,8 @@ class Config:
   scaling: ScalingConfig = dataclasses.field(default_factory=ScalingConfig)
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
-  num_samplers: int = 2
-  num_evaluators: int = 10
+  num_samplers: int = 1
+  num_evaluators: int = 1
   num_pdb: int = 1
 
 
