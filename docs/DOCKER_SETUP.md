@@ -1,112 +1,73 @@
 # Docker Setup Guide
 
-DistributedFunSearch uses **Docker Compose (v3.8)** to run two containers:
+DistributedFunSearch uses Docker Compose to run two containers: **disfun-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) for the evolutionary search with GPU support, and **rabbitmq** (`rabbitmq:3.13.4-management`) for message passing. Both containers communicate via a Docker bridge network.
 
-- **disfun-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) - Runs the evolutionary search with GPU support
-- **rabbitmq** (`rabbitmq:3.13.4-management`) - Message broker for asynchronous inter-process communication
+## CUDA Compatibility
 
-Both containers run inside a **Docker bridge network** (`app-network`) for internal communication.
+The devcontainer uses PyTorch 2.2.2 with CUDA 12.1. Check your server's CUDA version with `nvidia-smi` and look for the version in the top-right corner. If it differs from 12.1, update the base image in `.devcontainer/Dockerfile` to match (e.g., `cuda11.8` or `cuda12.4`). Find compatible PyTorch Docker images [here](https://pytorch.org/get-started/previous-versions/).
 
-## Installation Steps
+## Quick Start
 
-### 1. Start Docker Containers
+Start the containers from the `.devcontainer` directory:
 
 ```bash
 cd .devcontainer
 docker compose up --build -d
-```
-
-This will:
-- Pull required Docker images (PyTorch with CUDA 12.1, RabbitMQ with management plugin)
-- Create and start both containers in detached mode
-- Set up the bridge network for container communication
-
-### 2. Enter the Main Container
-
-```bash
 docker exec -it disfun-main bash
 ```
-
-### 3. Create Conda Environment
 
 Inside the container, initialize conda and create the environment:
 
 ```bash
-# Initialize conda for your shell (required inside Docker)
-conda init bash
-source ~/.bashrc
-
-# Create and activate the environment
+conda init bash && source ~/.bashrc
 conda create -n env python=3.11 pip numpy==1.26.4 -y
 conda activate env
 ```
 
-### 4. Install PyTorch (Skip if Using API-based LLM)
+Install PyTorch matching your CUDA version. For CUDA 12.1:
 
-If using a local LLM (e.g., StarCoder2):
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-If using OpenAI/Azure API (`sampler.gpt=True` in config), you can skip this step.
+For other CUDA versions find the matching installation command [here](https://pytorch.org/get-started/previous-versions/). You can skip this step if using OpenAI/Azure API.
 
-### 5. Install DistributedFunSearch
+Install DistributedFunSearch:
 
 ```bash
 cd /workspace/DistributedFunSearch
-
-# Standard installation
-pip install .
-
-# OR: Editable/development mode (changes to source code take effect immediately)
-pip install -e .
+pip install .  # or pip install -e . for development mode
 ```
 
-### 6. (Optional) Pre-download LLM
+Optionally pre-download the LLM (downloads to `/workspace/models/`):
 
-To download StarCoder2-15B ahead of time:
 ```bash
 cd src/experiments/experiment1
-python load_llm.py  # Downloads to /workspace/models/
+python load_llm.py  # Change cache_dir in load_llm.py to modify download location
 ```
 
-## Running an Experiment
+If you don't preload, the model downloads to `/mnt/models/` by default (change in `src/disfun/sampler.py:79`).
+
+Run an experiment:
 
 ```bash
 cd src/experiments/experiment1
 python -m disfun
 ```
 
-## Docker-Specific Configuration
+## Configuration
 
-### Network Architecture
+The main container connects to RabbitMQ via the Docker service name. In your `config.py`, set `host='rabbitmq'` (not `localhost`):
 
-- **Internal communication**: The main container connects to RabbitMQ via `rabbitmq:5672` (Docker service name)
-- **External access**: RabbitMQ Management Interface is exposed on host port `15672`
-- **Volume mounts**: Project directory is mounted at `/workspace/DistributedFunSearch` (changes sync between host and container)
-
-### RabbitMQ Connection
-
-In `config.py`, use the Docker service name:
 ```python
-rabbitmq=RabbitMQConfig(
-    host='rabbitmq',  # Docker service name, not 'localhost'
-    port=5672,
-)
+rabbitmq=RabbitMQConfig(host='rabbitmq', port=5672)
 ```
 
-### Accessing RabbitMQ Management Interface
+## RabbitMQ Management Interface
 
-The RabbitMQ Management Interface is a web-based dashboard for monitoring message load, processing rates, and system status.
+The web-based monitoring dashboard is enabled by default and available at `http://localhost:15672` with login credentials **guest/guest**.
 
-**Local access (same machine as Docker host):**
-```
-http://localhost:15672
-```
-
-**Remote access (Docker running on remote server):**
-
-If running on a remote server, use SSH tunneling to access the interface on your local machine:
+If running on a remote server, the interface is not directly accessible from your local machine. Forward port 15672 using an SSH tunnel from your local machine:
 
 ```bash
 # Standard SSH tunnel
@@ -116,47 +77,65 @@ ssh -L 15672:localhost:15672 user@remote-server -N -f
 ssh -J jump-user@jump-server -L 15672:localhost:15672 user@remote-server -N -f
 ```
 
-Then access at `http://localhost:15672` on your local machine.
+Then access at `http://localhost:15672` on your local machine and login with guest/guest.
 
-**Login credentials (default):**
-- **Username**: guest
-- **Password**: guest
+## Running Multiple Experiments
 
-### Running Multiple Experiments Simultaneously
+To run parallel experiments without interference, use RabbitMQ virtual hosts. Set a different vhost in each experiment's `config.py` (e.g., `vhost='exp1'`, `vhost='exp2'`), then create the vhost and set permissions:
 
-To run multiple experiments in parallel without interference, use RabbitMQ virtual hosts (vhosts):
-
-**1. Set different vhost for each experiment in `config.py`:**
-```python
-rabbitmq=RabbitMQConfig(
-    host='rabbitmq',
-    port=5672,
-    vhost='exp1'  # Use 'exp2', 'exp3', etc. for other experiments
-)
-```
-
-**2. Create the vhost in RabbitMQ:**
 ```bash
 docker exec rabbitmq rabbitmqctl add_vhost exp1
 docker exec rabbitmq rabbitmqctl set_permissions -p exp1 guest ".*" ".*" ".*"
 ```
 
-**3. Repeat for each experiment:**
+Repeat for each experiment with different vhost names. Each experiment will have completely isolated queues.
+
+## Multi-Node Setup
+
+To scale across multiple machines, run RabbitMQ and the ProgramsDatabase on a main node, then attach additional samplers and evaluators from worker nodes. The main node uses `.devcontainer/` (runs both RabbitMQ and disfun-main), while worker nodes use `.devcontainer/external/.devcontainer/` (runs only disfun-main).
+
+**Main node setup:**
+
+Start both containers and run the full experiment (includes ProgramsDatabase, samplers, and evaluators):
+
 ```bash
-docker exec rabbitmq rabbitmqctl add_vhost exp2
-docker exec rabbitmq rabbitmqctl set_permissions -p exp2 guest ".*" ".*" ".*"
+cd /workspace/DistributedFunSearch/.devcontainer
+docker compose up --build -d
+docker exec -it disfun-main bash
+# Follow installation steps, then:
+cd src/experiments/experiment1
+python -m disfun
 ```
 
-Each experiment with a different `vhost` will be completely isolated with separate queues and messages.
+**Worker node setup:**
 
-### Modifying Ports or Hostnames
+Start the external devcontainer which uses `network_mode: "host"` to share the host's network:
 
-To customize ports or hostnames, edit `.devcontainer/docker-compose.yml`:
+```bash
+cd /workspace/DistributedFunSearch/.devcontainer/external/.devcontainer
+docker compose up --build -d
+docker exec -it disfun-main bash
+```
 
-```yaml
-services:
-  rabbitmq:
-    ports:
-      - "15672:15672"  # Management interface
-      - "5672:5672"    # AMQP message passing
+Inside the worker container, follow the installation steps above (conda env, PyTorch, DistributedFunSearch). In `config.py`, set the RabbitMQ host to the main node's actual hostname or IP address:
+
+```python
+rabbitmq=RabbitMQConfig(
+    host='main-node-hostname',  # e.g., 'node1.cluster.com' or '192.168.1.10'
+    port=5672,
+)
+```
+
+Then attach only samplers and evaluators (don't run the full experiment, which would create a duplicate ProgramsDatabase):
+
+```bash
+cd src/experiments/experiment1
+
+# Attach evaluators only
+python -m disfun.attach_evaluators
+
+# Or attach samplers only
+python -m disfun.attach_samplers
+
+# Or run both in separate terminals
 ```

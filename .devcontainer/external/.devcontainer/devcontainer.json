@@ -2,7 +2,8 @@
     "name": "disfun-main",
     "dockerComposeFile": "docker-compose.yml",
     "service": "devcontainer",
-    "workspaceFolder": "/workspace/DistributedFunSearch/",
+    "workspaceFolder": "/workspace/DistributedFunSearch",
+    "remoteUser": "root",
     "overrideCommand": false,
     "forwardPorts": [3000],
     "customizations": {
@@ -11,7 +12,10 @@
           "eamodio.gitlens",
           "ms-python.python",
           "ms-toolsai.jupyter"
-        ]
+        ],
+        "settings": {
+          "terminal.integrated.cwd": "/workspace/DistributedFunSearch"
+        }
       }
     }
   }
