@@ -22,7 +22,7 @@ Once the node is allocated, start an interactive shell:
 srun --pty bash
 ```
 
-You can now run the enroot commands below on the compute node to build an enroot image.
+You can now run the enroot commands below on the compute node to build the enroot image.
 
 Download and convert a PyTorch image with the required CUDA version. For example, to install PyTorch 2.2.2 with CUDA 12.1:
 
