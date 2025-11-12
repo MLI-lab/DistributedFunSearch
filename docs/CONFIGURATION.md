@@ -1,4 +1,4 @@
-# Configuration Guide
+# Configuration guide
 
 DistributedFunSearch is configured through:
 1. **Config file** (`config.py`) - **Primary**: All experiment parameters
@@ -8,7 +8,7 @@ DistributedFunSearch is configured through:
 
 ---
 
-## Quick Start
+## Quick start
 
 **Minimal command** (all settings in config):
 ```bash
@@ -29,11 +29,11 @@ python -m disfun \
 
 ---
 
-## Configuration File (Primary)
+## Configuration file (primary)
 
 Experiments are configured via `config.py` in the experiment directory (e.g., `src/experiments/experiment1/config.py`).
 
-### Example Configuration
+### Example configuration
 
 ```python
 import dataclasses
@@ -70,9 +70,9 @@ config = Config(
 
 ---
 
-## Command-Line Arguments (Overrides)
+## Command-line arguments (overrides)
 
-### Essential Arguments
+### Essential arguments
 
 ```bash
 python -m disfun \
@@ -80,7 +80,7 @@ python -m disfun \
   --checkpoint ./checkpoint.pkl         # Resume from checkpoint (optional)
 ```
 
-### Path Overrides
+### Path overrides
 
 Override `config.paths.*` values for specific runs:
 
@@ -91,7 +91,7 @@ python -m disfun \
   --backup                              # Enable backup (overrides config.paths.backup_enabled)
 ```
 
-### Scaling Overrides
+### Scaling overrides
 
 Override `config.scaling.*` values:
 
@@ -105,7 +105,7 @@ python -m disfun \
 
 See [Scaling Guide](SCALING.md) for details on scaling behavior.
 
-### Termination Overrides
+### Termination overrides
 
 Override `config.termination.*` values:
 
@@ -130,9 +130,9 @@ python -m disfun  # Ensure config.sampler.gpt=True
 
 ---
 
-## Configuration Blocks Reference
+## Configuration blocks reference
 
-### Configuration Blocks
+### Configuration blocks
 
 <details>
 <summary><b>PathsConfig</b> - File system paths ⭐ NEW</summary>
@@ -466,11 +466,11 @@ Top-level config that combines all sub-configs.
 
 </details>
 
-## Specification Files
+## Specification files
 
 The function to evolve is defined in specification files at `src/disfun/specifications/`.
 
-### Directory Structure
+### Directory structure
 
 ```
 specifications/
@@ -485,7 +485,7 @@ specifications/
         └── load_graph/
 ```
 
-### Changing Specifications
+### Changing specifications
 
 Edit `get_spec_path()` in `config.py`:
 
@@ -500,7 +500,7 @@ def get_spec_path() -> str:
     #                     "IDS", "StarCoder2", "load_graph", "baseline.txt")
 ```
 
-### Graph Files
+### Graph files
 
 Pre-computed graphs are stored at `src/graphs/`:
 - Deletion codes: `graph_d_s{s}_n{n}_q{q}.lmdb`

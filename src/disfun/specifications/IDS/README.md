@@ -1,8 +1,8 @@
-# IDS (Insertion/Deletion/Substitution) Code Specifications
+# IDS (Insertion/Deletion/Substitution) code specifications
 
 This directory contains specifications for finding error-correcting codes that can correct insertions, deletions, AND substitutions using edit distance (Levenshtein distance).
 
-## Problem Formulation
+## Problem formulation
 
 **Objective:** Find large binary codes where all codewords have pairwise edit distance ≥ 2s + 1
 
@@ -10,13 +10,13 @@ This directory contains specifications for finding error-correcting codes that c
 
 **Example:** For s=1, we need minimum distance 3, meaning any codeword can be recovered even after 1 insertion, deletion, or substitution.
 
-## Graph Formulation
+## Graph formulation
 
 - **Nodes:** All binary strings of length n
 - **Edges:** Two nodes are connected if `edit_distance(node1, node2) < 2s + 1`
 - **Independent Set:** A set of nodes with no edges between them = valid code with sufficient minimum distance
 
-## Directory Structure
+## Directory structure
 
 ```
 IDS/
@@ -31,7 +31,7 @@ IDS/
 
 ## Usage
 
-### Option 1: Using Pre-computed Graphs (Recommended for n ≥ 8)
+### Option 1: Using pre-computed graphs (recommended for n ≥ 8)
 
 1. **Construct graphs first:**
    ```bash
@@ -60,7 +60,7 @@ IDS/
    python -m decos --config-path config.py
    ```
 
-### Option 2: Constructing Graphs On-the-Fly (For small n ≤ 7)
+### Option 2: Constructing graphs on-the-fly (for small n ≤ 7)
 
 Use this for small values of n where graph construction is fast enough:
 
@@ -76,7 +76,7 @@ evaluator = EvaluatorConfig(
 
 **Warning:** Graph construction has O(2^(2n)) complexity. For n=10, this means ~1 million pairwise comparisons per graph!
 
-## Key Differences from Deletion-Only Codes
+## Key differences from deletion-only codes
 
 | Aspect | Deletion Codes | IDS Codes |
 |--------|---------------|-----------|
@@ -108,13 +108,13 @@ Test 1: n=6, s=1 (min distance required: 3)
   Valid code (can correct 1 errors)
 ```
 
-## Performance Notes
+## Performance notes
 
 - **Graph construction time** scales as O(2^(2n)) due to computing all pairwise edit distances
 - **Memory usage** is similar to deletion-only codes (~40MB for n=10, s=1)
 - **Pre-computing graphs** is highly recommended for n ≥ 8
 
-## Known Optimal Solutions
+## Known optimal solutions
 
 For reference, here are some known optimal code sizes for IDS codes:
 
@@ -126,14 +126,14 @@ For reference, here are some known optimal code sizes for IDS codes:
 
 (Add more as you discover them!)
 
-## Implementation Details
+## Implementation details
 
 The specifications use the `python-Levenshtein` package for fast edit distance computation. This package:
 - Is written in C for performance
 - Implements the Wagner-Fischer algorithm
 - Has been added to `pyproject.toml` dependencies
 
-## Future Enhancements
+## Future enhancements
 
 Potential improvements:
 1. Add GPU-accelerated edit distance computation for very large n

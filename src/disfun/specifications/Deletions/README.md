@@ -1,8 +1,8 @@
-# Deletion Code Specifications
+# Deletion code specifications
 
 This directory contains specifications for finding error-correcting codes that can correct deletions using longest common subsequence (LCS).
 
-## Problem Formulation
+## Problem formulation
 
 **Objective:** Find large binary codes where all codewords share a common subsequence of length at most n - s - 1
 
@@ -10,13 +10,13 @@ This directory contains specifications for finding error-correcting codes that c
 
 **Example:** For s=1, we need LCS ≤ n-2, meaning any codeword can be recovered even after 1 deletion.
 
-## Graph Formulation
+## Graph formulation
 
 - **Nodes:** All binary strings of length n
 - **Edges:** Two nodes are connected if `LCS(node1, node2) ≥ n - s`
 - **Independent Set:** A set of nodes with no edges between them = valid deletion-correcting code
 
-## Directory Structure
+## Directory structure
 
 ```
 Deletions/
@@ -38,7 +38,7 @@ Deletions/
 
 ## Usage
 
-### Option 1: Using Pre-computed Graphs (Recommended for n ≥ 8)
+### Option 1: Using pre-computed graphs (recommended for n ≥ 8)
 
 1. **Graphs should already exist** in `src/graphs/` as `graph_s{s}_n{n}.lmdb` files
 
@@ -74,7 +74,7 @@ Deletions/
    python -m decos
    ```
 
-### Option 2: Constructing Graphs On-the-Fly (For small n ≤ 7)
+### Option 2: Constructing graphs on-the-fly (for small n ≤ 7)
 
 Use this for small values of n where graph construction is fast enough:
 
@@ -89,7 +89,7 @@ def get_spec_path() -> str:
 
 **Warning:** Graph construction has O(2^(2n)) complexity with dynamic programming for LCS computation.
 
-### Using Advanced Prompts
+### Using advanced prompts
 
 The `load_graph` directories contain multiple prompt versions (`prompt_1.txt`, `prompt_3.txt`, etc.) that have been evolved through the system. To use an advanced prompt:
 
@@ -99,7 +99,7 @@ return os.path.join(decos_base, "src", "decos", "specifications",
                    "Deletions", "gpt", "load_graph", "prompt_5.txt")
 ```
 
-## Key Differences from IDS Codes
+## Key differences from IDS codes
 
 | Aspect | Deletion Codes | IDS Codes |
 |--------|---------------|-----------|
@@ -128,13 +128,13 @@ Test 1: n=6, s=1 (LCS threshold: 5)
   Hash value: <some_hash>
 ```
 
-## Performance Notes
+## Performance notes
 
 - **Graph construction time** scales as O(2^(2n) × n²) due to LCS computation for all pairs
 - **Memory usage**: ~40MB for n=10, s=1
 - **Pre-computed graphs** are available in `src/graphs/` for common (n, s) pairs
 
-## Known Optimal Solutions
+## Known optimal solutions
 
 For reference, here are some known optimal code sizes for deletion-correcting codes:
 
@@ -148,21 +148,21 @@ For reference, here are some known optimal code sizes for deletion-correcting co
 
 For more optimal solutions, see `src/graphs/vt_solutions.json`
 
-## Implementation Details
+## Implementation details
 
 The specifications use:
 - **Dynamic programming** for efficient LCS computation
 - **Space-optimized DP** using only two rows instead of full n×n matrix
 - **Early termination** when LCS threshold is reached
 
-## LLM Models Supported
+## LLM models supported
 
 - **StarCoder2-15B**: Local inference, requires GPU with ~20GB VRAM
 - **GPT (Azure OpenAI)**: API-based inference, no local GPU required
 
 To switch between models, set `gpt=True` or `gpt=False` in `SamplerConfig` in your config file.
 
-## Future Enhancements
+## Future enhancements
 
 Potential improvements:
 1. Add test scripts for StarCoder2 specifications

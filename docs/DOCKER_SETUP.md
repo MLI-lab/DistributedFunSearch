@@ -1,10 +1,10 @@
-# Docker Setup Guide
+# Docker setup guide
 
 DistributedFunSearch uses Docker Compose to run two containers: **disfun-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) for the evolutionary search with GPU support, and **rabbitmq** (`rabbitmq:3.13.4-management`) for message passing. Both containers communicate via a Docker bridge network.
 
 **CUDA Compatibility:** The devcontainer uses PyTorch 2.2.2 with CUDA 12.1. Check your server's CUDA version with `nvidia-smi` and look for the version in the top-right corner. If it differs from 12.1, update the base image in `.devcontainer/Dockerfile` to match (e.g., `cuda11.8` or `cuda12.4`). Find compatible PyTorch Docker images [here](https://pytorch.org/get-started/previous-versions/).
 
-## Quick Start
+## Quick start
 
 Start the containers from the `.devcontainer` directory:
 
@@ -61,7 +61,7 @@ cd src/experiments/experiment1
 python -m disfun
 ```
 
-## RabbitMQ Management Interface
+## RabbitMQ management interface
 
 The web-based monitoring dashboard is enabled by default and available at `http://localhost:15672` with login credentials **guest/guest**.
 
@@ -77,7 +77,7 @@ ssh -J jump-user@jump-server -L 15672:localhost:15672 user@remote-server -N -f
 
 Then access at `http://localhost:15672` on your local machine and login with guest/guest.
 
-## Running Multiple Experiments
+## Running multiple experiments
 
 To run parallel experiments without interference, use RabbitMQ virtual hosts. Set a different vhost in each experiment's `config.py` (e.g., `vhost='exp1'`, `vhost='exp2'`), then create the vhost and set permissions:
 
@@ -88,7 +88,7 @@ docker exec rabbitmq rabbitmqctl set_permissions -p exp1 guest ".*" ".*" ".*"
 
 Repeat for each experiment with different vhost names. Each experiment will have completely isolated queues.
 
-## Multi-Node Setup
+## Multi-node setup
 
 To scale across multiple machines, run RabbitMQ and the ProgramsDatabase on a main node, then attach additional samplers and evaluators from worker nodes. The main node uses `.devcontainer/` (runs both RabbitMQ and disfun-main), while worker nodes use `.devcontainer/external/.devcontainer/` (runs only disfun-main).
 

@@ -1,4 +1,4 @@
-# Dynamic Scaling Configuration Guide
+# Dynamic scaling configuration guide
 
 DistributedFunSearch includes a dynamic scaling system that automatically spawns and terminates sampler and evaluator processes based on queue load and available system resources.
 
@@ -12,7 +12,7 @@ The scaling system monitors RabbitMQ queue load every `check_interval` seconds (
 
 All scaling parameters are configurable via the `ScalingConfig` class in your experiment's `config.py`.
 
-### ScalingConfig Parameters
+### ScalingConfig parameters
 
 ```python
 from src.experiments.experiment1.config import Config, ScalingConfig
@@ -38,7 +38,7 @@ config = Config(
 The `min_gpu_memory_gib` parameter should be adjusted based on the LLM's memory requirements.
 
 
-## Scaling Behavior
+## Scaling behavior
 
 ### Samplers
 
@@ -66,7 +66,7 @@ The `min_gpu_memory_gib` parameter should be adjusted based on the LLM's memory 
 - `evaluator_queue` is empty (0 messages)
 - Current evaluator count > `min_evaluators` (CLI argument, default: 1)
 
-## CLI Arguments
+## CLI arguments
 
 Additional scaling control via command-line arguments:
 
@@ -78,7 +78,7 @@ python -m disfun \
   --no-dynamic-scaling             # Disable auto-scaling entirely
 ```
 
-## Monitoring Scaling Activity
+## Monitoring scaling activity
 
 You can check the resource logs for scaling decisions:
 ```bash
