@@ -6,6 +6,28 @@ The cluster setup distributes work across multiple nodes:
 
 ## 1. Setup Steps
 
+### 1.1 Request Interactive Node
+
+Before building the enroot container, request an interactive compute node:
+
+```bash
+# Request a specific node
+salloc -p lrz-cpu --qos=cpu --mem=64G --nodelist=cpu-009
+
+# Or request any available node
+salloc -p lrz-cpu --qos=cpu --mem=64G
+```
+
+Once the node is allocated, start an interactive shell:
+
+```bash
+srun --pty bash
+```
+
+You can now run the enroot commands below on the compute node.
+
+### 1.2 Build Enroot Container
+
 Download and convert a PyTorch image with the required CUDA version to an enroot image.
 For example, to install PyTorch 2.2.2 with CUDA 12.1:
 
@@ -31,7 +53,7 @@ enroot export -o /desired/path/custom_name_with_rabbitmq.sqsh custom_name
 
 You can now delete the original `custom_name` image. Use `custom_name_with_rabbitmq.sqsh` as your container image in `exp1.sh`.
 
-### 2. Configure Experiment
+## 2. Configure Experiment
 
 Edit `src/experiments/experiment1/exp1.sh`:
 
@@ -56,7 +78,7 @@ PORT=15673    # RabbitMQ management interface
 PORT2=5672    # RabbitMQ AMQP message passing
 ```
 
-### 3. Submit SLURM Job
+## 3. Submit SLURM Job
 
 From the parent directory containing `DistributedFunSearch/`:
 
