@@ -6,7 +6,7 @@
 
 <p>&nbsp;</p>
 
-**DistributedFunSearch** (`disfun`) is a **multi-node distributed implementation of [FunSearch](https://github.com/google-deepmind/funsearch)** ([Romera et al., 2024](https://www.nature.com/articles/s41586-023-06924-6)) that uses LLM-guided evolutionary search to discover novel algorithms. It uses RabbitMQ for asynchronous message passing and works with both API-based LLMs (e.g., GPT-4o via Azure OpenAI) and locally hosted models (defaulting to StarCoder2).
+**DistributedFunSearch** (`disfun`) is a **multi-node distributed implementation of [FunSearch](https://github.com/google-deepmind/funsearch)** ([Romera et al., 2024](https://www.nature.com/articles/s41586-023-06924-6)) that uses LLM-guided evolutionary search to discover novel algorithms. It uses RabbitMQ for asynchronous message passing and supports local models (via vLLM) and closed-source API models (via LiteLLM) through a unified inference interface.
 
 - **Independent workers**: ProgramsDatabase, Samplers, and Evaluators work independently and process tasks asynchronously to maximize throughput
 - **Multi-node execution**: Distributes across multiple nodes and allows adding Samplers or Evaluators from the same or different nodes to a running experiment (see [Cluster Setup](docs/CLUSTER_SETUP.md) for SLURM/Enroot example)
@@ -33,11 +33,18 @@ conda activate env
 # 2. Install PyTorch (skip if using API-based LLM)
 conda install pytorch==2.2.2 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 
-# 3. Start RabbitMQ
+# 3. Install C compiler (required for vLLM/Triton)
+# For local models only - skip if using API-based LLM
+conda install -c conda-forge gcc_linux-64 gxx_linux-64 -y
+
+# 4. Install graph-tool (required for graph-based evaluation)
+conda install -c conda-forge graph-tool -y
+
+# 5. Start RabbitMQ
 sudo systemctl start rabbitmq-server
 
-# 4. Install DistributedFunSearch
-pip install .
+# 6. Install DistributedFunSearch
+pip install . # or pip install -e . for development mode
 ```
 
 See [Docker Setup](docs/DOCKER_SETUP.md) for container-based installation or [Cluster Setup](docs/CLUSTER_SETUP.md) for cluster execution.
@@ -56,59 +63,90 @@ python -m disfun --checkpoint path/to/checkpoint.pkl
 
 You can monitor message load in real time at `http://localhost:15672` (login: guest/guest). Enable the management plugin first with `sudo rabbitmq-plugins enable rabbitmq_management`.
 
+The default configuration uses StarCoder2-15B (local model). To optionally use API models instead, see the "Change the LLM" section.
+
 ## Evolve your problem
 
-Adapt DistributedFunSearch to your problem by defining a **specification file** (that specifies which function to evolve and how to evaluate it), **evaluation inputs** (what parameter values to test your evolved function on), and **evaluation outputs** (score and hash for deduplication, plus optional metrics like speed or memory).
+Adapt DistributedFunSearch to your problem by defining a **specification** (what to solve), **prompt style** (how to format LLM output), **evaluation inputs** (what parameter values to test), and **evaluation outputs** (score and hash for deduplication).
 
 ### Create your specification
 
-Add a new specification file to `src/disfun/specifications/` (see existing examples in `Deletions/` or `IDS/` folders).
+DistributedFunSearch uses a **modular specification system** with two independent components:
 
-**Specification structure:**
+1. **Problem description** (what to solve) - Contains problem statement, imports, helper functions, and baseline function
+2. **Prompt style** (how to respond) - Defines output format (code only, code + reasoning, etc.)
+
+**Basic setup:**
+
+Create `src/disfun/specifications/YourTask/problem_descriptions/baseline.txt`:
 
 ```python
 """
-[Problem description that becomes the LLM prompt]
-Improve the `your_function` function over its previous versions below.
-Keep the code short and comment for easy understanding.
+[Problem description]
+Explain your problem, constraints, and what the function should optimize.
+
+Improve the priority function over its previous versions.
+Keep the code short.
 """
 
 import your_dependencies
 
-# Helper functions and classes that define your problem
+# Helper functions
 def helper_function(...):
-    ...
+    pass
 
-# Evaluation entry point, must be named "evaluate"
-# Called by evaluator with test inputs
+# Evaluation entry point
 def evaluate(params):
     input1, input2, input3 = params
     result, hash_value = solve(input1, input2, input3)
-    return (score, hash_value)  # Score and hash for deduplication
+    return (score, hash_value)
 
-# Main evaluation logic which uses the evolved function
+# Main evaluation logic
 def solve(input1, input2, input3):
-    # Your problem-specific logic that uses the priority function
+    # Uses the evolved priority function
     priorities = {item: priority(item, ...) for item in items}
     # ... use priorities to construct solution ...
     return solution, hash_value
 
-# The function that gets evolved by the LLM, must be named "priority"
+# Function to evolve
 def priority(item, context):
     """Returns the priority/score for the given item."""
-    return 0.0  # Baseline implementation
+    return 0.0
 ```
 
-**Explanation:**
-- Docstring: Becomes the problem context in the LLM prompt
-- Helper functions: Defines your problem (graph construction, constraints, etc.)
-- `evaluate(params)`: Entry point called by evaluator
-- `solve(...)`: Implements evaluation logic using the evolved function
-- `priority(item, context)`: The function that the LLM evolves
+**Configure in config.py:**
 
-The function names `evaluate` and `priority` are hardcoded in `__main__.py` (lines 284, 661). If you want to use different names, you also need to update them there.
+```python
+from disfun.config import Config, EvaluatorConfig, PromptStyleConfig
 
-The evaluator executes this entire script, calling `evaluate()` with evaluation inputs.
+config = Config(
+    evaluator=EvaluatorConfig(
+        spec_path="src/disfun/specifications/YourTask",
+        problem_description="baseline",  # Which problem variant
+    ),
+
+    prompt_style=PromptStyleConfig(
+        preset="eoh",  # "funsearch" (code only), "eoh" (thought + code), or "extended_eoh" (thinking + thought + code)
+    )
+)
+```
+
+**Available prompt styles:**
+
+- `funsearch`: Code only, minimal tokens
+- `eoh`: One-sentence algorithm description + code (recommended)
+- `extended_eoh`: Full reasoning + summary + code (for complex problems)
+
+**Creating variants:**
+
+You can create multiple problem descriptions (e.g., `explicit_constraints.txt`, `with_hints.txt`) and switch between them in config. See [Prompt Construction Guide](docs/PROMPTS.md) for details on creating custom variants and understanding how prompts are built.
+
+**Key points:**
+
+- Function names `evaluate` and `priority` are hardcoded in `__main__.py` (lines 284, 661)
+- The evaluator executes the entire specification file, calling `evaluate()` with test inputs
+- Helper functions define your problem (graph construction, constraints, etc.)
+- The `priority` function is what the LLM evolves
 
 ### Configure your evaluation inputs
 
@@ -120,7 +158,8 @@ The `evaluate()` function in your specification receives each tuple and uses the
 
 ```python
 evaluator=EvaluatorConfig(
-    spec_path="src/disfun/specifications/Deletions/StarCoder2/load_graph/baseline.txt",
+    spec_path="src/disfun/specifications/Deletions",
+    problem_description="baseline",  # Which problem variant to use
     s_values=[1, 2],        # Scalar or list: error correction levels
     start_n=[5, 7],         # Range start: code lengths (one per s_value)
     end_n=[10, 12],         # Range end: code lengths (one per s_value)
@@ -165,39 +204,61 @@ evaluator=EvaluatorConfig(
 To extract additional outputs (e.g., execution time, memory usage) or change how scores are combined, modify these two functions.
 
 
-### Change the LLM 
+### Change the LLM
 
-**For different open-source models:**
+Edit the `model` field in `config.py` to switch between models:
 
-Edit `src/disfun/sampler.py` line ~64:
-```python
-checkpoint = "bigcode/starcoder2-15b"  # Any HuggingFace model ID
-```
-
-**For OpenAI models:**
-
-In `config.py`, enable GPT mode:
+**Local models:**
 ```python
 sampler=SamplerConfig(
-    gpt=True,
-    # ... other sampler config
+    model="bigcode/starcoder2-15b",
+    # or: "meta-llama/Meta-Llama-3.1-70B-Instruct"
+    # or: "mistralai/Mistral-7B-Instruct-v0.2"
 )
 ```
 
-To use a different GPT model, edit `src/disfun/gpt.py` line 22:
+Each sampler loads the model on its assigned GPU using vLLM Python API.
+
+Models are automatically downloaded to `~/.cache/huggingface/` on first use. To change the cache location, either set it in config:
 ```python
-def __init__(self, samples_per_prompt: int, model="gpt-4o-mini"):  # Change model here
+sampler=SamplerConfig(
+    model="bigcode/starcoder2-15b",
+    cache_dir="/your/custom/cache/path",  # Optional: custom cache location
+)
 ```
 
-Then export your Azure OpenAI credentials:
+Or use an environment variable:
 ```bash
-export AZURE_OPENAI_API_KEY=<your-key>
-export AZURE_OPENAI_API_VERSION=<your-version>
+export HF_HOME=/your/custom/cache/path
 ```
+
+**API models :**
+```python
+sampler=SamplerConfig(
+    model="gpt-4o-mini",
+    # or: "claude-3-5-sonnet-20241022"
+    # or: "together_ai/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+)
+```
+
+For API models, copy `.env.example` to `.env` and add your API keys:
+```bash
+cp .env.example .env
+# Edit .env and add: OPENAI_API_KEY=sk-...
+```
+
+See [LiteLLM providers documentation](https://docs.litellm.ai/docs/providers) for supported API models.
+
+**Implementation:**
+
+The system uses:
+- **Local models**: Each sampler loads the model using vLLM Python API (one model instance per GPU)
+- **API models**: LiteLLM client for unified access to multiple API providers
 
 ## Documentation
 
 - [Configuration Guide](docs/CONFIGURATION.md): Detailed configuration options, CLI arguments, and config blocks
+- [Prompt Construction Guide](docs/PROMPTS.md): How prompts are built, available problem descriptions and styles, creating custom variants
 - [Scaling Guide](docs/SCALING.md): Explanation on how dynamic resource scaling is implemented
 - [Docker Setup](docs/DOCKER_SETUP.md): Setup with Docker containers
 - [Cluster Setup](docs/CLUSTER_SETUP.md): Setup on cluster with SLURM and enroot 

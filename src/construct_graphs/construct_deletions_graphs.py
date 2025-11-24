@@ -1,10 +1,10 @@
 """
 Standalone script to construct graphs for deletion-correcting codes.
 
-Nodes are q-ary strings of length n (e.g., binary for q=2, DNA for q=4).
+Nodes are q-ary strings of length n (e.g. - binary for q=2 - DNA for q=4).
 Two nodes are connected if they share a common subsequence of length at least n-s.
 
-For a code to correct s deletions, no two codewords can share a subsequence of length >= n-s.
+For a code to correct s deletions - no two codewords can share a subsequence of length >= n-s.
 So an independent set in this graph is a deletion-correcting code.
 
 Usage:
@@ -15,17 +15,17 @@ and save them to LMDB databases in the format: graph_d_s{s}_n{n}_q{q}.lmdb
 
 Parallelization Strategy:
     To avoid creating a massive list of all sequence pairs in memory (which would require
-    ~15TB for n=10, q=4), workers generate pairs on-the-fly from assigned index ranges.
+    ~15TB for n=10, q=4) - workers generate pairs on-the-fly from assigned index ranges.
 
-    For N sequences, we need to compute all pairs (i,j) where i < j:
+    For N sequences - we need to compute all pairs (i,j) where i < j:
     - Total pairs: N(N-1)/2
-    - Each worker is assigned a range of 'i' indices: [start_i, end_i)
-    - For each i in its range, the worker compares sequence[i] with all sequence[j] where j > i
+    - Each worker is assigned a range of 'i' indices: [start_i - end_i)
+    - For each i in its range - the worker compares sequence[i] with all sequence[j] where j > i
     - This ensures no duplicate comparisons (each pair is processed exactly once)
 
     Load balancing: Index ranges are assigned such that each worker processes approximately
     the same number of pairs. Early indices (small i) have more work since they compare with
-    more j values, so workers processing early indices get fewer indices.
+    more j values - so workers processing early indices get fewer indices.
 
     How it works:
         Using the quadratic formula to solve for index boundaries:
@@ -48,11 +48,11 @@ def _compute_edges_chunk(args):
     Worker function to compute edges for a chunk of sequence pairs.
 
     Args:
-        args: Tuple of (worker_id, start_i, end_i, sequences, n, s)
-              Worker generates pairs from range [start_i, end_i) to save memory
+        args: Tuple of (worker_id - start_i - end_i - sequences - n - s)
+              Worker generates pairs from range [start_i - end_i) to save memory
 
     Returns:
-        List of edges (seq1, seq2) that should be connected
+        List of edges (seq1 - seq2) that should be connected
     """
     worker_id, start_i, end_i, sequences, n, s = args
     edges = []
@@ -92,7 +92,7 @@ def has_common_subsequence(seq1, seq2, n, s):
         s: Number of deletions to correct
 
     Returns:
-        bool: True if LCS length >= n-s, False otherwise
+        bool: True if LCS length >= n-s - False otherwise
     """
     threshold = n - s
     if threshold <= 0:
@@ -124,7 +124,7 @@ def generate_deletion_graph(n, s, q=2, max_workers=None):
     Args:
         n: Length of strings
         s: Number of deletions to correct
-        q: Alphabet size (default: 2 for binary, 4 for DNA)
+        q: Alphabet size (default: 2 for binary - 4 for DNA)
         max_workers: Number of parallel workers (default: cpu_count())
 
     Returns:
@@ -153,7 +153,7 @@ def generate_deletion_graph(n, s, q=2, max_workers=None):
 
     def cumulative_pairs_at_index(k):
         """Calculate total pairs from i=0 to i=k-1"""
-        return k * n_sequences - k * (k + 1) // 2
+        return k * n_sequences, k * (k + 1) // 2
 
     worker_args = []
     current_i = 0
@@ -230,7 +230,7 @@ def save_graph_to_lmdb(adjacency, output_path):
     map_size_bytes = int(estimated_total_bytes * 1.5)
     map_size_gb = (map_size_bytes // (1024**3)) + 1
 
-    # Minimum 10GB, maximum reasonable size based on system
+    # Minimum 10GB - maximum reasonable size based on system
     map_size_gb = max(10, map_size_gb)
     map_size_bytes = map_size_gb * 1024 * 1024 * 1024
 
@@ -260,7 +260,7 @@ def construct_and_save_graph(n, s, q, output_dir, max_workers=None):
     Args:
         n: Length of strings
         s: Number of deletions to correct
-        q: Alphabet size (2 for binary, 4 for DNA)
+        q: Alphabet size (2 for binary - 4 for DNA)
         output_dir: Directory to save the graph
         max_workers: Number of parallel workers (default: cpu_count())
     """
@@ -287,13 +287,13 @@ if __name__ == "__main__":
     print("=" * 70)
     print()
 
-    # Alphabet size: 2 for binary, 4 for DNA (quaternary)
+    # Alphabet size: 2 for binary - 4 for DNA (quaternary)
     q = 4
 
     # Number of parallel workers (set to None to use all available CPU cores)
     max_workers = 16
 
-    # Define (n, s) pairs to construct graphs for
+    # Define (n - s) pairs to construct graphs for
     # Adjust these based on your experimental needs
     params = [
         # s=1: single deletion correction

@@ -1,0 +1,5 @@
+First, reason about how to improve the priority function based on the examples below. Next, describe your new approach in one sentence. Finally,
+implement it in Python. Use this format:
+<thinking>Your reasoning</thinking>
+<thought>One-sentence description</thought>
+<code>Your implementation</code>

@@ -9,7 +9,8 @@ import subprocess
 import cloudpickle
 import warnings
 import hashlib
-import psutil  
+import psutil
+import shutil  
 
 
 # Define the main container path
@@ -82,12 +83,13 @@ class DummySandbox:
 
 class ExternalProcessSandbox(DummySandbox):
     """Sandbox that executes the code in a separate Python process on the same host."""
-    def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", local_id=None):
+    def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", local_id=None, graph_dir=None):
         super(ExternalProcessSandbox, self).__init__()
         self.local_id = local_id
         self.output_path = ensure_dir_exists(pathlib.Path(base_path) / f"sandbox{self.local_id}")
         self.timeout_secs = timeout_secs
         self.python_path = python_path
+        self.graph_dir = graph_dir  # Store graph_dir to pass to subprocess
         self.input_path = ensure_dir_exists(self.output_path / "inputs")
 
     def _exec(self, call_data_path: pathlib.Path, input_path: pathlib.Path, error_file_path: pathlib.Path) -> bool:
@@ -96,7 +98,7 @@ class ExternalProcessSandbox(DummySandbox):
         The container (CONTAINER_MAIN) will execute the LLM-generated method from prog.pickle using input.pickle as input,
         writing the output to output.pickle.
 
-        Process group management ensures that if this process dies, all child processes are killed.
+        Process group management ensures that if this process dies - all child processes are killed.
         """
         prog_path = call_data_path / "prog.pickle"   # Serialized Python function
         output_file = call_data_path / "output.pickle"  # Where output will be written
@@ -117,6 +119,11 @@ class ExternalProcessSandbox(DummySandbox):
 
         process = None
         try:
+            # Prepare environment variables
+            env = os.environ.copy()
+            if self.graph_dir:
+                env['GRAPH_DIR'] = str(self.graph_dir)
+
             # Use Popen with start_new_session=True to create a new process group
             # This allows us to kill the entire process tree if needed
             process = subprocess.Popen(
@@ -124,6 +131,7 @@ class ExternalProcessSandbox(DummySandbox):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=os.getcwd(),
+                env=env,  # Pass environment variables including GRAPH_DIR
                 start_new_session=True  # Creates new process group
             )
 
@@ -181,7 +189,7 @@ class ExternalProcessSandbox(DummySandbox):
         function_to_run: str,
         test_input,
         timeout_seconds: int,
-        count: int, 
+        count: int
     ) -> tuple[Any, bool, pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
         """
         Executes the function in a sandboxed environment.
@@ -224,3 +232,32 @@ class ExternalProcessSandbox(DummySandbox):
                 return result, True, cpu_time, self.output_path, input_file, error_file
         except Exception as e:
             return None, False, 0.0, self.output_path, input_file, error_file
+
+    def cleanup_call_directories(self, count: int):
+        """
+        Clean up call directory after evaluation to save disk space.
+        Removes the call{count} directory including prog.pickle and output.pickle.
+        Keeps stderr logs and input files (inputs are reused).
+
+        Args:
+            count: The call number to clean up
+        """
+        try:
+            call_data_folder = self.output_path / f"call{count}"
+            if call_data_folder.exists():
+                shutil.rmtree(call_data_folder, ignore_errors=True)
+        except Exception as e:
+            # Don't fail evaluation if cleanup fails, just log it
+            pass
+
+    def cleanup_all(self):
+        """
+        Clean up the entire sandbox directory for this evaluator.
+        Call this during evaluator shutdown.
+        """
+        try:
+            if self.output_path.exists():
+                shutil.rmtree(self.output_path, ignore_errors=True)
+        except Exception as e:
+            # Don't fail if cleanup fails
+            pass

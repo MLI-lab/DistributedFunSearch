@@ -1,14 +1,14 @@
 # Copyright 2023 DeepMind Technologies Limited
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the Apache License - Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #    http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
+# Unless required by applicable law or agreed to in writing - software
 # distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND - either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
@@ -22,14 +22,14 @@ Differences from the original DeepMind FunSearch version
   generated program on test inputs in isolated subprocesses.
 * Uses multiprocessing with CPU parallelism (via `ProcessPoolExecutor`) to evaluate
   multiple inputs in parallel.
-* Tracks and publishes per-sample CPU time, along with GPU time and token counts
+* Tracks and publishes per-sample CPU time - along with GPU time and token counts
   received from the sampler.
-* Publishes results back to the database queue with functional scores, hashed outputs,
+* Publishes results back to the database queue with functional scores - hashed outputs,
   and a flag indicating whether an optimal solution was found.
 * Logs full outputs for prompts with structurally identical few-shot examples,
   allowing downstream deduplication and analysis.
 * Parses LLM output by extracting only the first valid function body from generated code.
-  If the LLM generates multiple functions or malformed code, only the first parseable
+  If the LLM generates multiple functions or malformed code - only the first parseable
   function body is kept and the rest is silently discarded.
 
 """
@@ -86,19 +86,27 @@ def extract_evaluation_result(test_output, problem_instance):
 
 
 class _FunctionLineVisitor(ast.NodeVisitor):
-  """Visitor that finds the last line number of a function with a given name."""
+  """Visitor that finds the start and end line numbers of a function with a given name."""
 
   def __init__(self, target_function_name: str) -> None:
     self._target_function_name: str = target_function_name
+    self._function_start_line: int | None = None
     self._function_end_line: int | None = None
 
-  def visit_FunctionDef(self, node: Any) -> None:  
-    """Collects the end line number of the target function."""
+  def visit_FunctionDef(self, node: Any) -> None:
+    """Collects the start and end line numbers of the target function."""
     if node.name == self._target_function_name:
-      # node.end_lineo extracts the last name of the currently visited function when it matches the function name we initalized the class with 
+      # node.lineno is the line with 'def' - node.end_lineno is the last line
+      self._function_start_line = node.lineno
       self._function_end_line = node.end_lineno
-    # calling it will continue normal traversal of the AST 
+    # calling it will continue normal traversal of the AST
     self.generic_visit(node)
+
+  @property
+  def function_start_line(self) -> int:
+    """Line number of the 'def' line of function `target_function_name`."""
+    assert self._function_start_line is not None  # Check internal correctness.
+    return self._function_start_line
 
   # Allows to access the functions end line number after the AST has been visited
   @property
@@ -108,26 +116,180 @@ class _FunctionLineVisitor(ast.NodeVisitor):
     return self._function_end_line
 
 
-def _trim_function_body(generated_code: str) -> str:
-  """Extracts the body of the generated function, trimming anything after it."""
+def _extract_three_tier(generated_output: str) -> tuple[str, str | None, str | None]:
+  """Extract thinking - thought - and code from model output using XML tags.
+
+  Supports formats:
+  1. Extended EoH: <thinking>...</thinking><thought>...</thought><code>...</code>
+  2. EoH: <thought>...</thought><code>...</code>
+  3. FunSearch: raw code (fallback to AST parsing)
+
+  Args:
+      generated_output: Raw LLM output
+
+  Returns:
+      tuple: (code_body, thought, thinking)
+          - code_body: Cleaned function body (ready to insert into template)
+          - thought: One-sentence algorithm description (EoH) or None
+          - thinking: Full chain-of-thought reasoning (extended_eoh) or None
+  """
+  if not generated_output:
+    return '', None, None
+
+  # Try XML tag extraction
+  import re
+  thinking_match = re.search(r'<thinking>(.*?)</thinking>', generated_output, re.DOTALL)
+  thought_match = re.search(r'<thought>(.*?)</thought>', generated_output, re.DOTALL)
+  code_match = re.search(r'<code>(.*?)</code>', generated_output, re.DOTALL)
+
+  # Extract components
+  thinking = thinking_match.group(1).strip() if thinking_match else None
+  thought = thought_match.group(1).strip() if thought_match else None
+
+  if code_match:
+    # <code> tags found - extract and parse code with AST
+    raw_code = code_match.group(1).strip()
+    logger.debug(f"Extracted code from <code> tags ({len(raw_code)} chars)")
+    cleaned_code = _trim_function_body_ast(raw_code)
+    logger.debug(f"Cleaned code after AST parsing ({len(cleaned_code) if cleaned_code else 0} chars):\n{cleaned_code if cleaned_code else '(empty)'}")
+    return cleaned_code, thought, thinking
+
+  # Fallback: No <code> tags - but may have <thought>/<thinking> tags
+  # Remove thought/thinking tags from output and treat the rest as code
+  code_to_parse = generated_output
+  if thought_match or thinking_match:
+    logger.debug(f"Found <thought> or <thinking> tags without <code> tags. Extracting thought/thinking and parsing remainder as code.")
+    # Remove thought and thinking tags from the generated output
+    code_to_parse = re.sub(r'<thinking>.*?</thinking>\s*', '', code_to_parse, flags=re.DOTALL)
+    code_to_parse = re.sub(r'<thought>.*?</thought>\s*', '', code_to_parse, flags=re.DOTALL)
+  else:
+    logger.debug(f"No XML tags found, treating entire output as code")
+
+  cleaned_code = _trim_function_body_ast(code_to_parse)
+  logger.debug(f"Cleaned code after AST parsing ({len(cleaned_code) if cleaned_code else 0} chars):\n{cleaned_code if cleaned_code else '(empty)'}")
+  return cleaned_code, thought, thinking
+
+
+def _trim_function_body_ast(generated_code: str) -> str:
+  """Extracts the body of the generated function using AST parsing.
+
+  Handles both:
+  1. Full function with header: `def priority_v1(...):\n    return 0.0`
+  2. Function body only (fallback): `return 0.0`
+
+  Parses the code as-is - extracts body - preserves exact indentation from LLM.
+  """
   if not generated_code:
     return ''
-  # wraps the code in a fake function header because generated_code is just the body of the function (completes def priority_vX):
-  code = f'def fake_function_header():\n{generated_code}'
-  tree = None
-  # We keep trying and deleting code from the end until the parser succeeds.
-  while tree is None:
-    try:
-      tree = ast.parse(code)
-    # Loop continues until the parsing succeeds or there's no code left.  
-    except SyntaxError as e:
-      code = '\n'.join(code.splitlines()[:e.lineno - 1])
-  if not code:
-    return ''
-  visitor = _FunctionLineVisitor('fake_function_header')
-  visitor.visit(tree)
-  body_lines = code.splitlines()[1:visitor.function_end_line]
-  return '\n'.join(body_lines) + '\n\n'
+
+  # Strip markdown code fences first (LLMs often wrap in ```python ... ```)
+  generated_code = generated_code.strip()
+  if generated_code.startswith('```'):
+    lines = generated_code.split('\n')
+    # Remove opening fence (```python or just ```)
+    if lines[0].startswith('```'):
+      lines = lines[1:]
+    # Remove closing fence
+    if lines and lines[-1].strip() == '```':
+      lines = lines[:-1]
+    generated_code = '\n'.join(lines).strip()
+    logger.debug(f"Stripped markdown code fences, remaining code ({len(generated_code)} chars)")
+
+  # First - check if code contains a function definition (may have imports before it)
+  import re
+  func_header_match = re.search(r'^\s*def\s+\w+\s*\([^)]*\)\s*(?:->\s*[^:]+)?\s*:', generated_code, re.MULTILINE)
+
+  if func_header_match:
+    # Has function definition - parse as module (may include imports)
+    logger.debug("Found function definition, parsing as module")
+    code = generated_code
+    function_name_match = re.search(r'def\s+(\w+)\s*\(', generated_code)
+    function_name = function_name_match.group(1) if function_name_match else 'unknown_function'
+
+    tree = None
+    deletion_count = 0
+    # We keep trying and deleting code from the end until the parser succeeds.
+    while tree is None:
+      try:
+        tree = ast.parse(code)
+      except SyntaxError as e:
+        deletion_count += 1
+        deleted_line = code.splitlines()[e.lineno - 1] if e.lineno <= len(code.splitlines()) else "(unknown)"
+        logger.warning(f"AST SyntaxError at line {e.lineno}: {e.msg}. Deleting line: {deleted_line[:100]}")
+        code = '\n'.join(code.splitlines()[:e.lineno - 1])
+        if deletion_count > 20:
+          logger.error("Too many AST deletions (>20), stopping. Code likely invalid.")
+          return ''
+    if not code:
+      logger.warning("AST parsing resulted in empty code after deletions")
+      return ''
+    if deletion_count > 0:
+      logger.info(f"AST parsing required {deletion_count} line deletions to succeed")
+
+    # Extract module-level imports (to move inside function body if needed)
+    import ast as ast_module
+    imports = []
+    for node in tree.body:
+      if isinstance(node, (ast_module.Import, ast_module.ImportFrom)):
+        # Get the import statement as string
+        import_line = code.splitlines()[node.lineno - 1]
+        imports.append(import_line)
+        logger.debug(f"Detected module-level import: {import_line}")
+      elif isinstance(node, ast_module.FunctionDef):
+        # Stop at function definition
+        break
+
+    # Extract body using visitor
+    visitor = _FunctionLineVisitor(function_name)
+    visitor.visit(tree)
+    total_lines = len(code.splitlines())
+    logger.debug(f"AST: function '{function_name}' spans lines {visitor.function_start_line}-{visitor.function_end_line} (total {total_lines} lines)")
+
+    # Extract function body (skip the def line)
+    body_lines = code.splitlines()[visitor.function_start_line:visitor.function_end_line]
+
+    # Prepend imports (indented) to function body if they were outside the function
+    if imports:
+      logger.debug(f"Moving {len(imports)} module-level import(s) inside function body")
+      indented_imports = ['    ' + imp for imp in imports]
+      body_lines = indented_imports + body_lines
+
+    result = '\n'.join(body_lines) + '\n\n'
+
+    if imports:
+      logger.debug(f"Rewritten function body with imports moved inside ({len(body_lines)} total lines):\n{result}")
+    else:
+      logger.debug(f"AST: extracted {len(body_lines)} body lines")
+
+    return result
+
+  else:
+    # No function header - wrap in fake function (fallback for body-only completions)
+    logger.debug("No function header found, wrapping in fake function")
+    code = f'def fake_function_header():\n{generated_code}'
+    tree = None
+    deletion_count = 0
+    while tree is None:
+      try:
+        tree = ast.parse(code)
+      except SyntaxError as e:
+        deletion_count += 1
+        deleted_line = code.splitlines()[e.lineno - 1] if e.lineno <= len(code.splitlines()) else "(unknown)"
+        logger.warning(f"AST SyntaxError at line {e.lineno}: {e.msg}. Deleting line: {deleted_line[:100]}")
+        code = '\n'.join(code.splitlines()[:e.lineno - 1])
+        if deletion_count > 20:
+          logger.error("Too many AST deletions (>20), stopping. Code likely invalid.")
+          return ''
+    if not code:
+      logger.warning("AST parsing resulted in empty code after deletions")
+      return ''
+    if deletion_count > 0:
+      logger.info(f"AST parsing required {deletion_count} line deletions to succeed")
+
+    visitor = _FunctionLineVisitor('fake_function_header')
+    visitor.visit(tree)
+    body_lines = code.splitlines()[1:visitor.function_end_line]
+    return '\n'.join(body_lines) + '\n\n'
 
 def _sample_to_program(
     generated_code: str,
@@ -135,11 +297,20 @@ def _sample_to_program(
     template: code_manipulation.Program,
     # function_to_evolve is set to priority
     function_to_evolve: str,
-) -> tuple[code_manipulation.Function, str]:
-  """Returns the compiled generated function and the full runnable program.
-     Purpose: integrate a generated code as string into a larger program template. 
+) -> tuple[code_manipulation.Function, str, str | None, str | None]:
+  """Returns the compiled generated function - full runnable program - thought - and thinking.
+
+  Purpose: integrate a generated code as string into a larger program template.
+
+  Returns:
+      tuple: (evolved_function, program_str, thought, thinking)
+          - evolved_function: Function object with updated body, thought, and thinking
+          - program_str: Complete runnable program as string
+          - thought: One-sentence algorithm description or None
+          - thinking: Full chain-of-thought reasoning or None
   """
-  body = _trim_function_body(generated_code) 
+  # Extract code body and thought/thinking (markdown fences stripped inside _trim_function_body_ast)
+  body, thought, thinking = _extract_three_tier(generated_code)
   if version_generated is not None:
 
     body = code_manipulation.rename_function_calls(
@@ -150,16 +321,22 @@ def _sample_to_program(
   evolved_function = program.get_function(function_to_evolve)
 
   evolved_function.body = body
-  return evolved_function, str(program)
+  evolved_function.thinking = thinking
+  evolved_function.thought = thought
+  return evolved_function, str(program), thought, thinking
 
 
 
 def run_evaluation(sandbox, program, function_to_run, input, timeout_seconds, call_count, call_count_lock):
-    with call_count_lock: # the with statement ensures the lock is released once the block is exited regardless of whether an exception is raised 
+    with call_count_lock: # the with statement ensures the lock is released once the block is exited regardless of whether an exception is raised
         count = call_count.value
         call_count.value += 1
 
     result, runs_ok, cpu_time, call_data_folder, input_path, error_file = sandbox.run(program, function_to_run, input, timeout_seconds, count)
+
+    # Clean up sandbox call directory to save disk space
+    sandbox.cleanup_call_directories(count)
+
     return result, runs_ok, cpu_time, call_data_folder, input_path, error_file
 
 
@@ -169,10 +346,10 @@ class Evaluator:
 
     Note: Debug information about which graph files are being loaded is written to stderr
     in the sandbox subprocesses. These logs can be found in sandbox stderr_*.log files
-    (e.g., sandbox/sandbox<PID>/stderr_N.log). The stderr files are automatically cleaned up
+    (e.g. - sandbox/sandbox<PID>/stderr_N.log). The stderr files are automatically cleaned up
     after evaluation completes.
     """
-    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2):
+    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2, graph_dir=None, cache_graphs=False, cache_size_limit_gb=2.0):
         self.connection = connection
         self.channel = channel
         self.evaluator_queue = evaluator_queue
@@ -183,11 +360,14 @@ class Evaluator:
         self.inputs = inputs
         self.timeout_seconds = timeout_seconds
         self.local_id = local_id
+        self.graph_dir = graph_dir  # Store graph_dir for passing to sandbox
+        self.cache_graphs = cache_graphs  # Enable graph caching in specifications
+        self.cache_size_limit_gb = cache_size_limit_gb  # Size limit for cached graphs
         self.manager = Manager()
         self.call_count = self.manager.Value('i', 0)
         self.call_count_lock = self.manager.Lock()
         self.sandbox = sandbox.ExternalProcessSandbox(
-            base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id)
+            base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id, graph_dir=graph_dir)
         self.executor = ProcessPoolExecutor(max_workers=max_workers)
         self.cumulative_cpu_time = 0.0  # Track total CPU time
         self.cpu_time_lock = self.manager.Lock()  # Lock to protect updates to cumulative CPU time
@@ -250,6 +430,11 @@ class Evaluator:
             killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
             if killed > 0:
                 logger.info(f"Evaluator {self.local_id}: Cleaned up {killed} orphaned sandbox processes during shutdown")
+
+            # Clean up sandbox directories
+            if hasattr(self, '_sandbox') and self._sandbox:
+                self._sandbox.cleanup_all()
+                logger.info(f"Evaluator {self.local_id}: Cleaned up sandbox directories")
 
             # Run garbage collection to clean up resources
             gc.collect()
@@ -333,26 +518,43 @@ class Evaluator:
             logger.debug(f"Received parent_ids from Sampler: {parent_ids}")
 
             # Process the new function from the generated code
-            new_function, program = _sample_to_program(data["sample"], data.get("version_generated"), self.template, self.function_to_evolve)
+            new_function, program, thought, thinking = _sample_to_program(data["sample"], data.get("version_generated"), self.template, self.function_to_evolve)
+
+            # Inject cache configuration into the program as global variables
+            # These will be available to the specification code (load_graph - solve - etc.)
+            cache_config_injection = f"""
+# Graph caching configuration (injected by evaluator)
+CACHE_GRAPHS = {self.cache_graphs}
+CACHE_SIZE_LIMIT_GB = {self.cache_size_limit_gb}
+
+"""
+            program = cache_config_injection + program
 
             tasks = {}
 
             if new_function.body not in [None, '']:
                 # Submit each test input as a task for multiprocessing
                 logger.debug(f"Evaluator: Submitting {len(self.inputs)} evaluation tasks with inputs: {self.inputs}")
+                logger.debug(f"Evaluator: Executor status: {self.executor}, _shutdown={getattr(self.executor, '_shutdown', 'N/A')}")
                 tasks = {self.executor.submit(run_evaluation, self.sandbox, program, self.function_to_run, input, self.timeout_seconds, self.call_count, self.call_count_lock): input for input in self.inputs}
+                logger.debug(f"Evaluator: Created {len(tasks)} tasks for execution")
             else:
                 logger.info("New function body is None or empty. Skipping execution but publishing 'return'.")
-                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False, parent_ids)
+                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False, parent_ids, thought, thinking)
                 await self.publish_to_database(result, hash_value)  # Publish "return" result
                 return  # Early return after publishing
 
             scores_per_test = {}
             # Waiting for results from all test inputs
+            logger.debug(f"Evaluator: Starting to process {len(tasks)} futures")
+            iteration_count = 0
             for future in as_completed(tasks):
+                iteration_count += 1
                 input = tasks[future]
+                logger.debug(f"Evaluator: Processing future {iteration_count}/{len(tasks)} for input {input}")
                 try:
-                    test_output, runs_ok, cpu_time,  call_data_folder, input_path, error_file= future.result(timeout=self.timeout_seconds)
+                    test_output, runs_ok, cpu_time, call_data_folder, input_path, error_file= future.result(timeout=self.timeout_seconds)
+                    logger.debug(f"Evaluator: Future result, runs_ok={runs_ok}, cpu_time={cpu_time}, test_output={test_output}")
                     call_folders_to_cleanup.append(call_data_folder)
                     call_files_to_cleanup.append(input_path)
                     call_files_to_cleanup.append(error_file)
@@ -362,12 +564,25 @@ class Evaluator:
                         self.cumulative_cpu_time += cpu_time
 
                     if runs_ok and test_output[0] is not None:
-                        # Extract score, key, and hash using the extraction function
+                        # Extract score - key - and hash using the extraction function
                         score_key, score_value, extracted_hash = extract_evaluation_result(test_output, input)
                         scores_per_test[score_key] = score_value
                         if extracted_hash is not None:
                             hash_value = extracted_hash
-                        logger.debug(f"Evaluator: scores_per_test {scores_per_test}")
+                        logger.info(f"Evaluator: Test passed for input {input}, score_key={score_key}, score={score_value}")
+                    else:
+                        # Read error details from error file if it exists
+                        error_details = ""
+                        if error_file and error_file.exists():
+                            try:
+                                with open(error_file, 'r') as f:
+                                    error_content = f.read().strip()
+                                    if error_content:
+                                        # Only show first 500 chars of error
+                                        error_details = f" - Error: {error_content[:500]}"
+                            except Exception:
+                                pass
+                        logger.warning(f"Evaluator: Test failed for input {input}, runs_ok={runs_ok}, test_output={test_output}{error_details}")
                 except concurrent.futures.TimeoutError:
                     logger.warning(f"Task for input {input} timed out.")
                 except concurrent.futures.CancelledError:
@@ -375,6 +590,8 @@ class Evaluator:
                 except Exception as e:
                     # Catch any other exceptions
                     logger.error(f"Error during task execution for input {input}: {e}")
+
+            logger.debug(f"Evaluator: Completed processing all {iteration_count} futures, got {len(scores_per_test)} scores")
             
 
 
@@ -387,10 +604,10 @@ class Evaluator:
 
             # Prepare the result for publishing
             if len(scores_per_test) == len(self.inputs) and any(score != 0 for score in scores_per_test.values()):
-                result = (new_function, data['island_id'], scores_per_test, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids)
+                result = (new_function, data['island_id'], scores_per_test, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids, thought, thinking)
                 logger.debug(f"Scores are {scores_per_test}")
             else:
-                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False, parent_ids)
+                result = ("return", data['island_id'], {}, data['expected_version'], self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens, False, parent_ids, thought, thinking)
 
             # Publish the result
             await self.publish_to_database(result, hash_value)
@@ -401,18 +618,20 @@ class Evaluator:
 
         except Exception as e:
             logger.error(f"Error in process_message: {e}")
-        
+
         finally:
-            # Cleanup: Delete the call_data_folder after a delay
-            await asyncio.sleep(1)  # Optional delay, adjust if needed
-            if call_data_folder and call_data_folder.exists():
-                shutil.rmtree(call_data_folder)
+            # Cleanup sandbox folder after a delay
+            # DISABLED - keeping sandbox for error analysis (99.99% failure rate investigation)
+            # await asyncio.sleep(1)
+            # if call_data_folder and call_data_folder.exists():
+            #     shutil.rmtree(call_data_folder)
+            pass
 
 
     async def publish_to_database(self, result, hash_value):
         try:
 
-            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids = result
+            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids, thought, thinking = result
 
             serialized_result = {
                 "new_function": function.serialize() if hasattr(function, 'serialize') else str(function),
@@ -425,7 +644,9 @@ class Evaluator:
                 "input_tokens":      input_tokens,
                 "output_tokens":     output_tokens,
                 "found_optimal_solution": found_optimal_solution,
-                "parent_ids": parent_ids  # Include parent IDs for lineage tracking
+                "parent_ids": parent_ids,  # Include parent IDs for lineage tracking
+                "thought": thought,  # One-sentence algorithm description
+                "thinking": thinking  # Full chain-of-thought reasoning
             }
 
             message_body = json.dumps(serialized_result)
@@ -435,7 +656,7 @@ class Evaluator:
 
             # Publishing the serialized result to the database queue
             await self.channel.default_exchange.publish(
-                aio_pika.Message(body=message_body.encode()), 
+                aio_pika.Message(body=message_body.encode()),
                 routing_key='database_queue'
             )
 

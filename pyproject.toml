@@ -28,8 +28,17 @@ dependencies = [
   "pandas",
   "seaborn",
   "tabulate",
-  "networkx"
+  "networkx",
+  "aiohttp",
+  "litellm",
+  "vllm",
+  "python-dotenv",
+  "requests",
+  "ujson"
 ]
+
+# Additional conda dependencies:
+# - graph-tool: conda install -c conda-forge graph-tool
 
 [tool.setuptools.packages.find]
 where = ["src"]

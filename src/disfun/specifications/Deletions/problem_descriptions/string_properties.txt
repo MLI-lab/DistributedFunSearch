@@ -1,0 +1,9 @@
+"""
+Finds large independent set in graph G where nodes are q-ary strings of length n.
+Nodes in G are connected if they share a subsequence of length at least n-s.
+
+Improve the `priority_v{version}` function over its previous versions below.
+Consider properties of the q-ary string `node`, such as specific patterns, the number of ones/zeros.
+Keep the code short and comment for easy understanding.
+{prompt_style}
+"""

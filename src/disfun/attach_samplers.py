@@ -1,64 +1,34 @@
 import asyncio
-import logging
-from logging import FileHandler
-from multiprocessing import current_process
 import argparse
 import torch.multiprocessing as mp
 import os
-import signal
 import sys
-import time
-from typing import Sequence, Any
 from disfun.scaling_utils import ResourceManager
-from disfun import sampler
-from disfun import process_utils
-from disfun.process_entry import sampler_process_entry, load_config
-import socket
-from disfun import gpt
+from disfun import sampler, process_utils
+from disfun.process_entry import sampler_process_entry
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-def get_ip_address():
-    try:
-        hostname = socket.gethostname()
-        ip_address = socket.gethostbyname(hostname)
-        return ip_address
-    except Exception as e:
-        return f"Error fetching IP address: {e}"
 
 class TaskManager:
     def __init__(self, config, check_interval, log_dir, config_path):
         self.config = config
         self.config_path = config_path  # Store for spawn compatibility
         self.log_dir = log_dir  # Store for spawn compatibility
-        self.log_filename = None  # Will store the shared log filename
-        self.logger = self.initialize_logger(log_dir)
+
+        # Initialize logger and store filename for child processes
+        pid = os.getpid()
+        self.log_filename = f'attach_samplers_pid{pid}.log'
+        self.logger = process_utils.initialize_logger(log_dir, self.log_filename)
+
         self.sampler_processes = []
         self.tasks = []
-        if self.config.sampler.gpt:
-            self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True, scaling_config=self.config.scaling)
-        else:
-            self.resource_manager = ResourceManager(log_dir=log_dir, scaling_config=self.config.scaling)
+        self.resource_manager = ResourceManager(log_dir=log_dir, scaling_config=self.config.scaling)
         self.process_to_device_map = {}
-
-    def initialize_logger(self, log_dir):
-        logger = logging.getLogger('main_logger')
-        logger.setLevel(logging.INFO)
-        os.makedirs(log_dir, exist_ok=True)
-        pid = os.getpid()
-        # Create PID-based log file that will be shared with child processes
-        self.log_filename = f'attach_samplers_pid{pid}.log'
-        log_file_path = os.path.join(log_dir, self.log_filename)
-        handler = FileHandler(log_file_path, mode='a')  # Changed to append mode for child processes
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.propagate = False
-        return logger
 
     async def main_task(self, enable_scaling=True):
         """
-        Main async entry point. Establishes queue connections, starts initial processes,
+        Main async entry point. Establishes queue connections - starts initial processes,
         and optionally starts a scaling loop from ResourceManager.
         """
         resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
@@ -112,48 +82,71 @@ class TaskManager:
             self.logger.error(f"Exception in main_task: {e}")
 
     def start_initial_processes(self):
-        # If self.config.sampler.gpt is True, just start samplers without GPU device assignment
-        if self.config.sampler.gpt:
-            self.logger.info("GPT mode enabled. Starting sampler processes without GPU device assignment.")
+        from disfun.sampler import is_local_model
+
+        # Check if using local model (needs GPU) or API model (CPU only)
+        use_local = is_local_model(self.config.sampler.model)
+
+        if use_local:
+            # LOCAL MODEL: Each sampler loads model on assigned GPU
+            self.logger.info(f"Starting {self.config.num_samplers} sampler(s) with LOCAL model: {self.config.sampler.model}")
+            self.logger.info("Each sampler will load the model on its assigned GPU")
+
+            assigned_gpus = set()
+            ctx = mp.get_context('spawn')
+
+            for i in range(self.config.num_samplers):
+                try:
+                    assignment = self.resource_manager.assign_gpu_device(
+                        min_free_memory_gib=20,
+                        max_utilization=50,
+                        assigned_gpus=assigned_gpus
+                    )
+                except Exception as e:
+                    self.logger.error(f"Cannot start sampler {i}: No suitable GPU available. Error: {e}")
+                    continue
+
+                if assignment is None:
+                    self.logger.error("No suitable GPU available for sampler. Skipping.")
+                    continue
+
+                host_gpu, device = assignment
+                assigned_gpus.add(device)
+                self.logger.info(f"Assigning sampler {i} to GPU {device} (host GPU: {host_gpu})")
+
+                try:
+                    proc = ctx.Process(
+                        target=sampler_process_entry,
+                        args=(self.config_path, device, self.log_dir, self.log_filename),
+                        name=f"Sampler-{i}"
+                    )
+                    proc.start()
+                    self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid} on GPU {device}")
+                    self.sampler_processes.append(proc)
+                    self.process_to_device_map[proc.pid] = device
+                except Exception as e:
+                    self.logger.error(f"Failed to start sampler {i}: {e}")
+                    continue
+        else:
+            # API MODEL: Samplers are CPU processes
+            self.logger.info(f"Starting {self.config.num_samplers} sampler(s) with API model: {self.config.sampler.model}")
+            self.logger.info("Samplers will use API (no GPU assignment needed)")
+
             ctx = mp.get_context('spawn')
             for i in range(self.config.num_samplers):
                 device = None
                 try:
-                    # Pass log filename so child processes write to same file
-                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir, self.log_filename), name=f"Sampler-{i}")
+                    proc = ctx.Process(
+                        target=sampler_process_entry,
+                        args=(self.config_path, device, self.log_dir, self.log_filename),
+                        name=f"Sampler-{i}"
+                    )
                     proc.start()
-                    self.logger.debug(f"Started Sampler Process {i} (GPT mode) with PID: {proc.pid}")
+                    self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid}")
                     self.sampler_processes.append(proc)
                     self.process_to_device_map[proc.pid] = device
                 except Exception as e:
                     self.logger.error(f"Error starting sampler {i}: {e}")
-                    continue
-        else:
-            assigned_gpus = set()
-            ctx = mp.get_context('spawn')
-            # Use the ResourceManager's assign_gpu_device method for consistent GPU assignment.
-            for i in range(self.config.num_samplers):
-                try:
-                    assignment = self.resource_manager.assign_gpu_device(min_free_memory_gib=20, max_utilization=50, assigned_gpus=assigned_gpus)
-                except Exception as e:
-                    self.logger.error(f"Cannot start sampler {i}: No suitable GPU available and error {e}.")
-
-                if assignment is None:
-                    self.logger.error("No suitable GPU available for sampler. Skipping or failing gracefully.")
-                    continue
-                else:
-                    host_gpu, device = assignment
-                    assigned_gpus.add(device)
-                self.logger.info(f"Assigning sampler {i} to GPU {device} (host GPU: {host_gpu})")
-                try:
-                    # Pass log filename so child processes write to same file
-                    proc = ctx.Process(target=sampler_process_entry, args=(self.config_path, device, self.log_dir, self.log_filename), name=f"Sampler-{i}")
-                    proc.start()
-                    self.sampler_processes.append(proc)
-                    self.process_to_device_map[proc.pid] = device
-                    self.logger.debug(f"Process-to-Device Map: {self.process_to_device_map}")
-                except Exception as e:
-                    self.logger.error(f"Failed to start sampler {i} due to error: {e}")
                     continue
 
 
@@ -163,8 +156,8 @@ if __name__ == "__main__":
 
 ######################################### General setting related arguments #######################################
     parser.add_argument(
-        "--check_interval", 
-        type=int, 
+        "--check_interval",
+        type=int,
         default=200,
         help="Time interval (in seconds) between consecutive scaling checks for evaluators and samplers. Defaults to 200s."
         )
@@ -194,17 +187,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_samplers",
         type=int,
-        default=1000, 
+        default=1000,
         help="Maximum samplers the system can scale up to. Adjust based on resource availability. Default no hard limit and based on dynamic resource checks."
     )
 
     args = parser.parse_args()
 
-    # By default, scaling is enabled unless --no-dynamic-scaling is passed
+    # By default - scaling is enabled unless --no-dynamic-scaling is passed
     enable_dynamic_scaling = not args.no_dynamic_scaling
 
     async def main():
-        config = load_config(args.config_path)
+        config = process_utils.load_config(args.config_path)
         # Prefer config.scaling.check_interval over CLI argument
         check_interval = config.scaling.check_interval if hasattr(config, 'scaling') and config.scaling else args.check_interval
         task_manager = TaskManager(

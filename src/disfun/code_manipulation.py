@@ -1,14 +1,14 @@
 # Copyright 2023 DeepMind Technologies Limited
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the Apache License - Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #    http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
+# Unless required by applicable law or agreed to in writing - software
 # distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND - either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
@@ -16,10 +16,10 @@
 """Tools for manipulating Python code.
 
 It implements 2 classes representing unities of code:
-- Function, containing all the information we need about functions: name, args,
+- Function - containing all the information we need about functions: name - args,
   body and optionally a return type and a docstring.
-- Program, which contains a code preface (which could be imports, global
-  variables and classes, ...) and a list of Functions.
+- Program - which contains a code preface (which could be imports - global
+  variables and classes - ...) and a list of Functions.
 """
 
 import ast # to parse Python code into its Abstract Syntax Tree
@@ -45,8 +45,11 @@ class Function:
     # Evolutionary lineage tracking
     program_id: int | None = None  # Unique ID for this program
     parent_ids: list[int] | None = None  # IDs of programs in the prompt that generated this
-    generation: int = 0  # Generation number (0 for baseline, increments for offspring)
+    generation: int = 0  # Generation number (0 for baseline - increments for offspring)
     timestamp: float | None = None  # When this program was created
+    # Three-tier reasoning
+    thinking: str | None = None  # Full chain-of-thought reasoning (extended_eoh)
+    thought: str | None = None   # One-sentence algorithm description (eoh)
 
 
     def __str__(self) -> str:
@@ -67,8 +70,10 @@ class Function:
             "args": self.args,
             "body": self.body,
             "return_type": self.return_type,
-            "docstring": self.docstring, 
-            "hash_value": self.hash_value 
+            "docstring": self.docstring,
+            "hash_value": self.hash_value,
+            "thinking": self.thinking,
+            "thought": self.thought
         }
 
     @staticmethod
@@ -83,8 +88,10 @@ class Function:
             "args": self.args,
             "body": self.body,
             "return_type": self.return_type,
-            "docstring": self.docstring, 
-            "hash_value": self.hash_value
+            "docstring": self.docstring,
+            "hash_value": self.hash_value,
+            "thinking": self.thinking,
+            "thought": self.thought
         }
 
     @staticmethod
@@ -94,8 +101,10 @@ class Function:
             args=data["args"],
             body=data["body"],
             return_type=data.get("return_type", None),
-            docstring=data.get("docstring", None), 
-            hash_value=data.get("hash_value", None) 
+            docstring=data.get("docstring", None),
+            hash_value=data.get("hash_value", None),
+            thinking=data.get("thinking", None),
+            thought=data.get("thought", None)
         )
 
     @staticmethod
@@ -180,7 +189,7 @@ class ProgramVisitor(ast.NodeVisitor):
             if not self._functions:
                 # Capture preface as all lines before the first function.
                 raw_preface = self._codelines[:node.lineno - 1]
-                # If remove_classes is enabled, filter out the marked lines.
+                # If remove_classes is enabled - filter out the marked lines.
                 if self._remove_classes:
                     raw_preface = [
                         line for idx, line in enumerate(raw_preface)
@@ -191,12 +200,22 @@ class ProgramVisitor(ast.NodeVisitor):
             body_start_line = node.body[0].lineno - 1
             # Extract the docstring if available.
             docstring = None
-            if isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Str):
-                docstring = f'  {ast.literal_eval(ast.unparse(node.body[0]))}'
-                if len(node.body) > 1:
-                    body_start_line = node.body[1].lineno - 1
-                else:
-                    body_start_line = function_end_line
+            # Check for docstring (supports both old ast.Str and new ast.Constant)
+            if isinstance(node.body[0], ast.Expr):
+                # Python 3.8+: string literals are ast.Constant
+                if isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
+                    docstring = f'  {node.body[0].value.value}'
+                    if len(node.body) > 1:
+                        body_start_line = node.body[1].lineno - 1
+                    else:
+                        body_start_line = function_end_line
+                # Python 3.7 and earlier: string literals are ast.Str
+                elif isinstance(node.body[0].value, ast.Str):
+                    docstring = f'  {ast.literal_eval(ast.unparse(node.body[0]))}'
+                    if len(node.body) > 1:
+                        body_start_line = node.body[1].lineno - 1
+                    else:
+                        body_start_line = function_end_line
 
             self._functions.append(Function(
                 name=node.name,
@@ -215,7 +234,7 @@ class ProgramVisitor(ast.NodeVisitor):
         )
 
     def return_program(self) -> Program:
-        # Optionally, rebuild the preface from the cleaned code.
+        # Optionally - rebuild the preface from the cleaned code.
         if self._remove_classes:
             # Assume the preface is the first N lines (as originally captured) in the cleaned version.
             num_preface_lines = len(self._preface.splitlines())
@@ -234,7 +253,7 @@ def text_to_program(text: str, remove_classes: bool = False) -> Program:
 
     - Builds a preface (everything before the first top-level function).  
     - Collects every top-level function into class:`Function` objects.  
-    - When remove_classes is True, any code lines belonging to
+    - When remove_classes is True - any code lines belonging to
       top-level class definitions are discarded before the preface and
       functions are assembled for the prompt to the LLM.
 
@@ -264,7 +283,7 @@ def text_to_function(text: str) -> Function:
   """Returns Function object by parsing input text using Python AST."""
   program = text_to_program(text)
   if len(program.functions) != 1:
-    raise ValueError(f'Only one function expected, got {len(program.functions)}'
+    raise ValueError(f'Only one function expected - got {len(program.functions)}'
                      f':\n{program.functions}')
   return program.functions[0]
 
@@ -312,7 +331,7 @@ def _yield_token_and_is_call(
     raise e
 
 def rename_function_calls(code: str, source_name: str, target_name: str) -> str:
-  """Function parses the code into tokens, identifies function call tokens, and replaces instances of source_name with target_name where appropriate. """
+  """Function parses the code into tokens - identifies function call tokens - and replaces instances of source_name with target_name where appropriate. """
   if source_name not in code:
     return code
   modified_tokens = []
@@ -344,10 +363,10 @@ def yield_decorated(code: str, name: str) -> Iterator[str]:
     """Yields names of functions decorated with `@name` in `code`."""
     tree = ast.parse(code)
     for node in ast.walk(tree):
-      #checks whether the current node is an instance of ast.FunctionDef, which is the node type representing a function definition. 
-      #If the node is indeed a function definition, then it can potentially have decorators
+      #checks whether the current node is an instance of ast.FunctionDef - which is the node type representing a function definition. 
+      #If the node is indeed a function definition - then it can potentially have decorators
         if isinstance(node, ast.FunctionDef):
-            #For every FunctionDef node, there is a decorator_list attribute. This attribute contains a list of all the decorator nodes that are applied to the function.
+            #For every FunctionDef node - there is a decorator_list attribute. This attribute contains a list of all the decorator nodes that are applied to the function.
             for decorator in node.decorator_list:
                 if isinstance(decorator, ast.Name) and decorator.id == name:
                     yield node.name

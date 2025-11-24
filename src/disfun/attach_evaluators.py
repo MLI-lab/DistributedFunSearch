@@ -1,29 +1,15 @@
 import asyncio
-import logging
-from logging import FileHandler
-import json
-import os
-import signal
-import sys
-import torch.multiprocessing as mp
-import socket
 import argparse
+import torch.multiprocessing as mp
+import os
+import sys
 from typing import Sequence, Any
-import datetime
 from disfun.scaling_utils import ResourceManager
-from disfun import process_utils
-from disfun.process_entry import evaluator_process_entry, load_config
-from disfun import code_manipulation
+from disfun import process_utils, code_manipulation
+from disfun.process_entry import evaluator_process_entry
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-def get_ip_address():
-    try:
-        hostname = socket.gethostname()
-        ip_address = socket.gethostbyname(hostname)
-        return ip_address
-    except Exception as e:
-        return f"Error fetching IP address: {e}"
 
 class TaskManager:
     def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, target_signatures, config_path, sandbox_base_path):
@@ -33,8 +19,12 @@ class TaskManager:
         self.config_path = config_path  # Store for spawn compatibility
         self.log_dir = log_dir  # Store for spawn compatibility
         self.sandbox_base_path = sandbox_base_path  # Store for spawn compatibility
-        self.log_filename = None  # Will store the shared log filename
-        self.logger = self.initialize_logger(log_dir)
+
+        # Initialize logger and store filename for child processes
+        pid = os.getpid()
+        self.log_filename = f'attach_evaluators_pid{pid}.log'
+        self.logger = process_utils.initialize_logger(log_dir, self.log_filename)
+
         self.evaluator_processes = []
         self.database_processes = []
         self.sampler_processes = []
@@ -43,22 +33,7 @@ class TaskManager:
         self.queues = []
         self.connection = None
         self.resource_manager = ResourceManager(log_dir=log_dir, cpu_only=True, scaling_config=self.config.scaling)
-        self.target_signatures= target_signatures
-
-    def initialize_logger(self, log_dir):
-        logger = logging.getLogger('main_logger')
-        logger.setLevel(logging.INFO)
-        os.makedirs(log_dir, exist_ok=True)
-        pid = os.getpid()
-        # Create PID-based log file that will be shared with child processes
-        self.log_filename = f'attach_evaluators_pid{pid}.log'
-        log_file_path = os.path.join(log_dir, self.log_filename)
-        handler = FileHandler(log_file_path, mode='a')  # Changed to append mode for child processes
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.propagate = False
-        return logger
+        self.target_signatures = target_signatures
 
     async def main_task(self, enable_scaling=True):
         resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
@@ -178,7 +153,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_samplers",
         type=int,
-        default=1000, 
+        default=1000,
         help="Maximum samplers the system can scale up to. Adjust based on resource availability. Default no hard limit and based on dynamic resource checks."
     )
 
@@ -187,7 +162,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--target_solutions",
         type=str,
-        default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',  
+        default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',
         help="JSON string specifying target solutions for (n, s_value). Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'"
     )
 
@@ -208,12 +183,15 @@ if __name__ == "__main__":
     enable_dynamic_scaling = not args.no_dynamic_scaling
 
     async def main():
-        config = load_config(args.config_path)
+        config = process_utils.load_config(args.config_path)
 
-        # Load the specification from the provided path or default
-        spec_path = config.evaluator.spec_path
+        # Load the evaluation script from the absolute path
+        from pathlib import Path
+
+        eval_script_path = Path(config.evaluator.evaluation_script_path)
+
         try:
-            with open(spec_path, 'r') as file:
+            with open(eval_script_path, 'r') as file:
                 specification = file.read()
             if not isinstance(specification, str) or not specification.strip():
                 raise ValueError("Specification must be a non-empty string.")
@@ -224,10 +202,10 @@ if __name__ == "__main__":
             specification = specification.replace("n == start_n", f"n == {actual_start_n}")
 
         except FileNotFoundError:
-            print(f"Error: Specification file not found at {spec_path}")
+            print(f"Error: Evaluation script not found at {eval_script_path}")
             sys.exit(1)
         except ValueError as e:
-            print(f"Error in specification: {e}")
+            print(f"Error in evaluation script: {e}")
             sys.exit(1)
 
         if not (len(config.evaluator.s_values) == len(config.evaluator.start_n) == len(config.evaluator.end_n)):

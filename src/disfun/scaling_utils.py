@@ -7,6 +7,9 @@ import torch.multiprocessing as mp
 from logging import FileHandler
 import socket
 import statistics
+import aiohttp
+import time
+import traceback
 
 
 
@@ -50,7 +53,7 @@ class ResourceManager:
         """Check if system has enough free memory.
 
         Args:
-            min_free_gib: Minimum free memory in GiB. If None, uses scaling_config value (default: 30)
+            min_free_gib: Minimum free memory in GiB. If None - uses scaling_config value (default: 30)
         """
         if min_free_gib is None:
             min_free_gib = self.scaling_config.min_system_memory_gib if self.scaling_config else 30
@@ -78,7 +81,7 @@ class ResourceManager:
 
     async def log_resource_stats_periodically(self, interval=60, sample_duration=10, sample_interval=1):
         """
-        Logs system resource usage periodically, averaging values over `sample_duration` seconds.
+        Logs system resource usage periodically - averaging values over `sample_duration` seconds.
         - interval: Time between log entries (seconds).
         - sample_duration: Time window over which to collect samples.
         - sample_interval: Time between samples within the window.
@@ -99,7 +102,7 @@ class ResourceManager:
                 swap_samples = []
 
                 if not self.cpu_only:
-                    gpu_samples = {}  # Dict of lists: {gpu_index: [sample1, sample2, ...]}
+                    gpu_samples = {}  # Dict of lists: {gpu_index: [sample1 - sample2 - ...]}
 
                 for _ in range(num_samples):
                     # CPU usage
@@ -117,7 +120,7 @@ class ResourceManager:
 
                     # Disk I/O
                     disk_io = await asyncio.to_thread(psutil.disk_io_counters)
-                    if disk_io:  # Can be None on some systems (e.g., Docker containers)
+                    if disk_io:  # Can be None on some systems (e.g. - Docker containers)
                         disk_read_samples.append(disk_io.read_bytes / 1e6)  # Convert to MB
                         disk_write_samples.append(disk_io.write_bytes / 1e6)
                     else:
@@ -160,9 +163,9 @@ class ResourceManager:
                 avg_d_state = statistics.mean(d_state_samples)
 
                 log_message = (
-                    f"Avg CPU: {avg_cpu:.2f}%, Load: {avg_load:.2f}, I/O Wait: {avg_io_wait:.2f}%, "
-                    f"Ctx Switches: {avg_ctx_switch}, Disk Read/Write: {avg_disk_read:.2f}/{avg_disk_write:.2f} MB, "
-                    f"Mem Usage: {avg_mem:.2f}%, Swap: {avg_swap:.2f}%, D-State Processes: {avg_d_state}"
+                    f"Avg CPU: {avg_cpu:.2f}% - Load: {avg_load:.2f} - I/O Wait: {avg_io_wait:.2f}% - "
+                    f"Ctx Switches: {avg_ctx_switch} - Disk Read/Write: {avg_disk_read:.2f}/{avg_disk_write:.2f} MB - "
+                    f"Mem Usage: {avg_mem:.2f}% - Swap: {avg_swap:.2f}% - D-State Processes: {avg_d_state}"
                 )
 
                 # Include GPU if applicable
@@ -171,7 +174,7 @@ class ResourceManager:
                     for gpu_index in sorted(gpu_samples.keys()):
                         avg_gpu = statistics.mean(gpu_samples[gpu_index]) if gpu_samples[gpu_index] else 0
                         gpu_stats.append(f"GPU {gpu_index}: {avg_gpu:.2f}%")
-                    log_message += f", {', '.join(gpu_stats)}"
+                    log_message += f" - {' - '.join(gpu_stats)}"
 
                 self.resource_logger.info(log_message)
 
@@ -188,7 +191,7 @@ class ResourceManager:
         """Retrieves GPU utilization asynchronously for all available GPUs.
 
         Returns:
-            dict: Mapping of GPU index to utilization percentage {0: 45.2, 1: 12.3, ...}
+            dict: Mapping of GPU index to utilization percentage {0: 45.2 - 1: 12.3 - ...}
                   Returns empty dict if cpu_only mode.
         """
         if self.cpu_only:
@@ -212,13 +215,15 @@ class ResourceManager:
         return gpu_utils
 
 
-    async def run_scaling_loop(self, evaluator_queue=None, sampler_queue=None, evaluator_processes=None,
-                               sampler_processes=None, sampler_entry_function=None, evaluator_entry_function=None,
-                               config_path=None, log_dir=None, template=None, inputs=None, target_signatures=None,
+    async def run_scaling_loop(self, evaluator_queue=None, sampler_queue=None,
+                               evaluator_processes=None, sampler_processes=None,
+                               sampler_entry_function=None, evaluator_entry_function=None,
+                               config=None, config_path=None, log_dir=None, template=None, inputs=None, target_signatures=None,
                                sandbox_base_path=None, max_evaluators=10000, min_evaluators=1,
                                max_samplers=1000, min_samplers=1, check_interval=120, log_filename=None):
         """Scales evaluator and sampler processes dynamically based on queue sizes and system resources."""
         self.resource_logger.info("Starting scaling loop")
+        self.config = config  # Store config for use in get_queue_message_count
         evaluator_processes = evaluator_processes or []
         sampler_processes = sampler_processes or []
         max_evaluators = max_evaluators if max_evaluators is not None else 0
@@ -229,6 +234,7 @@ class ResourceManager:
                     evaluator_message_count = await self.get_queue_message_count(evaluator_queue) if evaluator_queue else 0
                     sampler_message_count = await self.get_queue_message_count(sampler_queue) if sampler_queue else 0
                     self.resource_logger.info(f"Message counts are {evaluator_message_count} and {sampler_message_count}")
+
                     # Scale Evaluators
                     evaluator_scaled = False
                     if evaluator_queue and max_evaluators > 0:
@@ -262,7 +268,7 @@ class ResourceManager:
                             await self.terminate_process(sampler_processes, "Sampler")
                             sampler_scaled = True
 
-                    # If nothing was scaled, log that scaling was skipped
+                    # If nothing was scaled - log that scaling was skipped
                     if not evaluator_scaled and not sampler_scaled:
                         self.resource_logger.info("No scaling action taken in this iteration.")
 
@@ -308,14 +314,14 @@ class ResourceManager:
 
     async def can_scale_up_samplers(self):
         """
-        Returns a GPU assignment tuple (host_gpu, container_device) if we can
-        scale up samplers, or None if we cannot.
+        Returns a GPU assignment tuple (host_gpu - container_device) if we can
+        scale up samplers - or None if we cannot.
         """
         if self.cpu_only:
             # No GPUs available at all
             return None
 
-        # See if any GPU is free enough, using config values
+        # See if any GPU is free enough - using config values
         min_memory = self.scaling_config.min_gpu_memory_gib if self.scaling_config else 20
         max_util = self.scaling_config.max_gpu_utilization if self.scaling_config else 50
         assignment = self.assign_gpu_device(min_free_memory_gib=min_memory, max_utilization=max_util)
@@ -326,8 +332,8 @@ class ResourceManager:
         Determine if it's safe to scale up evaluators based on CPU usage and system load.
 
         Args:
-            cpu_usage_threshold: Maximum allowed average CPU usage percentage. If None, uses scaling_config value (default: 99).
-            normalized_load_threshold: Maximum allowed 1-minute load (load average divided by available cores). If None, uses scaling_config value (default: 0.99).
+            cpu_usage_threshold: Maximum allowed average CPU usage percentage. If None - uses scaling_config value (default: 99).
+            normalized_load_threshold: Maximum allowed 1-minute load (load average divided by available cores). If None - uses scaling_config value (default: 0.99).
             duration: Duration in seconds to smooth CPU usage samples (default: 10).
             interval: Interval in seconds between CPU usage samples (default: 1).
 
@@ -366,7 +372,7 @@ class ResourceManager:
         Spawn creates a clean process without inheriting thread state from parent.
         """
         ctx = mp.get_context('spawn')
-        if assignment == True:  # CPU-only mode, no GPU assignment
+        if assignment == True:  # CPU-only mode - no GPU assignment
             proc = ctx.Process(
                 target=entry_function,
                 args=(config_path, None, log_dir, log_filename),  # No GPU device
@@ -420,7 +426,7 @@ class ResourceManager:
             id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
 
 
-            # Use assigned_gpus passed from the caller, otherwise fallback to existing assignments
+            # Use assigned_gpus passed from the caller - otherwise fallback to existing assignments
             if assigned_gpus is None:
                 assigned_gpus = set(self.process_to_device_map.values())
 
@@ -457,7 +463,7 @@ class ResourceManager:
 
 
             self.resource_logger.info(
-                f"Assigning GPU {host_gpu} (container {container_device}): Free {best_gpu[2]:.2f} GiB, Utilization {best_gpu[3]}%"
+                f"Assigning GPU {host_gpu} (container {container_device}): Free {best_gpu[2]:.2f} GiB - Utilization {best_gpu[3]}%"
             )
 
             return host_gpu, container_device
@@ -477,7 +483,7 @@ class ResourceManager:
             # Use asyncio.to_thread to avoid blocking the event loop
             await asyncio.to_thread(proc.join, timeout)
 
-            if proc.is_alive():  # If still running, force kill
+            if proc.is_alive():  # If still running - force kill
                 self.resource_logger.warning(f"{process_name} process (PID: {pid}) did not terminate in {timeout}s. Sending SIGKILL.")
                 proc.kill()
                 await asyncio.to_thread(proc.join)
@@ -492,19 +498,208 @@ class ResourceManager:
 
     async def get_queue_message_count(self, queue):
         """
-        Retrieves the current number of messages in the queue
-        by passively re-declaring `queue.name` on `queue.channel`.
+        Retrieves the current number of messages in the queue using RabbitMQ HTTP management API.
         """
         if queue is None:
             return 0
 
         try:
-            declared_queue = await queue.channel.declare_queue(queue.name, passive=True)
-            return declared_queue.declaration_result.message_count
+            # Get RabbitMQ connection details from config
+            rabbitmq_host = self.config.rabbitmq.host
+            rabbitmq_port = self.config.rabbitmq.management_port
+            rabbitmq_user = self.config.rabbitmq.username
+            rabbitmq_pass = self.config.rabbitmq.password
+            # URL-encode vhost: empty string or '/' becomes '%2F'
+            rabbitmq_vhost = '%2F' if not self.config.rabbitmq.vhost else self.config.rabbitmq.vhost
+
+            url = f"http://{rabbitmq_host}:{rabbitmq_port}/api/queues/{rabbitmq_vhost}/{queue.name}"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, auth=aiohttp.BasicAuth(rabbitmq_user, rabbitmq_pass)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        count = data.get('messages', 0)
+                        consumer_count = data.get('consumers', 0)
+                        self.resource_logger.info(f"Queue '{queue.name}': messages={count}, consumers={consumer_count}")
+                        return count
+                    else:
+                        self.resource_logger.error(f"Failed to get queue stats from management API: {response.status}")
+                        return 0
         except Exception as e:
             self.resource_logger.error(
-                f"Error getting message count for queue '{queue.name}': {e}"
+                f"Error getting message count for queue '{queue.name}':\n{traceback.format_exc()}"
             )
             return 0
+
+    async def get_rabbitmq_stats(self, config):
+        """
+        Get RabbitMQ server statistics via management API.
+
+        Returns dict with:
+        - memory_used_mb: Memory used by RabbitMQ in MB
+        - memory_limit_mb: Memory limit in MB
+        - memory_percent: Memory usage percentage
+        - connection_count: Number of active connections
+        - node_running: Whether the node is running
+        - fd_used: File descriptors used
+        - fd_total: Total file descriptors available
+        """
+        stats = {
+            'memory_used_mb': None,
+            'memory_limit_mb': None,
+            'memory_percent': None,
+            'connection_count': None,
+            'node_running': None,
+            'fd_used': None,
+            'fd_total': None,
+            'error': None
+        }
+
+        # Get management port from config (default 15672)
+        management_port = getattr(config.rabbitmq, 'management_port', 15672)
+        api_url = f"http://{config.rabbitmq.host}:{management_port}/api"
+
+        try:
+            auth = aiohttp.BasicAuth(config.rabbitmq.username, config.rabbitmq.password)
+            timeout = aiohttp.ClientTimeout(total=5)
+
+            async with aiohttp.ClientSession(auth=auth, timeout=timeout) as session:
+                # Get node overview
+                async with session.get(f"{api_url}/overview") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+
+                        # Memory stats
+                        if 'queue_totals' in data:
+                            stats['total_messages'] = data['queue_totals'].get('messages', 0)
+
+                        # Get node-specific stats
+                        node_name = data.get('node', '')
+                        if node_name:
+                            async with session.get(f"{api_url}/nodes/{node_name}") as node_resp:
+                                if node_resp.status == 200:
+                                    node_data = await node_resp.json()
+
+                                    # Memory
+                                    mem_used = node_data.get('mem_used', 0)
+                                    mem_limit = node_data.get('mem_limit', 0)
+                                    stats['memory_used_mb'] = mem_used / (1024 * 1024)
+                                    stats['memory_limit_mb'] = mem_limit / (1024 * 1024)
+                                    if mem_limit > 0:
+                                        stats['memory_percent'] = (mem_used / mem_limit) * 100
+
+                                    # File descriptors
+                                    stats['fd_used'] = node_data.get('fd_used', 0)
+                                    stats['fd_total'] = node_data.get('fd_total', 0)
+
+                                    # Node status
+                                    stats['node_running'] = node_data.get('running', False)
+
+                # Get connection count
+                async with session.get(f"{api_url}/connections") as conn_resp:
+                    if conn_resp.status == 200:
+                        connections = await conn_resp.json()
+                        stats['connection_count'] = len(connections)
+
+        except aiohttp.ClientConnectorError:
+            stats['error'] = "Cannot connect to RabbitMQ management API (is it enabled?)"
+        except asyncio.TimeoutError:
+            stats['error'] = "Timeout connecting to RabbitMQ management API"
+        except Exception as e:
+            stats['error'] = f"Error fetching RabbitMQ stats: {e}"
+
+        return stats
+
+    async def check_rabbitmq_health(self, config, log_details=True):
+        """
+        Check RabbitMQ health and log warnings if issues detected.
+
+        Returns:
+        - 'healthy': No issues detected
+        - 'warning': Some concerns but not critical
+        - 'critical': Critical issues detected
+        - 'unknown': Cannot determine health
+        """
+        stats = await self.get_rabbitmq_stats(config)
+
+        if stats['error']:
+            self.resource_logger.warning(f"RabbitMQ health check: {stats['error']}")
+            return 'unknown'
+
+        health_status = 'healthy'
+        issues = []
+
+        # Check memory usage
+        if stats['memory_percent'] is not None:
+            if stats['memory_percent'] > 90:
+                issues.append(f"Memory usage critical: {stats['memory_percent']:.1f}%")
+                health_status = 'critical'
+            elif stats['memory_percent'] > 75:
+                issues.append(f"Memory usage high: {stats['memory_percent']:.1f}%")
+                if health_status != 'critical':
+                    health_status = 'warning'
+
+        # Check connection count (warn if very high)
+        if stats['connection_count'] is not None and stats['connection_count'] > 1000:
+            issues.append(f"High connection count: {stats['connection_count']}")
+            if health_status != 'critical':
+                health_status = 'warning'
+
+        # Check file descriptors
+        if stats['fd_used'] and stats['fd_total']:
+            fd_percent = (stats['fd_used'] / stats['fd_total']) * 100
+            if fd_percent > 90:
+                issues.append(f"File descriptors critical: {fd_percent:.1f}%")
+                health_status = 'critical'
+            elif fd_percent > 75:
+                issues.append(f"File descriptors high: {fd_percent:.1f}%")
+                if health_status != 'critical':
+                    health_status = 'warning'
+
+        # Check if node is running
+        if stats['node_running'] is False:
+            issues.append("RabbitMQ node is not running!")
+            health_status = 'critical'
+
+        # Log results
+        if log_details or health_status != 'healthy':
+            if issues:
+                self.resource_logger.warning(f"RabbitMQ health: {health_status.upper()}, {'; '.join(issues)}")
+            else:
+                self.resource_logger.info(
+                    f"RabbitMQ health: {health_status.upper()} - "
+                    f"Memory: {stats['memory_used_mb']:.0f}/{stats['memory_limit_mb']:.0f} MB "
+                    f"({stats['memory_percent']:.1f}%) - "
+                    f"Connections: {stats['connection_count']} - "
+                    f"FD: {stats['fd_used']}/{stats['fd_total']}"
+                )
+
+        return health_status
+
+    async def measure_rabbitmq_latency(self, config):
+        """
+        Measure network latency to RabbitMQ server by pinging the management API.
+
+        Returns latency in milliseconds - or None if unreachable.
+        """
+        management_port = getattr(config.rabbitmq, 'management_port', 15672)
+        api_url = f"http://{config.rabbitmq.host}:{management_port}/api/overview"
+
+        try:
+            auth = aiohttp.BasicAuth(config.rabbitmq.username, config.rabbitmq.password)
+            timeout = aiohttp.ClientTimeout(total=5)
+
+            start_time = time.time()
+            async with aiohttp.ClientSession(auth=auth, timeout=timeout) as session:
+                async with session.get(api_url) as resp:
+                    await resp.read()  # Ensure full response is received
+            end_time = time.time()
+
+            latency_ms = (end_time - start_time) * 1000
+            return latency_ms
+
+        except Exception as e:
+            self.resource_logger.warning(f"Cannot measure RabbitMQ latency: {e}")
+            return None
 
 

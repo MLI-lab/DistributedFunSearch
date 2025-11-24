@@ -19,3 +19,9 @@ pandas
 seaborn
 tabulate
 networkx
+aiohttp
+litellm
+vllm
+python-dotenv
+requests
+ujson

@@ -290,6 +290,11 @@ Controls how the LLM generates new function variants.
 Controls how generated functions are tested and scored.
 
 **Attributes:**
+- `evaluation_script_path` (str): Path to evaluation script (default: `graph_networkx.py`)
+  - `no_graph.py`: On-the-fly evaluation (slowest, simplest API)
+  - `graph_networkx.py`: NetworkX graphs (faster than no_graph, simple API - LLMs use nodes directly)
+  - `graph_gt.py`: graph-tool (fastest, complex API - LLMs must convert nodes to vertex indices)
+  - **Recommendation**: Use `graph_networkx.py` for best balance of speed and LLM compatibility
 - `s_values` (List[int]): Error correction parameters (default: `[2]`)
   - For deletion codes: number of deletions to correct
   - For IDS codes: number of insertions/deletions/substitutions (requires min distance 2s+1)

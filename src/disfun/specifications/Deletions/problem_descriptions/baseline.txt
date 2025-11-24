@@ -1,0 +1,8 @@
+"""
+Construct deletion-correcting codes by finding large independent sets.
+Nodes are q-ary strings of length n. Two nodes are neighbors if they share a subsequence of length >= n-s.
+
+Improve the `priority_v{version}` function over its previous versions below.
+Keep the code short and comment for easy understanding.
+{prompt_style}
+"""

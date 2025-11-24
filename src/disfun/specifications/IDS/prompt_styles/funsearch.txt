@@ -1,0 +1,3 @@
+Continue the function implementation below.
+Output your implementation inside <code> tags:
+<code>Your implementation</code>

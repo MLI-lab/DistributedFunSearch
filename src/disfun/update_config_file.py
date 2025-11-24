@@ -10,11 +10,10 @@ def update_config_file(config_file, host_value):
         print(f"Couldnt not read content file {e}")
 
     # Replace the `host` attribute in the configuration with hostname str of assigned node
-    # Use word boundary \b to match only 'host', not 'vhost'
+    # Use word boundary \b to match only 'host' not 'vhost'
     pattern = r"(\bhost\s*:\s*str\s*=\s*)['\"].*?['\"]|\bhost\s*:\s*str\s*=\s*''"
     replacement = rf"\1'{host_value}'"
     updated_content = re.sub(pattern, replacement, content)
-
 
     with open(config_file, 'w') as file:
         file.write(updated_content)

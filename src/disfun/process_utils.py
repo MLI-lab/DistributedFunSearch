@@ -5,13 +5,108 @@ This module provides reusable patterns to reduce code duplication across
 the DistributedFunSearch codebase.
 """
 
+import os
 import asyncio
 import signal
 import logging
+import importlib.util
 import torch.multiprocessing as mp
+from logging import FileHandler
+from logging.handlers import RotatingFileHandler
 from yarl import URL
 import aio_pika
 from typing import Optional, Callable
+
+
+def load_config(config_path):
+    """
+    Dynamically load a configuration module from a given file path.
+
+    Args:
+        config_path: Path to the configuration file
+
+    Returns:
+        Config object instance
+    """
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Configuration file not found at {config_path}")
+
+    spec = importlib.util.spec_from_file_location("config", config_path)
+    config_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config_module)
+
+    if not hasattr(config_module, "Config"):
+        raise ValueError(f"The configuration file at {config_path} must define a 'Config' class.")
+
+    return config_module.Config()
+
+
+def initialize_logger(log_dir, log_filename, process_type=None):
+    """
+    Initialize logger for process (works for both parent and child processes).
+
+    Args:
+        log_dir: Directory containing the log file
+        log_filename: Name of the log file to write to
+        process_type: Type of process ("Sampler", "Evaluator", or None for main)
+
+    Returns:
+        Logger instance
+    """
+    logger = logging.getLogger('main_logger')
+    logger.setLevel(logging.DEBUG)
+    os.makedirs(log_dir, exist_ok=True)
+
+    # For child processes (Sampler/Evaluator) - clear any inherited handlers from parent
+    if process_type in ("Sampler", "Evaluator"):
+        logger.handlers.clear()
+
+    # Only add handler if logger doesn't have any yet
+    if not logger.handlers:
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+        # Samplers: all log to shared samplers.log file
+        if process_type == "Sampler":
+            sampler_handler = RotatingFileHandler(
+                os.path.join(log_dir, 'samplers.log'),
+                mode='a',
+                maxBytes=50*1024*1024,
+                backupCount=5
+            )
+            sampler_handler.setFormatter(formatter)
+            logger.addHandler(sampler_handler)
+
+        # Evaluators: all log to shared evaluators.log file
+        elif process_type == "Evaluator":
+            evaluator_handler = RotatingFileHandler(
+                os.path.join(log_dir, 'evaluators.log'),
+                mode='a',
+                maxBytes=50*1024*1024,
+                backupCount=5
+            )
+            evaluator_handler.setFormatter(formatter)
+            logger.addHandler(evaluator_handler)
+
+        # Main process/database: log to main.log
+        else:
+            log_file_path = os.path.join(log_dir, log_filename)
+            handler = RotatingFileHandler(log_file_path, mode='a', maxBytes=50*1024*1024, backupCount=5)
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+
+        logger.propagate = False
+
+    # Setup cost logger (shared file across all processes)
+    cost_logger = logging.getLogger('cost_logger')
+    if not cost_logger.handlers:
+        # Use RotatingFileHandler: rotates when file reaches 10 MB - keeps 3 backups
+        cost_handler = RotatingFileHandler(os.path.join(log_dir, 'costs.log'), mode='a', maxBytes=10*1024*1024, backupCount=3)
+        cost_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        cost_logger.addHandler(cost_handler)
+        cost_logger.setLevel(logging.INFO)
+        cost_logger.propagate = False
+
+    return logger
 
 
 async def create_rabbitmq_connection(config, timeout=300, heartbeat=172800):
@@ -23,7 +118,7 @@ async def create_rabbitmq_connection(config, timeout=300, heartbeat=172800):
         timeout: Connection timeout in seconds
         heartbeat: Heartbeat interval in seconds (default 172800 = 2 days)
                    Set to 2 days for testing long-running experiments.
-                   If connection errors occur before this timeout, they are
+                   If connection errors occur before this timeout - they are
                    likely due to network issues or RabbitMQ server resource limits,
                    not heartbeat timeouts.
 
@@ -90,113 +185,64 @@ def setup_signal_handlers(loop, process_type: str, local_id: int, logger: loggin
     loop.add_signal_handler(signal.SIGINT, shutdown_callback)
 
 
-class ManagedProcess:
+async def graceful_shutdown(component_type: str, local_id: int, logger: logging.Logger,
+                           loop, connection, channel, task, instance,
+                           cleanup_done_flag: dict):
     """
-    Context manager for multiprocessing.Process that ensures proper cleanup.
-    
-    Usage:
-        with ManagedProcess(target=my_func, args=(arg1,)) as proc:
-            # Process is started automatically
+    Shared graceful shutdown logic for all process types.
+
+    Args:
+        component_type: Type of component ("Sampler" or "Evaluator")
+        local_id: Process ID or identifier
+        logger: Logger instance
+        loop: Asyncio event loop
+        connection: RabbitMQ connection
+        channel: RabbitMQ channel
+        task: Async task to cancel
+        instance: Component instance to cleanup (Sampler or Evaluator)
+        cleanup_done_flag: Dict with 'done' key to track cleanup state
+    """
+    if cleanup_done_flag.get('done', False):
+        return
+
+    logger.info(f"{component_type} {local_id}: Initiating graceful shutdown...")
+
+    # Cancel consume task
+    if task and not task.done():
+        logger.info(f"{component_type} {local_id}: Cancelling consume task...")
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=2)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
             pass
-        # Process is terminated and cleaned up automatically
-    """
-    
-    def __init__(self, target, args=(), kwargs=None, name=None, timeout=10):
-        """
-        Initialize a managed process.
-        
-        Args:
-            target: Function to run in the process
-            args: Positional arguments for target
-            kwargs: Keyword arguments for target
-            name: Name for the process
-            timeout: Timeout for graceful termination (seconds)
-        """
-        self.proc = mp.Process(
-            target=target,
-            args=args,
-            kwargs=kwargs or {},
-            name=name
-        )
-        self.timeout = timeout
-        self.logger = logging.getLogger('main_logger')
-    
-    def __enter__(self):
-        """Start the process and return it."""
-        self.proc.start()
-        if self.logger:
-            self.logger.debug(f"Started process {self.proc.name} (PID: {self.proc.pid})")
-        return self.proc
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Terminate the process gracefully."""
-        if self.proc.is_alive():
-            self.proc.terminate()
-            if self.logger:
-                self.logger.debug(f"Sent SIGTERM to {self.proc.name} (PID: {self.proc.pid})")
-            
-            self.proc.join(timeout=self.timeout)
-            
-            if self.proc.is_alive():
-                if self.logger:
-                    self.logger.warning(
-                        f"Process {self.proc.name} (PID: {self.proc.pid}) did not terminate "
-                        f"in {self.timeout}s. Sending SIGKILL."
-                    )
-                self.proc.kill()
-                self.proc.join()
-        
-        if self.logger:
-            self.logger.debug(f"Process {self.proc.name} (PID: {self.proc.pid}) terminated")
-        
-        return False  # Don't suppress exceptions
 
+    # Cleanup instance
+    if instance:
+        try:
+            logger.info(f"{component_type} {local_id}: Cleaning up {component_type.lower()} instance...")
+            if hasattr(instance, 'shutdown'):
+                await instance.shutdown()
+            elif hasattr(instance, 'cleanup'):
+                instance.cleanup()
+        except Exception as e:
+            logger.error(f"{component_type} {local_id}: Error during cleanup: {e}")
 
-class ConnectionManager:
-    """
-    Context manager for RabbitMQ connections and channels.
-    
-    Usage:
-        async with ConnectionManager(config) as (connection, channel):
-            # Use connection and channel
+    # Close connections (simplified - no verbose error handling)
+    if channel:
+        try:
+            await channel.close()
+        except Exception:
             pass
-        # Connection and channel are closed automatically
-    """
-    
-    def __init__(self, config, timeout=300):
-        """
-        Initialize connection manager.
-        
-        Args:
-            config: Configuration object with rabbitmq settings
-            timeout: Connection timeout in seconds
-        """
-        self.config = config
-        self.timeout = timeout
-        self.connection = None
-        self.channel = None
-    
-    async def __aenter__(self):
-        """Create connection and channel."""
-        self.connection = await create_rabbitmq_connection(self.config, self.timeout)
-        self.channel = await self.connection.channel()
-        return self.connection, self.channel
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Close channel and connection."""
-        if self.channel:
-            try:
-                await self.channel.close()
-            except Exception:
-                pass
-        
-        if self.connection:
-            try:
-                await self.connection.close()
-            except Exception:
-                pass
 
-        return False  # Don't suppress exceptions
+    if connection:
+        try:
+            await connection.close()
+        except Exception:
+            pass
+
+    cleanup_done_flag['done'] = True
+    logger.info(f"{component_type} {local_id}: Graceful shutdown complete.")
+    loop.stop()
 
 
 async def with_reconnection(consume_func: Callable, logger: logging.Logger,
@@ -206,7 +252,7 @@ async def with_reconnection(consume_func: Callable, logger: logging.Logger,
     """
     Wrapper that adds automatic reconnection logic to consume functions.
 
-    When a connection error occurs, this wrapper will:
+    When a connection error occurs - this wrapper will:
     1. Log the error with helpful context
     2. Wait with exponential backoff
     3. Retry the consume function
@@ -232,7 +278,7 @@ async def with_reconnection(consume_func: Callable, logger: logging.Logger,
     while True:  # Reconnection loop
         try:
             await consume_func()
-            # If consume_func exits normally, break the loop
+            # If consume_func exits normally - break the loop
             break
 
         except asyncio.CancelledError:
@@ -244,10 +290,6 @@ async def with_reconnection(consume_func: Callable, logger: logging.Logger,
             # Connection error occurred - log details and retry
             logger.error(
                 f"{component_name} connection error: {e}\n"
-                f"This can occur due to:\n"
-                f"  - RabbitMQ connection reset (network issues, heartbeat timeout)\n"
-                f"  - RabbitMQ server overload with many simultaneous connections\n"
-                f"  - Network interruptions in cluster environment\n"
                 f"Attempting to reconnect in {reconnect_delay:.1f} seconds..."
             )
 

@@ -1,0 +1,11 @@
+"""
+Finds a large independent set in graph G where nodes are q-ary strings of length n.
+Nodes in G are connected if their edit distance < 2s + 1, where s = 1.
+
+For a code to correct s errors (insertions, deletions, or substitutions),
+all codewords must have pairwise edit distance >= 2s + 1.
+
+Improve the `priority_v{version}` function over its previous versions below.
+Keep the code short and comment for easy understanding.
+{prompt_style}
+"""

@@ -271,7 +271,7 @@ def print_progress_comparison(checkpoints: Dict[str, Dict[str, Any]]):
 
 def main():
     # ========================================================================
-    # CONFIGURATION - Edit these variables
+    # CONFIGURATION 
     # ========================================================================
 
     # Path to checkpoint file(s)

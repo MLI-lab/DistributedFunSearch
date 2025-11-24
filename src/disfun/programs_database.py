@@ -1,14 +1,14 @@
 # Copyright 2023 DeepMind Technologies Limited
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the Apache License - Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #    http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
+# Unless required by applicable law or agreed to in writing - software
 # distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND - either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
@@ -18,12 +18,12 @@
 
 Differences from the original DeepMind FunSearch version
 
-* Works inside an async RabbitMQ loop (`consume_and_process`, `get_prompt`).
-* Logs cumulative evaluator CPU, sampler GPU, and I/O token counts.
+* Works inside an async RabbitMQ loop (`consume_and_process` - `get_prompt`).
+* Logs cumulative evaluator CPU - sampler GPU - and I/O token counts.
 * Saves and resumes from checkpoint.
 * Enforces deduplication (hash-based) and version-mismatch checks.
 * Stops early after an optimal solution or a prompt/solution quota.
-* Implements different evaluation scoring (last, average, weighted, relative difference to a traget solution)
+* Implements different evaluation scoring (last - average - weighted - relative difference to a traget solution)
 """
 
 import copy
@@ -40,6 +40,7 @@ import os
 import multiprocessing
 from typing import Mapping, Any, List, Sequence, Optional
 from disfun import code_manipulation
+from disfun import specification_loader
 import json
 import aio_pika
 import re
@@ -82,11 +83,11 @@ import json
 def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], target_signatures=None) -> float:
     """
     Reduces per-test scores into a single score based on the specified mode.
-    Extracts (n, s) from full problem instance tuples and aggregates for each s in s_values.
+    Extracts (n - s) from full problem instance tuples and aggregates for each s in s_values.
 
     Available modes:
     - "last": Uses the score for the largest n (end_n) for each s value.
-    - "average": Averages scores across all n values for each s, then averages across s values.
+    - "average": Averages scores across all n values for each s - then averages across s values.
     - "weighted": Weights scores by n to prioritize larger n-values.
     - "relative_difference": Uses relative difference (actual - target) / target to normalize across targets.
 
@@ -98,17 +99,17 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
         start_n (list): Start values for n per s-value.
         end_n (list): End values for n per s-value.
         s_values (list): List of s-values to consider.
-        target_signatures (dict, optional): Dictionary of target sizes for each (n, s).
+        target_signatures (dict, optional): Dictionary of target sizes for each (n - s).
 
     Returns:
         float: Final reduced score.
     """
     try:
-        # Convert string keys to tuples and extract (n, s) from full problem instance tuples
+        # Convert string keys to tuples and extract (n - s) from full problem instance tuples
         parsed_scores = {}
         for k, v in scores_per_test.items():
             key = eval(k) if isinstance(k, str) else k
-            # Extract (n, s) from full tuple: take first two elements
+            # Extract (n - s) from full tuple: take first two elements
             ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
             parsed_scores[ns_key] = v
     except Exception as e:
@@ -171,8 +172,8 @@ def _format_scores_for_prompt(
         relative_label: Prefix text for relative improvements.
 
     Returns:
-        Formatted string like "Absolute scores: {(6,1): 8, (7,1): 14}" or
-                            "Relative to baseline: {(6,1): +0.0%, (7,1): +7.1%}".
+        Formatted string like "Absolute scores: {(6,1): 8 - (7,1): 14}" or
+                            "Relative to baseline: {(6,1): +0.0% - (7,1): +7.1%}".
     """
     parsed_scores = {}
     for k, v in scores_per_test.items():
@@ -181,7 +182,7 @@ def _format_scores_for_prompt(
 
     if display_mode == "absolute":
         items = [f"{k}: {v}" for k, v in sorted(parsed_scores.items())]
-        return f"{absolute_label} {{{', '.join(items)}}}"
+        return f"{absolute_label} {{{' - '.join(items)}}}"
 
     elif display_mode == "relative":
         improvements = []
@@ -195,7 +196,7 @@ def _format_scores_for_prompt(
             else:
                 improvements.append(f"{dim}: {score_ours}")
 
-        return f"{relative_label} {{{', '.join(improvements)}}}"
+        return f"{relative_label} {{{' - '.join(improvements)}}}"
 
     return ""
 
@@ -205,10 +206,10 @@ def _get_q_description(q: int) -> str:
     Returns a descriptive string for the alphabet size.
 
     Args:
-        q: Alphabet size (2 for binary, 4 for quaternary, etc.)
+        q: Alphabet size (2 for binary - 4 for quaternary - etc.)
 
     Returns:
-        String like "binary" for q=2, "quaternary" for q=4, or "{q}-ary" for other values.
+        String like "binary" for q=2 - "quaternary" for q=4 - or "{q}-ary" for other values.
     """
     if q == 2:
         return "binary"
@@ -220,7 +221,7 @@ def _get_q_description(q: int) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class Prompt:
-    """A prompt produced by the ProgramsDatabase, to be sent to Samplers."""
+    """A prompt produced by the ProgramsDatabase - to be sent to Samplers."""
     code: str
     version_generated: int
     island_id: int
@@ -243,7 +244,7 @@ class Prompt:
 
 
 class ProgramsDatabase:
-    """A collection of programs, organized as islands.
+    """A collection of programs - organized as islands.
 
     The ProgramsDatabase maintains a population of evolved programs across multiple islands
     for diversity. It implements evolutionary lineage tracking to record parent-child
@@ -254,12 +255,12 @@ class ProgramsDatabase:
     Each program is assigned:
     - program_id: Unique identifier (auto-incrementing)
     - parent_ids: List of program IDs from the few-shot prompt that generated it
-    - generation: Evolutionary depth (0 for baseline, max(parent_generations) + 1 for offspring)
+    - generation: Evolutionary depth (0 for baseline - max(parent_generations) + 1 for offspring)
     - timestamp: Creation time
 
     Special Handling for Island Resets:
     -----------------------------------
-    When weak islands are reset, founder programs (best programs from surviving islands)
+    When weak islands are reset - founder programs (best programs from surviving islands)
     are copied to the reset island. These founder programs inherit lineage from their
     source program: the new founder's parent_ids contains the original program's program_id,
     maintaining the evolutionary chain across island boundaries.
@@ -299,6 +300,7 @@ class ProgramsDatabase:
         wandb_config=None,
         sampler_config=None,
         evaluator_config=None,
+        prompt_config=None,
         run_name=None
     ):
         self._islands = [] 
@@ -337,7 +339,7 @@ class ProgramsDatabase:
         self.q = q
 
         if self.display_mode == "relative" and not self.best_known_solutions:
-            logger.warning("display_mode='relative' requires best_known_solutions, falling back to 'absolute'")
+            logger.warning("display_mode='relative' requires best_known_solutions - falling back to 'absolute'")
             self.display_mode = "absolute"
 
         self.cumulative_evaluator_cpu_time = 0.0
@@ -353,7 +355,7 @@ class ProgramsDatabase:
         self.duplicates_discarded=0
         self.execution_failed = 0
 
-        # Evolutionary lineage tracking (optional, can be disabled via config)
+        # Evolutionary lineage tracking (optional - can be disabled via config)
         self.save_lineage = config.save_lineage if hasattr(config, 'save_lineage') else False
         self.next_program_id = 1  # Counter for assigning unique program IDs
         self.lineage_log = [] if self.save_lineage else None  # Only initialize if enabled
@@ -362,6 +364,16 @@ class ProgramsDatabase:
         # Lazy initialization of locks (will be created on first access)
         self._island_locks = None
         self._locks_initialized = False
+
+        # Modular specification loading (for new two-dimensional prompt system)
+        self.evaluator_config = evaluator_config
+        self.prompt_config = prompt_config
+        self._problem_desc_content = None
+        self._prompt_style_content = None
+        self._system_message_content = None
+        self._imports_content = None
+        self._spec_files_loaded = False
+        self._logged_modular_prompt_system = False  # Flag to log modular prompt system message only once
 
         for _ in range(config.num_islands):
             island = {}
@@ -423,7 +435,7 @@ class ProgramsDatabase:
                 "max_new_tokens": sampler_config.max_new_tokens,
                 "top_p": sampler_config.top_p,
                 "repetition_penalty": sampler_config.repetition_penalty,
-                "gpt": sampler_config.gpt,
+                "model": sampler_config.model,
                 "prompts_per_batch_sampler": sampler_config.prompts_per_batch,
             })
 
@@ -473,6 +485,12 @@ class ProgramsDatabase:
         if checkpoint_run_name:
             self.wandb_run_name = checkpoint_run_name
             logger.info(f"Restored run name from checkpoint: {checkpoint_run_name}")
+
+        # Restore numpy random state for reproducibility
+        numpy_random_state = checkpoint_data.get("numpy_random_state", None)
+        if numpy_random_state:
+            np.random.set_state(numpy_random_state)
+            logger.info("Restored numpy random state from checkpoint")
 
         for i, score in enumerate(checkpoint_data["best_score_per_island"]):
             self._best_score_per_island[i] = score
@@ -538,6 +556,7 @@ class ProgramsDatabase:
             "prompts_since_optimal":self.prompts_since_optimal,
             "wandb_run_id": self.wandb_run_id,  # Save W&B run ID for resumption
             "wandb_run_name": self.wandb_run_name,  # Save run name for checkpoint directory continuity
+            "numpy_random_state": np.random.get_state(),  # Save numpy random state for reproducibility
             "islands_state": []
         }
 
@@ -604,11 +623,11 @@ class ProgramsDatabase:
         for island_id, score in enumerate(self._best_score_per_island):
             metrics[f"island_{island_id}/best_score"] = score
 
-            # Log detailed scores for each evaluation input (n, s)
+            # Log detailed scores for each evaluation input (n - s)
             scores_per_test = self._best_scores_per_test_per_island[island_id]
             if scores_per_test is not None:
                 for test_key, test_score in scores_per_test.items():
-                    # test_key is (n, s) tuple
+                    # test_key is (n - s) tuple
                     if isinstance(test_key, tuple) and len(test_key) >= 2:
                         n, s = test_key[0], test_key[1]
                         metrics[f"island_{island_id}/score_n{n}_s{s}"] = test_score
@@ -720,7 +739,7 @@ class ProgramsDatabase:
     def _trace_lineage(self, program_id: int, max_depth: int = 100):
         """Trace the full evolutionary lineage of a program.
 
-        Returns a list of dictionaries, each containing:
+        Returns a list of dictionaries - each containing:
         - program: The Function object
         - generation: Generation number
         - score: Program's score
@@ -796,7 +815,7 @@ class ProgramsDatabase:
 <head>
     <title>Evolutionary Lineage - Program {program_id}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
+        body {{ font-family: Arial - sans-serif; margin: 20px; background-color: #f5f5f5; }}
         h1 {{ color: #333; }}
         .program-card {{
             background: white;
@@ -816,7 +835,7 @@ class ProgramsDatabase:
             border: 1px solid #ddd;
             border-radius: 4px;
             padding: 10px;
-            font-family: 'Courier New', monospace;
+            font-family: 'Courier New' - monospace;
             font-size: 13px;
             overflow-x: auto;
             white-space: pre-wrap;
@@ -827,13 +846,13 @@ class ProgramsDatabase:
     </style>
 </head>
 <body>
-    <h1>Evolutionary Lineage - Island {island_id}, Program {program_id}</h1>
+    <h1>Evolutionary Lineage - Island {island_id} - Program {program_id}</h1>
     <p>Showing {num_ancestors} programs in the evolutionary chain (newest to oldest)</p>
 """.format(program_id=program_id, island_id=island_id, num_ancestors=len(lineage))
 
         for i, entry in enumerate(lineage):
             is_current = (i == 0)
-            parent_str = ", ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None (baseline)"
+            parent_str = " - ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None (baseline)"
 
             code = ""
             if entry['program'] is not None:
@@ -891,7 +910,7 @@ class ProgramsDatabase:
 <head>
     <title>Lineage Tree - Program {program_id}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
+        body {{ font-family: Arial - sans-serif; margin: 20px; background-color: #f5f5f5; }}
         h1 {{ color: #333; }}
         .tree {{ margin: 20px; }}
         .node {{
@@ -915,7 +934,7 @@ class ProgramsDatabase:
     </style>
 </head>
 <body>
-    <h1>Lineage Tree - Island {island_id}, Program {program_id}</h1>
+    <h1>Lineage Tree - Island {island_id} - Program {program_id}</h1>
     <p>Genealogy structure showing {num_programs} programs across {num_generations} generations</p>
 """.format(
             program_id=program_id,
@@ -943,7 +962,7 @@ class ProgramsDatabase:
                 is_baseline = (entry['generation'] == 0)
                 node_class = "current" if is_current else ("baseline" if is_baseline else "")
 
-                parent_str = ", ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None"
+                parent_str = " - ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None"
 
                 html += f"""            <div class="node {node_class}">
                 <div class="node-id">ID: {entry['program_id']}</div>
@@ -986,7 +1005,7 @@ class ProgramsDatabase:
             lineage = self._trace_lineage(program.program_id) if self.save_lineage else []
 
             # Format detailed scores
-            scores_str = ", ".join(f"{k}:{v}" for k, v in scores_per_test.items()) if scores_per_test else "N/A"
+            scores_str = " - ".join(f"{k}:{v}" for k, v in scores_per_test.items()) if scores_per_test else "N/A"
 
             # Full code (not truncated)
             full_code = str(program)
@@ -1004,7 +1023,7 @@ class ProgramsDatabase:
                     with open(html_path, 'w') as f:
                         f.write(html_content)
 
-                    # Generate tree diagram HTML (structure only, no code)
+                    # Generate tree diagram HTML (structure only - no code)
                     tree_content = self._generate_lineage_tree_diagram(program.program_id, island_id)
                     tree_filename = f"lineage_tree_island{island_id}_program{program.program_id}.html"
                     tree_path = f"{self.save_checkpoints_path}/{tree_filename}"
@@ -1017,7 +1036,7 @@ class ProgramsDatabase:
                             artifact = wandb.Artifact(
                                 name=f"lineage_island{island_id}_step{self.total_prompts}",
                                 type="lineage_visualization",
-                                description=f"Evolutionary lineage for island {island_id}, program {program.program_id}"
+                                description=f"Evolutionary lineage for island {island_id} - program {program.program_id}"
                             )
                             artifact.add_file(html_path, name="detailed_with_code.html")
                             artifact.add_file(tree_path, name="tree_diagram.html")
@@ -1025,9 +1044,9 @@ class ProgramsDatabase:
                             lineage_link = f"See artifact: lineage_island{island_id}_step{self.total_prompts}"
                         except Exception as e:
                             logger.warning(f"Failed to upload lineage artifact to W&B: {e}")
-                            lineage_link = f"Local files: {html_filename}, {tree_filename}"
+                            lineage_link = f"Local files: {html_filename} - {tree_filename}"
                     else:
-                        lineage_link = f"Local files: {html_filename}, {tree_filename}"
+                        lineage_link = f"Local files: {html_filename} - {tree_filename}"
                 except Exception as e:
                     logger.error(f"Error generating lineage HTML: {e}")
                     lineage_link = "Error generating lineage"
@@ -1103,7 +1122,7 @@ class ProgramsDatabase:
                         logger.info(f"Successfully resumed W&B run: {expected_run_id}")
                         logger.info(f"W&B run URL: {wandb.run.url}")
                     else:
-                        # This shouldn't happen with resume="must", but check anyway
+                        # This shouldn't happen with resume="must" - but check anyway
                         logger.warning(f"Unexpected: W&B run ID mismatch. Expected {expected_run_id}, got {wandb.run.id if wandb.run else 'None'}")
 
                 except Exception as e:
@@ -1123,7 +1142,7 @@ class ProgramsDatabase:
                         logger.error(f"Reason: No permission to access run {expected_run_id}")
                         logger.error("Suggestion: Verify entity/project permissions and API key")
                     else:
-                        logger.error(f"Reason: Unknown error - {e}")
+                        logger.error(f"Reason: Unknown error, {e}")
 
                     # Close any partial W&B connection
                     if wandb.run:
@@ -1131,7 +1150,7 @@ class ProgramsDatabase:
 
                     logger.info("Creating a new W&B run instead...")
 
-                # If resume failed, create a new run
+                # If resume failed - create a new run
                 if resume_failed:
                     await loop.run_in_executor(
                         None,
@@ -1212,7 +1231,7 @@ class ProgramsDatabase:
         except asyncio.CancelledError:
             logger.info("W&B logging task cancelled. NOT finishing run to allow resumption from checkpoint.")
             # Do NOT call wandb.finish() here - leave the run "running" so it can be resumed
-            # If the run is truly complete, the user should manually finish it in W&B UI
+            # If the run is truly complete - the user should manually finish it in W&B UI
             # or call wandb.finish() explicitly when termination conditions are met
             if self.wandb_enabled and wandb.run is not None:
                 logger.info(f"W&B run {wandb.run.id} left in resumable state. Resume with: --checkpoint <path>")
@@ -1375,7 +1394,7 @@ class ProgramsDatabase:
                 else:
                     logger.warning("Reset period exceeded, but not all islands have enough programs. Skipping reset for now.")
         else:
-            # If reset_period is None, only check population
+            # If reset_period is None - only check population
             all_islands_sufficiently_populated = all(island['num_programs'] >= self._config.reset_programs for island in self._islands)
             if all_islands_sufficiently_populated:
                 logger.info("Reset period not defined, but all islands have enough programs. Proceeding to reset islands.")
@@ -1421,7 +1440,7 @@ class ProgramsDatabase:
         Each registered program receives:
         - program_id: Unique auto-incrementing identifier
         - parent_ids: Programs from the few-shot prompt that generated this program
-        - generation: max(parent_generations) + 1, or 0 if no parents (baseline)
+        - generation: max(parent_generations) + 1 - or 0 if no parents (baseline)
         - timestamp: Current time
 
         The lineage information is logged to self.lineage_log for tracking evolutionary trajectories.
@@ -1440,7 +1459,7 @@ class ProgramsDatabase:
         self.next_program_id += 1
         program.parent_ids = parent_ids
 
-        # Calculate generation: max of parent generations + 1, or 0 if no parents
+        # Calculate generation: max of parent generations + 1 - or 0 if no parents
         if parent_ids:
             # Find maximum generation among parents
             max_parent_generation = 0
@@ -1497,7 +1516,7 @@ class ProgramsDatabase:
                 self._best_score_per_island[island_id] = score
                 logger.info(f'Best score of island {island_id} increased to {score} with program {program} and scores {scores_per_test}')
         
-            # If the score is equal to the best score, check the program signature
+            # If the score is equal to the best score - check the program signature
             elif score == self._best_score_per_island[island_id]:
                 # Get the current best program's signature
                 current_best_program = self._best_program_per_island[island_id]
@@ -1517,13 +1536,13 @@ class ProgramsDatabase:
         """Reset the weakest half of islands with founders from the best islands.
 
         This method maintains diversity by periodically resetting underperforming islands.
-        The weakest islands (by best score) are cleared, and each is seeded with the best
+        The weakest islands (by best score) are cleared - and each is seeded with the best
         program from a randomly selected surviving island.
 
         Lineage Tracking During Resets:
         --------------------------------
         Founder programs maintain evolutionary continuity across island boundaries.
-        When a program is copied as a founder to a reset island, it receives a new program_id
+        When a program is copied as a founder to a reset island - it receives a new program_id
         but its parent_ids contains the original program's program_id. This creates an
         evolutionary link showing the program was "migrated" from another island rather than
         evolved from a prompt.
@@ -1611,7 +1630,7 @@ class ProgramsDatabase:
         """Generate a prompt for an island.
 
         Returns:
-            tuple: (prompt, flag_duplicate, version_generated, parent_ids)
+            tuple: (prompt - flag_duplicate - version_generated - parent_ids)
         """
         clusters = island['clusters']
         signatures = list(clusters.keys())
@@ -1661,7 +1680,7 @@ class ProgramsDatabase:
         parent_ids = []  # Track parent program IDs
         logger.debug(f"Length of valid sig: {len(valid_signatures)}")
 
-        # If only one valid signature is available, sample from it once.
+        # If only one valid signature is available - sample from it once.
         if len(valid_signatures) == 1:
             selected_signature = valid_signatures[0]
             cluster = clusters[selected_signature]
@@ -1695,10 +1714,10 @@ class ProgramsDatabase:
             )
             sampled_signatures.update([valid_signatures[i] for i in cluster_indices])
         else:
-            # If fewer than desired valid clusters are available, use all available ones.
+            # If fewer than desired valid clusters are available - use all available ones.
             logger.warning("Fewer valid clusters than functions_per_prompt; using all available clusters.")
             sampled_signatures.update(valid_signatures)
-            # Optionally, you could recalculate probabilities excluding these and sample additional ones if desired.
+            # Optionally - you could recalculate probabilities excluding these and sample additional ones if desired.
     
         # Sample one program from each selected cluster.
         for signature in sampled_signatures:
@@ -1720,7 +1739,45 @@ class ProgramsDatabase:
         prompt, flag_duplicate = self._generate_prompt(sorted_programs)
         return prompt, flag_duplicate, version_generated, parent_ids
 
+    def _load_specification_files(self):
+        """Load modular specification files if not already loaded."""
+        if self._spec_files_loaded:
+            return
+
+        # Check if we have prompt config with the new fields
+        if self.prompt_config is None:
+            logger.debug("No prompt config found, skipping modular spec loading")
+            self._spec_files_loaded = True
+            return
+
+        # Check if modular spec fields exist
+        if not hasattr(self.prompt_config, 'problem_description_path'):
+            logger.debug("prompt config missing problem_description_path, skipping modular spec loading")
+            self._spec_files_loaded = True
+            return
+
+        try:
+            # Get system_message_path and imports_path if they exist
+            system_message_path = getattr(self.prompt_config, 'system_message_path', None)
+            imports_path = getattr(self.prompt_config, 'imports_path', None)
+
+            # Load using specification_loader with full paths
+            self._problem_desc_content, self._prompt_style_content, self._system_message_content, self._imports_content = specification_loader.load_specification_files(
+                self.prompt_config.problem_description_path,
+                self.prompt_config.prompt_style_path,
+                system_message_path,
+                imports_path
+            )
+            logger.info(f"Loaded modular specifications: problem={self.prompt_config.problem_description_path}, style={self.prompt_config.prompt_style_path}, system={system_message_path}, imports={imports_path}")
+            self._spec_files_loaded = True
+        except Exception as e:
+            logger.warning(f"Failed to load modular specification files: {e}. Falling back to template-based prompts.")
+            self._spec_files_loaded = True
+
     def _generate_prompt(self, implementations_with_scores: Sequence[tuple]) -> str:
+        # Load modular specification files if available
+        self._load_specification_files()
+
         logger.debug(f"Type of `implementations_with_scores`: {type(implementations_with_scores)}")
 
         implementations = [impl for impl, _ in implementations_with_scores]
@@ -1738,28 +1795,61 @@ class ProgramsDatabase:
             implementation.name = new_function_name
 
             # Add scores to the docstring of evaluated implementations
-            if self.show_eval_scores and scores_list[i]:
-                score_text = _format_scores_for_prompt(
-                    scores_list[i],
-                    self.display_mode,
-                    self.best_known_solutions,
-                    self.absolute_label,
-                    self.relative_label
-                )
-
-                if i >= 1:
-                    # For i >= 1, use "Improved version" docstring
+            if i >= 1:
+                # For i >= 1 (evolved functions) - create "Improved version" docstring
+                if self.show_eval_scores and scores_list[i]:
+                    score_text = _format_scores_for_prompt(
+                        scores_list[i],
+                        self.display_mode,
+                        self.best_known_solutions,
+                        self.absolute_label,
+                        self.relative_label
+                    )
                     base_docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`.'
                     implementation.docstring = f'{base_docstring} {score_text}'
                 else:
-                    # For i == 0, append scores to existing docstring
+                    implementation.docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`.'
+            elif i == 0:
+                # For i == 0 (baseline) - use {score} placeholder replacement
+                logger.debug(f"Processing baseline (i=0): show_eval_scores={self.show_eval_scores}, has_scores={bool(scores_list[i])}, scores={scores_list[i]}")
+                logger.debug(f"Baseline has docstring={bool(implementation.docstring)}, body contains {{score}}={'{score}' in implementation.body if implementation.body else False}")
+
+                if self.show_eval_scores and scores_list[i]:
+                    score_text = _format_scores_for_prompt(
+                        scores_list[i],
+                        self.display_mode,
+                        self.best_known_solutions,
+                        self.absolute_label,
+                        self.relative_label
+                    )
+                    logger.debug(f"Replacing {{score}} with: {score_text}")
+
+                    # Replace in docstring (if extracted)
                     if implementation.docstring:
-                        implementation.docstring = f'{implementation.docstring.strip()} {score_text}'
-                    else:
-                        implementation.docstring = score_text
-            elif i >= 1:
-                # No scores, but still update docstring for i >= 1
-                implementation.docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`.'
+                        implementation.docstring = implementation.docstring.replace('{score}', score_text)
+                        logger.debug(f"Docstring after replacement:\n{implementation.docstring}")
+
+                    # Replace in body (for backwards compatibility with old stored functions)
+                    if implementation.body and '{score}' in implementation.body:
+                        implementation.body = implementation.body.replace('{score}', score_text)
+                        logger.debug(f"Body after replacement:\n{implementation.body}")
+                else:
+                    # Remove {score} placeholder
+                    logger.debug("No scores or show_eval_scores=False, removing {score} placeholder")
+
+                    # Remove from docstring
+                    if implementation.docstring:
+                        docstring_lines = implementation.docstring.split('\n')
+                        filtered_lines = [line for line in docstring_lines if '{score}' not in line]
+                        implementation.docstring = '\n'.join(filtered_lines)
+                        logger.debug(f"Docstring after removal:\n{implementation.docstring}")
+
+                    # Remove from body
+                    if implementation.body and '{score}' in implementation.body:
+                        body_lines = implementation.body.split('\n')
+                        filtered_lines = [line for line in body_lines if '{score}' not in line]
+                        implementation.body = '\n'.join(filtered_lines)
+                        logger.debug(f"Body after removal:\n{implementation.body}")
             try:
                 implementation_str = code_manipulation.rename_function_calls(
                     str(implementation), self._function_to_evolve, new_function_name
@@ -1785,6 +1875,79 @@ class ProgramsDatabase:
         except Exception as e:
             logger.error(f"Error in creating header: {e}")
 
+        # Check if modular specification files are loaded
+        # Note: prompt_style_content can be empty for code completion mode (StarCoder - etc.)
+        use_modular_prompt = (
+            self._problem_desc_content is not None and
+            self._problem_desc_content.strip()
+        )
+
+        if use_modular_prompt:
+            # Modular prompt construction
+            if not self._logged_modular_prompt_system:
+                logger.info("Using modular specification system for prompt construction")
+                self._logged_modular_prompt_system = True
+
+            try:
+                # Build few-shot examples (exclude the header which has empty body)
+                fewshot_implementations = [(impl, scores) for impl, scores in
+                                          zip(implementations, scores_list)]
+                fewshot_examples = specification_loader.build_fewshot_examples(
+                    fewshot_implementations,
+                    self.prompt_config  # Use prompt config directly
+                )
+
+                # Construct the modular prompt
+                prompt_parts = []
+
+                # 1. Problem description with placeholders replaced
+                problem_desc = self._problem_desc_content.strip()
+
+                # Replace {version} with actual version number
+                problem_desc = problem_desc.replace("{version}", str(next_version))
+
+                # Replace {prompt_style} placeholder
+                if self._prompt_style_content and self._prompt_style_content.strip():
+                    problem_desc = problem_desc.replace("{prompt_style}", "\n" + self._prompt_style_content.strip())
+                else:
+                    problem_desc = problem_desc.replace("\n{prompt_style}", "")  # Remove placeholder and preceding newline
+
+                prompt_parts.append(problem_desc)
+
+                # 2. Imports (if specified)
+                if self._imports_content and self._imports_content.strip():
+                    prompt_parts.append(self._imports_content.strip())
+
+                # 3. Few-shot examples (if any) - just the functions - no labels
+                if fewshot_examples:
+                    prompt_parts.append(fewshot_examples)
+
+                # 4. Function header to complete
+                prompt_parts.append(str(header))
+
+                prompt_str = "\n\n".join(prompt_parts)
+
+                # Check for duplicates
+                duplicate_prompt = False
+                if len(implementations) == 2 and implementations[0].hash_value == implementations[1].hash_value:
+                    duplicate_prompt = True
+                    self.dublicate_prompts += 1
+                    try:
+                        with open("duplicate_prompt.txt", "a") as f:
+                            f.write(prompt_str)
+                        logger.info("Duplicate prompt written to 'duplicate_prompt.txt'.")
+                    except Exception as e:
+                        logger.error(f"Failed to write duplicate prompt to file: {e}")
+
+                logger.debug(f"Modular prompt constructed: {len(prompt_str)} characters")
+                logger.debug(f"Full prompt sent to LLM:\n{'='*80}\n{prompt_str}\n{'='*80}")
+                return prompt_str.rstrip('\n'), duplicate_prompt
+
+            except Exception as e:
+                logger.error(f"Error constructing modular prompt: {e}. Falling back to template-based approach.")
+                # Fall through to template-based approach
+
+        # Template-based prompt construction (original approach)
         if hasattr(self._template, 'preface'):
             preface = getattr(self._template, 'preface', '')
 
@@ -1801,7 +1964,7 @@ class ProgramsDatabase:
             if self.include_nx:
                 imports.append("import networkx as nx")
 
-            # If the preface starts with a docstring, leave it intact
+            # If the preface starts with a docstring - leave it intact
             if preface_cleaned.startswith('"""'):
                 docstring_end = preface_cleaned.index('"""', 3) + 3
                 initial_docstring = preface_cleaned[:docstring_end]
@@ -1819,7 +1982,7 @@ class ProgramsDatabase:
             sections.extend(imports)
             sections.append("")  # Add a blank line after imports
 
-            # Join sections, ensuring appropriate newlines
+            # Join sections - ensuring appropriate newlines
             preface = "\n".join(filter(None, sections))+ "\n" + "\n"
             self._template = dataclasses.replace(self._template, preface=preface)
 
@@ -1830,7 +1993,7 @@ class ProgramsDatabase:
                 with open(spec_path, 'r') as file:
                     specification = file.read()
                 template_no_hash= code_manipulation.text_to_program(specification)
-                # Use the first two functions from the template, followed by versioned functions
+                # Use the first two functions from the template - followed by versioned functions
                 first_two_functions = template_no_hash.functions[:4]
                 new_functions_list = first_two_functions + versioned_functions
             else:
@@ -1841,7 +2004,8 @@ class ProgramsDatabase:
 
             prompt_str = str(prompt)
 
-            logger.debug(f"Final prompt after class removal: {prompt_str}")
+            logger.debug(f"Template-based prompt constructed: {len(prompt_str)} characters")
+            logger.debug(f"Full prompt sent to LLM:\n{'='*80}\n{prompt_str}\n{'='*80}")
 
             # Write to a file if two programs have the same hash value
             duplicate_prompt = False
@@ -1883,7 +2047,7 @@ class ProgramsDatabase:
         return tuple(ensure_hashable(scores_per_test[k]) for k in sorted(scores_per_test.keys()))
 
     def sample_program(self, cluster_data, temperature=1.0):
-        """Samples a program from the cluster, favoring shorter programs."""
+        """Samples a program from the cluster - favoring shorter programs."""
         programs = cluster_data['programs']
         if not programs:
             raise ValueError("Cluster contains no programs to sample.")

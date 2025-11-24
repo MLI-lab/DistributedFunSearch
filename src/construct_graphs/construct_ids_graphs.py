@@ -15,23 +15,23 @@ and save them to LMDB databases in the format: graph_ids_s{s}_n{n}_q{q}.lmdb
 
 Parallelization Strategy:
     To avoid creating a massive list of all sequence pairs in memory (which would require
-    ~15TB for n=10, q=4), workers generate pairs on-the-fly from assigned index ranges.
+    ~15TB for n=10, q=4) - workers generate pairs on-the-fly from assigned index ranges.
 
-    For N sequences, we need to compute all pairs (i,j) where i < j:
+    For N sequences - we need to compute all pairs (i,j) where i < j:
     - Total pairs: N(N-1)/2
-    - Each worker is assigned a range of 'i' indices: [start_i, end_i)
-    - For each i in its range, the worker compares sequence[i] with all sequence[j] where j > i, i.e. For every i in its range, that worker loops only over j = i+1..N-1.
+    - Each worker is assigned a range of 'i' indices: [start_i - end_i)
+    - For each i in its range - the worker compares sequence[i] with all sequence[j] where j > i - i.e. For every i in its range - that worker loops only over j = i+1..N-1.
     - This ensures no duplicate comparisons (each pair is processed exactly once)
 
     Load balancing: Index ranges are assigned such that each worker processes approximately
     the same number of pairs. Early indices (small i) have more work since they compare with
-    more j values, so workers processing early indices get fewer indices.
+    more j values - so workers processing early indices get fewer indices.
 
     How it works:
         Using the quadratic formula to solve for index boundaries:
         Cumulative pairs from i=0 to i=k-1: f(k) = sum_{i=0}^{k-1} (N-1-i) = k*N - k*(k+1)/2
         Target for worker w: (w+1) * (total_pairs / num_workers)
-        We want to choose boundaries k_0=0, k_1, k_2, …, k_W=N such that f(k_w) \approx \frac{w}{W} T where T is total pairs and W is number of workers and w is the worker index.
+        We want to choose boundaries k_0=0 - k_1 - k_2 - …, k_W=N such that f(k_w) \approx \frac{w}{W} T where T is total pairs and W is number of workers and w is the worker index.
         Solve: k*N - k*(k+1)/2 = target
 """
 
@@ -172,11 +172,11 @@ def _compute_edges_chunk(args):
     Worker function to compute edges for a chunk of sequence pairs.
 
     Args:
-        args: Tuple of (worker_id, start_i, end_i, sequences, threshold)
-              Worker generates pairs from range [start_i, end_i) to save memory
+        args: Tuple of (worker_id - start_i - end_i - sequences - threshold)
+              Worker generates pairs from range [start_i - end_i) to save memory
 
     Returns:
-        List of edges (seq1, seq2) that should be connected
+        List of edges (seq1 - seq2) that should be connected
     """
     worker_id, start_i, end_i, sequences, threshold = args
     edges = []
@@ -209,12 +209,12 @@ def _compute_edges_chunk(args):
 def generate_ids_graph(n, s, q=2, max_workers=None):
     """
     Generate a graph where nodes are q-ary strings of length n.
-    Two nodes are connected if edit_distance(node1, node2) < 2s + 1.
+    Two nodes are connected if edit_distance(node1 - node2) < 2s + 1.
 
     Args:
         n: Length of strings
         s: Number of errors to correct (requires min distance 2s + 1)
-        q: Alphabet size (default: 2 for binary, 4 for DNA)
+        q: Alphabet size (default: 2 for binary - 4 for DNA)
         max_workers: Number of parallel workers (default: cpu_count())
 
     Returns:
@@ -235,22 +235,22 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
     mem_estimate = estimate_memory_usage(n, s, q, max_workers)
     print(f"  Estimated memory usage (UPPER BOUND):")
     print(f"    Total: {mem_estimate['total']:.2f} GB")
-    print(f"    - Adjacency dict: {mem_estimate['adjacency']:.2f} GB")
-    print(f"    - Sequences list: {mem_estimate['sequences']:.2f} GB")
-    print(f"    - Workers ({max_workers}): {mem_estimate['workers']:.2f} GB")
+    print(f"   , Adjacency dict: {mem_estimate['adjacency']:.2f} GB")
+    print(f"   , Sequences list: {mem_estimate['sequences']:.2f} GB")
+    print(f"   , Workers ({max_workers}): {mem_estimate['workers']:.2f} GB")
     print(f"      * Edge buffer per worker: {mem_estimate['edge_buffer_per_worker']:.2f} GB (~{mem_estimate['expected_edges_per_worker']/1e6:.1f}M edges)")
     print(f"      * Process overhead: 0.1 GB per worker")
-    print(f"    - Base overhead: {mem_estimate['overhead']:.2f} GB")
+    print(f"   , Base overhead: {mem_estimate['overhead']:.2f} GB")
     print(f"  Note: This is an UPPER BOUND because:")
-    print(f"    - Uses Hamming ball (Hamming ≥ Levenshtein, equality only without shifts)")
-    print(f"    - All workers peak simultaneously (actual: staggered due to load balancing)")
-    print(f"    - Conservative 150 bytes/edge (actual: ~100-120 bytes)")
-    print(f"    - No copy-on-write sharing (Linux/macOS: sequences are shared)")
+    print(f"   , Uses Hamming ball (Hamming ≥ Levenshtein, equality only without shifts)")
+    print(f"   , All workers peak simultaneously (actual: staggered due to load balancing)")
+    print(f"   , Conservative 150 bytes/edge (actual: ~100-120 bytes)")
+    print(f"   , No copy-on-write sharing (Linux/macOS: sequences are shared)")
     print(f"    Actual memory usage typically 30-50% of estimate (or less if sparse).")
     print(f"  Graph properties (based on Hamming ball approximation):")
-    print(f"    - Upper bound on degree: V_{q}(n,{2*s}) = {mem_estimate['avg_degree']:.0f}")
-    print(f"    - Upper bound on edge probability: {mem_estimate['p_edge']:.6f}")
-    print(f"    - Actual degree will be lower due to Levenshtein < Hamming for shifts")
+    print(f"   , Upper bound on degree: V_{q}(n,{2*s}) = {mem_estimate['avg_degree']:.0f}")
+    print(f"   , Upper bound on edge probability: {mem_estimate['p_edge']:.6f}")
+    print(f"   , Actual degree will be lower due to Levenshtein < Hamming for shifts")
 
     # Generate q-ary alphabet: '0', '1', ..., 'q-1'
     alphabet = ''.join(str(i) for i in range(q))
@@ -271,7 +271,7 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
 
     def cumulative_pairs_at_index(k):
         """Calculate total pairs from i=0 to i=k-1"""
-        return k * n_sequences - k * (k + 1) // 2
+        return k * n_sequences, k * (k + 1) // 2
 
     worker_args = []
     current_i = 0
@@ -331,7 +331,7 @@ def generate_ids_graph(n, s, q=2, max_workers=None):
     if peak_memory_gb < mem_estimate['total']:
         print(f"    Within estimate (saved {mem_estimate['total'] - peak_memory_gb:.2f} GB)")
     else:
-        print(f"    WARNING: Exceeded estimate by {peak_memory_gb - mem_estimate['total']:.2f} GB")
+        print(f"    WARNING: Exceeded estimate by {peak_memory_gb, mem_estimate['total']:.2f} GB")
 
     return adjacency
 
@@ -359,7 +359,7 @@ def save_graph_to_lmdb(adjacency, output_path):
     map_size_bytes = int(estimated_total_bytes * 1.5)
     map_size_gb = (map_size_bytes // (1024**3)) + 1
 
-    # Minimum 10GB, maximum reasonable size based on system
+    # Minimum 10GB - maximum reasonable size based on system
     map_size_gb = max(10, map_size_gb)
     map_size_bytes = map_size_gb * 1024 * 1024 * 1024
 
@@ -389,7 +389,7 @@ def construct_and_save_graph(n, s, q, output_dir, max_workers=None):
     Args:
         n: Length of strings
         s: Number of errors to correct
-        q: Alphabet size (2 for binary, 4 for DNA)
+        q: Alphabet size (2 for binary - 4 for DNA)
         output_dir: Directory to save the graph
         max_workers: Number of parallel workers (default: cpu_count())
     """
@@ -416,13 +416,13 @@ if __name__ == "__main__":
     print("=" * 70)
     print()
 
-    # Alphabet size: 2 for binary, 4 for DNA (quaternary)
+    # Alphabet size: 2 for binary - 4 for DNA (quaternary)
     q = 4
 
     # Number of parallel workers (set to None to use all available CPU cores)
     max_workers = 15
 
-    # Define (n, s) pairs to construct graphs for
+    # Define (n - s) pairs to construct graphs for
     # Adjust these based on your experimental needs
     params = [
         # s=1: requires min distance 3
@@ -452,7 +452,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print()
     print("SLURM Memory Reporting:")
-    print("  To get SLURM's memory report after job completion, use:")
+    print("  To get SLURM's memory report after job completion - use:")
     print("    sacct -j <job_id> --format=JobID,MaxRSS,ReqMem,Elapsed")
     print("  MaxRSS shows the actual peak memory used by the job")
     print("=" * 70)

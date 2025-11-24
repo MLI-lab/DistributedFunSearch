@@ -28,7 +28,7 @@ Install PyTorch matching your CUDA version. For CUDA 12.1:
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-For other CUDA versions find the matching installation command [here](https://pytorch.org/get-started/previous-versions/). You can skip this step if using OpenAI/Azure API.
+For other CUDA versions find the matching installation command [here](https://pytorch.org/get-started/previous-versions/). You can skip this step if using API models.
 
 Install DistributedFunSearch:
 
@@ -37,14 +37,31 @@ cd /workspace/DistributedFunSearch
 pip install .  # or pip install -e . for development mode
 ```
 
-Optionally pre-download the LLM (downloads to `/workspace/models/`):
+**Install C compiler (required for local models):**
+
+If using local models with vLLM, install gcc/g++ (required for Triton to compile CUDA kernels):
 
 ```bash
-cd src/experiments/experiment1
-python load_llm.py  # Change cache_dir in load_llm.py to modify download location
+conda install -c conda-forge gcc_linux-64 gxx_linux-64 -y
 ```
 
-If you don't preload, the model downloads to `/mnt/models/` by default (change in `src/disfun/sampler.py:79`).
+Skip this step if using API models only.
+
+**Install graph-tool (required for graph-based evaluation):**
+
+```bash
+conda install -c conda-forge graph-tool -y
+```
+
+**Model caching (local models only):**
+
+vLLM automatically downloads models to `~/.cache/huggingface/` on first use. To change the cache location, set the environment variable before running:
+
+```bash
+export HF_HOME=/your/custom/cache/path
+# or
+export TRANSFORMERS_CACHE=/your/custom/cache/path
+```
 
 Before running the experiment, update your config to use the Docker RabbitMQ service name:
 

@@ -1,7 +1,6 @@
 """
 Example script showing how to use analysis utilities programmatically.
 
-This can be adapted into a Jupyter notebook for interactive analysis.
 """
 
 import pickle
@@ -121,7 +120,7 @@ def find_novel_programs(checkpoint1_path: str, checkpoint2_path: str, island_id:
 # Example usage
 if __name__ == "__main__":
     # ========================================================================
-    # CONFIGURATION - Edit these variables
+    # CONFIGURATION 
     # ========================================================================
 
     # Path to checkpoint file

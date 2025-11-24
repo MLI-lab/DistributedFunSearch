@@ -1,0 +1,3 @@
+First, describe your new priority function and main steps in one sentence. Next, implement it in Python. Use this format:
+<thought>One-sentence description</thought>
+<code>Your implementation</code>

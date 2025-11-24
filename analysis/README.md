@@ -4,7 +4,73 @@ This directory contains tools for analyzing checkpoint files generated during Di
 
 ## Tools
 
-### 1. Checkpoint Analyzer (`checkpoint_analyzer.py`)
+### 1. Priority Function Timing (`time_priority_function.py`)
+
+Time the evaluation of priority functions on different graph inputs to profile performance and identify bottlenecks.
+
+**Features:**
+- Time graph loading, priority computation, and greedy construction
+- Test multiple graph sizes and configurations
+- Generate detailed performance metrics (avg time per node)
+- Export results to JSON for further analysis
+- Automatically uses experiment configuration
+
+**Quick Start:**
+```bash
+# Test with default configuration (uses experiment1/config.py)
+python analysis/time_priority_function.py
+
+# Test specific graph sizes
+python analysis/time_priority_function.py --n_values 7 8 9 --s_values 2
+
+# Use custom specification and save results
+python analysis/time_priority_function.py \
+  --spec_path src/disfun/specifications/IDS/StarCoder2/load_graph/baseline.txt \
+  --graph_dir /mnt/Checkpoints/Graphs/ids_graphs \
+  --output timing_results.json
+
+# Run quick verification test
+python analysis/quick_test.py
+```
+
+**Example Output:**
+```
+Testing priority function on graph: s=2, n=7, q=4
+  Graph stats: 16384 nodes, 2007040 edges
+  Priority computation completed in 0.3542 seconds
+  Average time per node: 0.0216 ms
+  Independent set size: 5
+
+  Summary:
+    Graph loading:        0.1234s (25.8%)
+    Priority computation: 0.3542s (74.0%)
+    Greedy construction:  0.0001s (0.2%)
+    Total time:           0.4777s
+```
+
+### 2. Timing Visualization (`plot_timing_results.py`)
+
+Create plots from timing results to visualize performance characteristics.
+
+**Features:**
+- Timing breakdown by component (stacked bar chart)
+- Scaling analysis (time vs problem size)
+- Efficiency metrics (time per node)
+- Solution quality tracking
+
+**Usage:**
+```bash
+# Generate all plots from timing results
+python analysis/plot_timing_results.py timing_results.json
+
+# Save plots to files
+python analysis/plot_timing_results.py timing_results.json \
+  --output timing_breakdown.png \
+  --scaling-output scaling_analysis.png \
+  --stats
+```
+
+### 3. Checkpoint Analyzer (`checkpoint_analyzer.py`)
 
 Load and inspect checkpoint files to view island states, clusters, best programs, and statistics.
 

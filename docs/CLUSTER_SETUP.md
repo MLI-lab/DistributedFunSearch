@@ -30,14 +30,21 @@ Download and convert a PyTorch image with the required CUDA version. For example
 enroot import -o /desired/path/custom_name.sqsh docker://pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime
 ```
 
-Start the image with root privileges to install RabbitMQ, curl, and OpenSSH client:
+Start the image with root privileges to install RabbitMQ, curl, OpenSSH client, and graph-tool:
 
 ```bash
 enroot create -n custom_name /desired/path/custom_name.sqsh
 enroot start --root --rw custom_name
-apt update && apt install -y rabbitmq-server curl openssh-client
+
+# Install system packages
+apt update && apt install -y rabbitmq-server curl openssh-client build-essential
 rabbitmq-plugins enable rabbitmq_management
+
+# Install graph-tool (required for graph-based evaluation)
+conda install -c conda-forge graph-tool -y
 ```
+
+**Note:** `build-essential` installs gcc/g++ which are required for vLLM's Triton backend to compile CUDA kernels when using local models. Skip this if using API models only.
 
 Once the setup is complete, exit the container and save the changes in a new image:
 
@@ -47,6 +54,16 @@ enroot export -o /desired/path/custom_name_with_rabbitmq.sqsh custom_name
 ```
 
 You can now delete the original `custom_name` image. Use `custom_name_with_rabbitmq.sqsh` as your container image in `exp1.sh`.
+
+**Model caching (local models only):**
+
+vLLM automatically downloads models to `~/.cache/huggingface/` on first use. To change the cache location, set the environment variable in your job script before running the experiment:
+
+```bash
+export HF_HOME=/desired/path/models
+# or
+export TRANSFORMERS_CACHE=/desired/path/models
+```
 
 ## Configure experiment
 

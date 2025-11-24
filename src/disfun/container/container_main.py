@@ -10,9 +10,14 @@ import pathlib
 # Use the current working directory
 CWD = os.path.abspath(os.getcwd())
 
-# Adjust as needed—for instance, if your project root is one level up from where you run the script:
-SRC_DIR = os.path.abspath(os.path.join(CWD, "..", ".."))
-GRAPH_DIR = os.path.join(SRC_DIR, "graphs")
+# Get graph directory from environment variable or use default
+# The graph_dir can be set via GRAPH_DIR environment variable passed from sandbox.py
+GRAPH_DIR = os.environ.get('GRAPH_DIR', None)
+
+if GRAPH_DIR is None:
+    # Fallback to default location if not set
+    SRC_DIR = os.path.abspath(os.path.join(CWD, "..", ".."))
+    GRAPH_DIR = os.path.join(SRC_DIR, "graphs")
 
 def main(prog_file: str, input_file: str, output_file: str):
     """Executes a deserialized function with input and writes output to file."""
@@ -27,7 +32,7 @@ def main(prog_file: str, input_file: str, output_file: str):
 
         # Inject `GRAPH_DIR` into the function call
         start_cpu_time = time.process_time()
-        ret = func(input_data, GRAPH_DIR)  # ← Pass GRAPH_DIR
+        ret = func(input_data, GRAPH_DIR)  # Pass GRAPH_DIR
         end_cpu_time = time.process_time()
 
         execution_time = end_cpu_time - start_cpu_time

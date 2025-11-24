@@ -40,9 +40,12 @@ src/experiments/experiment*/
 
 # But do NOT ignore experiment1
 !src/experiments/experiment1/
-src/graphs/KaMIS/
 
-# Ignore IDS graphs but keep deletion graphs
+# Ignore graphs directory (contains large LMDB graph files)
+src/graphs/
+
+# Legacy specific ignores (covered by above)
+src/graphs/KaMIS/
 src/graphs/graph_ids_*.lmdb
 **/graph_ids_*.lmdb
 
@@ -87,3 +90,8 @@ dist/
 
 # Ignore SLURM job scripts
 src/experiments/experiment1/exp1.sh
+
+# Ignore environment variables file (contains API keys)
+.env
+*.env
+!.env.example
