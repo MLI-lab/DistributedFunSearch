@@ -9,6 +9,7 @@ Slower than graph-tool, but easier for LLMs to use correctly.
 import os
 import sys
 import itertools
+from itertools import combinations, permutations, product
 import hashlib
 import numpy as np
 import networkx as nx
@@ -95,7 +96,7 @@ def solve(n, s, q, graph_dir):
 
     # Compute priorities
     priorities = {
-        node: priority(node, G_for_priority, n, s, q)
+        node: priority(node, G_for_priority, n, s)
         for node in G.nodes
     }
 
@@ -123,8 +124,5 @@ def solve(n, s, q, graph_dir):
     return independent_set, hash_value
 
 
-def priority(node, G, n, s, q):
-    """
-    This is the placeholder, LLM will generate the actual implementation.
-    """
+def priority(node, G, n, s):
     pass

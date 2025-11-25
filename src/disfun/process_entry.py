@@ -9,11 +9,28 @@ import os
 import sys
 import asyncio
 from multiprocessing import current_process
-from disfun import process_utils
 
 
-def sampler_process_entry(config_path, device, log_dir, log_filename):
-    """Standalone sampler process entry point (spawn-compatible)."""
+def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id=0, use_parent_log=False):
+    """Standalone sampler process entry point (spawn-compatible).
+
+    Args:
+        sampler_id: Unique ID for this sampler (0, 1, 2, ...) used for seed offset
+        use_parent_log: If True, log to parent's log file instead of shared samplers.log
+    """
+    # Set CUDA_VISIBLE_DEVICES BEFORE importing anything that touches CUDA/PyTorch
+    # (vLLM, torch, process_utils all cache device info on import)
+    if device is not None:
+        if isinstance(device, str):
+            device_id = device.split(":")[-1] if ":" in device else device
+        else:
+            device_id = str(device)
+        os.environ["CUDA_VISIBLE_DEVICES"] = device_id
+        print(f"Sampler process: Set CUDA_VISIBLE_DEVICES={device_id}")
+
+    # Import process_utils AFTER setting CUDA_VISIBLE_DEVICES (it imports torch)
+    from disfun import process_utils
+
     # Load config FIRST to get cache_dir setting
     config = process_utils.load_config(config_path)
 
@@ -22,11 +39,12 @@ def sampler_process_entry(config_path, device, log_dir, log_filename):
         os.environ["HF_HOME"] = config.sampler.cache_dir
         print(f"Sampler process: Set HF_HOME to {config.sampler.cache_dir}")
 
-    # NOW import sampler module (vLLM will use the HF_HOME we just set)
+    # NOW import sampler module (vLLM will use the env vars we just set)
     from disfun import sampler
 
-    # Initialize logger in child process (with separate sampler log)
-    logger = process_utils.initialize_logger(log_dir, log_filename, process_type="Sampler")
+    # Initialize logger in child process
+    # If use_parent_log=True, log to parent's file; otherwise log to shared samplers.log
+    logger = process_utils.initialize_logger(log_dir, log_filename, process_type="Sampler", use_custom_log_file=use_parent_log)
 
     # Load system message for API models (if configured)
     system_message = None
@@ -69,8 +87,17 @@ def sampler_process_entry(config_path, device, log_dir, log_filename):
 
             try:
                 logger.info(f"Sampler {local_id}: Initializing sampler with model {config.sampler.model} on device {device}...")
+
+                # Calculate unique seed for this sampler
+                # Each sampler gets a unique seed space: base_seed + sampler_id * 1_000_000
+                # This ensures no collision even with millions of generations per sampler
+                sampler_seed = None
+                if config.random_seed is not None:
+                    sampler_seed = config.random_seed + sampler_id * 1_000_000
+                    logger.info(f"Sampler {local_id}: Using base seed {sampler_seed} (config.random_seed={config.random_seed} + sampler_id={sampler_id} * 1M)")
+
                 sampler_instance = sampler.Sampler(
-                    connection, channel, sampler_queue, evaluator_queue, config.sampler, device=device, log_dir=log_dir, system_message=system_message, random_seed=config.random_seed
+                    connection, channel, sampler_queue, evaluator_queue, config.sampler, device=device, log_dir=log_dir, system_message=system_message, random_seed=sampler_seed
                 )
                 logger.info(f"Sampler {local_id}: Sampler instance initialized successfully.")
             except Exception as e:
@@ -83,20 +110,20 @@ def sampler_process_entry(config_path, device, log_dir, log_filename):
             await sampler_task
 
         except asyncio.CancelledError:
-            print(f"Sampler {local_id}: Process was cancelled.")
+            logger.info(f"Sampler {local_id}: Cancelled.")
         except Exception as e:
-            print(f"Sampler {local_id} encountered an error: {e}")
+            logger.error(f"Sampler {local_id}: Error: {e}")
         finally:
+            # Cleanup if not already done by signal handler
             if not cleanup_done['done']:
-                try:
-                    if channel:
-                        await channel.close()
-                    if connection:
-                        await connection.close()
-                except Exception:
-                    pass
+                cleanup_done['done'] = True
+                if sampler_instance:
+                    sampler_instance.cleanup()
+                if channel:
+                    await channel.close()
+                if connection:
+                    await connection.close()
 
-    # Set up signal handlers with shared graceful_shutdown
     process_utils.setup_signal_handlers(
         loop, "Sampler", local_id, logger,
         lambda: process_utils.graceful_shutdown(
@@ -109,17 +136,22 @@ def sampler_process_entry(config_path, device, log_dir, log_filename):
         loop.run_until_complete(run_sampler())
     finally:
         loop.close()
-        logger.info(f"Sampler {local_id}: Event loop closed.")
         sys.exit(0)
 
 
-def evaluator_process_entry(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename):
-    """Standalone evaluator process entry point (spawn-compatible)."""
+def evaluator_process_entry(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename, use_parent_log=False):
+    """Standalone evaluator process entry point (spawn-compatible).
+
+    Args:
+        use_parent_log: If True, log to parent's log file instead of shared evaluators.log
+    """
+    from disfun import process_utils
     import disfun.evaluator as evaluator_module
 
-    # Reload config and logger in child process (with separate evaluator log)
+    # Reload config and logger in child process
     config = process_utils.load_config(config_path)
-    logger = process_utils.initialize_logger(log_dir, log_filename, process_type="Evaluator")
+    # If use_parent_log=True, log to parent's file; otherwise log to shared evaluators.log
+    logger = process_utils.initialize_logger(log_dir, log_filename, process_type="Evaluator", use_custom_log_file=use_parent_log)
 
     local_id = current_process().pid
     loop = asyncio.new_event_loop()

@@ -27,8 +27,12 @@ class ResourceManager:
         """
         self.hostname = socket.gethostname()
         self.cpu_only = cpu_only
-        self.process_to_device_map = {}
+        self.process_to_device_map = {}  # pid -> device
+        self.process_start_times = {}    # pid -> start time (for minimum lifetime check)
         self.scaling_config = scaling_config
+        self.next_sampler_id = 0  # Monotonically increasing counter for unique sampler IDs (never reused)
+        self.next_evaluator_id = 0  # Monotonically increasing counter for unique evaluator IDs
+        self.database = None  # Reference to ProgramsDatabase for syncing next_sampler_id to checkpoint
         if resource_logger is None:
             if log_dir is None:
                 raise ValueError("Either resource_logger or log_dir must be provided")
@@ -285,12 +289,12 @@ class ResourceManager:
         """Starts a new evaluator process using 'fork' multiprocessing context.
 
         Uses fork because evaluators don't load ML models and only execute functions
-        in sandboxed subprocesses. Fork is faster and has no threading deadlock risk.
+        in sandboxed subprocesses. Fork is faster than spawn for CPU-bound workloads.
         """
         ctx = mp.get_context('fork')
         proc = ctx.Process(
             target=entry_function,
-            args=(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename),
+            args=(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename, True),  # use_parent_log=True
             name=f"{process_name}-{len(processes)}"
         )
         proc.start()
@@ -372,29 +376,38 @@ class ResourceManager:
         Spawn creates a clean process without inheriting thread state from parent.
         """
         ctx = mp.get_context('spawn')
+        # Use monotonically increasing counter for unique sampler IDs (never reused, even after termination)
+        sampler_id = self.next_sampler_id
+        self.next_sampler_id += 1
+        # Sync to database for checkpointing
+        if self.database is not None:
+            self.database.next_sampler_id = self.next_sampler_id
+
         if assignment == True:  # CPU-only mode - no GPU assignment
             proc = ctx.Process(
                 target=entry_function,
-                args=(config_path, None, log_dir, log_filename),  # No GPU device
-                name=f"{process_name}-{len(processes)}"
+                args=(config_path, None, log_dir, log_filename, sampler_id, True),  # use_parent_log=True
+                name=f"{process_name}-{sampler_id}"
             )
             proc.start()
             processes.append(proc)
-            self.resource_logger.info(f"Started {process_name} process (PID: {proc.pid}) in CPU-only mode.")
+            self.resource_logger.info(f"Started {process_name} process (PID: {proc.pid}, ID: {sampler_id}) in CPU-only mode.")
             self.process_to_device_map[proc.pid] = None
+            self.process_start_times[proc.pid] = time.time()
             return True
         elif assignment is not None:
             # GPU assignment is available
             host_gpu, container_device = assignment
             proc = ctx.Process(
                 target=entry_function,
-                args=(config_path, container_device, log_dir, log_filename),
-                name=f"{process_name}-{len(processes)}"
+                args=(config_path, container_device, log_dir, log_filename, sampler_id, True),  # use_parent_log=True
+                name=f"{process_name}-{sampler_id}"
             )
             proc.start()
             processes.append(proc)
-            self.resource_logger.info(f"Started {process_name} process (PID: {proc.pid}) on GPU {container_device} (host GPU: {host_gpu})")
+            self.resource_logger.info(f"Started {process_name} process (PID: {proc.pid}, ID: {sampler_id}) on GPU {container_device} (host GPU: {host_gpu})")
             self.process_to_device_map[proc.pid] = container_device
+            self.process_start_times[proc.pid] = time.time()
             return True
         else:
             return False
@@ -472,28 +485,101 @@ class ResourceManager:
             return None
 
 
-    async def terminate_process(self, processes, process_name, timeout=30):
-        """Terminates a running process and ensures it fully exits (async to avoid blocking)."""
-        if processes:
-            proc = processes.pop(0)
+    def _select_process_to_terminate(self, processes, process_name, min_lifetime=60):
+        """Select best process to terminate: lowest GPU utilization, respecting minimum lifetime.
+
+        Args:
+            processes: List of process objects
+            process_name: "Sampler" or "Evaluator"
+            min_lifetime: Minimum seconds a process must run before termination (default: 60)
+
+        Returns:
+            Index of process to terminate, or None if no eligible process found
+        """
+        now = time.time()
+        eligible = []
+
+        for i, proc in enumerate(processes):
             pid = proc.pid
-            proc.terminate()
-            self.resource_logger.info(f"Sent SIGTERM to {process_name} process (PID: {pid}). Waiting for termination...")
+            # Skip processes that haven't run long enough (still initializing)
+            start_time = self.process_start_times.get(pid, 0)
+            if now - start_time < min_lifetime:
+                continue
+            eligible.append((i, proc))
 
-            # Use asyncio.to_thread to avoid blocking the event loop
-            await asyncio.to_thread(proc.join, timeout)
+        if not eligible:
+            return None
 
-            if proc.is_alive():  # If still running - force kill
-                self.resource_logger.warning(f"{process_name} process (PID: {pid}) did not terminate in {timeout}s. Sending SIGKILL.")
-                proc.kill()
-                await asyncio.to_thread(proc.join)
+        # For samplers with GPUs, prefer terminating the one on lowest-utilization GPU
+        if process_name == "Sampler" and not self.cpu_only:
+            best_idx = None
+            lowest_util = float('inf')
 
-            # Clean up GPU assignment map if this was a sampler process
-            if pid in self.process_to_device_map:
-                device = self.process_to_device_map.pop(pid)
-                self.resource_logger.info(f"Freed GPU assignment for PID {pid}: {device}")
+            for i, proc in eligible:
+                device = self.process_to_device_map.get(proc.pid)
+                if device and device.startswith("cuda:"):
+                    try:
+                        gpu_idx = int(device.split(":")[1])
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
+                        util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                        if util < lowest_util:
+                            lowest_util = util
+                            best_idx = i
+                    except Exception:
+                        pass
 
-            self.resource_logger.info(f"Terminated {process_name} process (PID: {pid})")
+            if best_idx is not None:
+                return best_idx
+
+        # Fallback: return oldest eligible process
+        return eligible[0][0]
+
+    async def terminate_process(self, processes, process_name, timeout=30):
+        """Terminates a process and its children (vLLM may spawn subprocesses holding GPU memory)."""
+        if not processes:
+            return
+
+        # Select best process to terminate (respects min lifetime, prefers low GPU util)
+        idx = self._select_process_to_terminate(processes, process_name)
+        if idx is None:
+            self.resource_logger.info(f"No {process_name} eligible for termination (all too young)")
+            return
+
+        proc = processes.pop(idx)
+        pid = proc.pid
+
+        # Get child PIDs before terminating (vLLM may spawn subprocesses)
+        child_pids = []
+        try:
+            child_pids = [c.pid for c in psutil.Process(pid).children(recursive=True)]
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+        # Terminate with longer timeout for samplers (GPU cleanup)
+        effective_timeout = 45 if process_name == "Sampler" else timeout
+        proc.terminate()
+        self.resource_logger.info(f"Terminating {process_name} (PID: {pid})...")
+
+        await asyncio.to_thread(proc.join, effective_timeout)
+
+        if proc.is_alive():
+            self.resource_logger.warning(f"{process_name} (PID: {pid}) force killing")
+            proc.kill()
+            await asyncio.to_thread(proc.join)
+
+        # Kill orphaned children (may hold GPU memory)
+        for child_pid in child_pids:
+            try:
+                psutil.Process(child_pid).kill()
+                self.resource_logger.info(f"Killed orphaned child {child_pid}")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        # Cleanup tracking maps
+        self.process_start_times.pop(pid, None)
+        if pid in self.process_to_device_map:
+            device = self.process_to_device_map.pop(pid)
+            self.resource_logger.info(f"Freed {device} (PID: {pid})")
 
 
     async def get_queue_message_count(self, queue):

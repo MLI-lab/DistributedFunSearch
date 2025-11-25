@@ -41,7 +41,7 @@ def load_config(config_path):
     return config_module.Config()
 
 
-def initialize_logger(log_dir, log_filename, process_type=None):
+def initialize_logger(log_dir, log_filename, process_type=None, use_custom_log_file=False):
     """
     Initialize logger for process (works for both parent and child processes).
 
@@ -49,6 +49,7 @@ def initialize_logger(log_dir, log_filename, process_type=None):
         log_dir: Directory containing the log file
         log_filename: Name of the log file to write to
         process_type: Type of process ("Sampler", "Evaluator", or None for main)
+        use_custom_log_file: If True, use log_filename even for Sampler/Evaluator process types
 
     Returns:
         Logger instance
@@ -65,8 +66,15 @@ def initialize_logger(log_dir, log_filename, process_type=None):
     if not logger.handlers:
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+        # If use_custom_log_file is True, always use the provided log_filename
+        if use_custom_log_file:
+            log_file_path = os.path.join(log_dir, log_filename)
+            handler = RotatingFileHandler(log_file_path, mode='a', maxBytes=50*1024*1024, backupCount=5)
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+
         # Samplers: all log to shared samplers.log file
-        if process_type == "Sampler":
+        elif process_type == "Sampler":
             sampler_handler = RotatingFileHandler(
                 os.path.join(log_dir, 'samplers.log'),
                 mode='a',

@@ -40,7 +40,7 @@ def solve(n, s, q, graph_dir):
     nodes = [''.join(seq) for seq in itertools.product(alphabet, repeat=n)]
 
     # Calculate priorities based only on node string properties (no graph passed)
-    priorities = {node: priority(node, n, s, q) for node in nodes}
+    priorities = {node: priority(node, n, s) for node in nodes}
 
     # Sort nodes by priority (descending), Lexicographic tie-breaking (the second element x is the node string)
     nodes_sorted = sorted(nodes, key=lambda x: (-priorities[x], x))
@@ -73,7 +73,7 @@ def solve(n, s, q, graph_dir):
     return independent_set, hash_value
 
 
-def priority(node, G, n, s, q):
+def priority(node, n, s):
     """
     This is the placeholder, LLM will generate the actual implementation.
     """

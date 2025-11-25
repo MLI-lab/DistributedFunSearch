@@ -3,15 +3,9 @@ Baseline implementation that assigns equal priority to all nodes.
 </thought>
 
 <code>
-def priority(node, n, s, q):
+def priority(node, n, s):
     """Returns the priority with which we want to add `node` to the independent set.
     {score}
-
-    Args:
-        node: string of length n with symbols from {0, 1, ..., q-1}
-        n: length of the string
-        s: number of errors (insertions/deletions/substitutions) the code can correct
-        q: alphabet size
     """
     return 0.0
 </code>

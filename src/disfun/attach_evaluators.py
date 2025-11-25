@@ -7,8 +7,17 @@ from typing import Sequence, Any
 from disfun.scaling_utils import ResourceManager
 from disfun import process_utils, code_manipulation
 from disfun.process_entry import evaluator_process_entry
+import json 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Set multiprocessing start method to 'spawn' for CUDA compatibility
+# Must be called before any multiprocessing to avoid CUDA context conflicts
+# Required to prevent fork+threading deadlocks when dynamically scaling
+try:
+    mp.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
 
 
 class TaskManager:
@@ -68,6 +77,7 @@ class TaskManager:
                         sampler_processes=None,
                         sampler_entry_function=None,
                         evaluator_entry_function=evaluator_process_entry,
+                        config=self.config,  # Pass full config for RabbitMQ access
                         config_path=self.config_path,
                         log_dir=self.log_dir,
                         template=self.template,
@@ -93,8 +103,8 @@ class TaskManager:
         for i in range(self.config.num_evaluators):
             proc = ctx.Process(
                 target=evaluator_process_entry,
-                # Pass log filename so child processes write to same file
-                args=(self.config_path, template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path, self.log_filename),
+                # Pass log filename and use_parent_log=True so child processes write to same file
+                args=(self.config_path, template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path, self.log_filename, True),
                 name=f"Evaluator-{i}"
             )
             proc.start()

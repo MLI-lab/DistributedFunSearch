@@ -195,16 +195,15 @@ def _trim_function_body_ast(generated_code: str) -> str:
     generated_code = '\n'.join(lines).strip()
     logger.debug(f"Stripped markdown code fences, remaining code ({len(generated_code)} chars)")
 
-  # First - check if code contains a function definition (may have imports before it)
+  # Check if code contains a priority function definition
   import re
-  func_header_match = re.search(r'^\s*def\s+\w+\s*\([^)]*\)\s*(?:->\s*[^:]+)?\s*:', generated_code, re.MULTILINE)
+  priority_match = re.search(r'^\s*def\s+(priority(?:_v\d+)?)\s*\(', generated_code, re.MULTILINE)
 
-  if func_header_match:
-    # Has function definition - parse as module (may include imports)
-    logger.debug("Found function definition, parsing as module")
+  if priority_match:
+    # Has priority function - extract its body only
+    logger.debug("Found priority function definition, extracting its body")
     code = generated_code
-    function_name_match = re.search(r'def\s+(\w+)\s*\(', generated_code)
-    function_name = function_name_match.group(1) if function_name_match else 'unknown_function'
+    function_name = priority_match.group(1)
 
     tree = None
     deletion_count = 0
@@ -264,9 +263,22 @@ def _trim_function_body_ast(generated_code: str) -> str:
     return result
 
   else:
-    # No function header - wrap in fake function (fallback for body-only completions)
-    logger.debug("No function header found, wrapping in fake function")
-    code = f'def fake_function_header():\n{generated_code}'
+    # No priority function - wrap code in fake function
+    # Check for unindented def at column 0 (standalone function to exclude)
+    standalone_func_match = re.search(r'^def\s+\w+\s*\(', generated_code, re.MULTILINE)
+
+    # Determine what code to wrap
+    if standalone_func_match and generated_code[:standalone_func_match.start()].strip():
+      # Found standalone function with code before it - use only code before
+      code_to_wrap = generated_code[:standalone_func_match.start()].rstrip()
+      logger.debug(f"Found standalone function, wrapping only code before it ({len(code_to_wrap)} chars)")
+    else:
+      # No standalone function, or no code before it - wrap everything
+      code_to_wrap = generated_code
+      logger.debug("Wrapping all code in fake function")
+
+    # Wrap in fake function as-is (don't modify indentation - take LLM output as-is)
+    code = 'def fake_function_header():\n' + code_to_wrap
     tree = None
     deletion_count = 0
     while tree is None:
@@ -372,19 +384,6 @@ class Evaluator:
         self.cumulative_cpu_time = 0.0  # Track total CPU time
         self.cpu_time_lock = self.manager.Lock()  # Lock to protect updates to cumulative CPU time
         self.target_signatures = target_signatures # Example {(6,1): 10, (7,1): 16, (8,1): 30, (9,1): 52, (10,1): 94, (11,1): 172}
-
-    def _track_cpu_time(self):
-        """
-        Tracks CPU time for all child processes and adds to the cumulative total.
-        """
-        parent = psutil.Process()
-        with self.cpu_time_lock:
-            for child in parent.children(recursive=True):
-                try:
-                    cpu_times = child.cpu_times()
-                    self.cumulative_cpu_time += cpu_times.user + cpu_times.system
-                except psutil.NoSuchProcess:
-                    pass  # Skip if the process no longer exists
 
     async def shutdown(self):
         logger.info(f"Evaluator {self.local_id}: Initiating shutdown process.")

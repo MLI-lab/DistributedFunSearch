@@ -88,13 +88,13 @@ def profile_variant(variant_name, eval_module, priority_func, n, s, q, graph_dir
         sig = inspect.signature(existing_priority)
         num_params = len(sig.parameters)
 
-        # Wrap priority function to match expected signature
-        if num_params == 4:  # no_graph: (node, n, s, q)
-            eval_module.priority = lambda node, n, s, q: priority_func(node, n, s, q)
-        elif num_params == 5:  # graph_networkx: (node, G, n, s, q)
-            eval_module.priority = lambda node, G, n, s, q: priority_func(node, n, s, q)
-        elif num_params == 7:  # graph_gt: (node, G, ntv, vtn, n, s, q)
-            eval_module.priority = lambda node, G, ntv, vtn, n, s, q: priority_func(node, n, s, q)
+        # Wrap priority function to match expected signature (q removed from all variants)
+        if num_params == 3:  # no_graph: (node, n, s)
+            eval_module.priority = lambda node, n, s: priority_func(node, n, s)
+        elif num_params == 4:  # graph_networkx: (node, G, n, s)
+            eval_module.priority = lambda node, G, n, s: priority_func(node, n, s)
+        elif num_params == 6:  # graph_gt: (node, G, ntv, vtn, n, s)
+            eval_module.priority = lambda node, G, ntv, vtn, n, s: priority_func(node, n, s)
         else:
             # Unknown signature, just assign directly
             eval_module.priority = priority_func
@@ -139,14 +139,13 @@ def profile_variant(variant_name, eval_module, priority_func, n, s, q, graph_dir
         else:
             print(f"  Nodes: {num_nodes} (q^n = {q}^{n})")
 
-        # Time the full solve operation (includes graph loading for graph variants)
-        solve_start = time.time()
-        independent_set, hash_value = eval_module.solve(n, s, q, graph_dir)
-        total_solve_time = time.time() - solve_start
-        set_size = len(independent_set)
-
-        # For graph variants, measure loading time separately to estimate algorithm-only time
+        # For graph variants, measure loading and algorithm time separately
         if variant_name in ['graph_networkx', 'graph_gt']:
+            # Clear any cached graph data in the module to ensure fresh load timing
+            if hasattr(eval_module, '_GRAPH_CACHE'):
+                eval_module._GRAPH_CACHE.clear()
+
+            # Measure loading time FIRST (before solve pollutes the cache)
             load_start = time.time()
             if variant_name == 'graph_networkx':
                 G = eval_module.load_graph(path)
@@ -156,16 +155,27 @@ def profile_variant(variant_name, eval_module, priority_func, n, s, q, graph_dir
                 num_edges = G.num_edges()
             graph_load_time = time.time() - load_start
 
-            # Algorithm time is approximately (solve_time - load_time)
-            # This assumes solve() did similar loading work
-            algorithm_time = max(0, total_solve_time - graph_load_time)
+            # Now run solve() - it will use cached graph, so solve_time ≈ algorithm_time
+            solve_start = time.time()
+            independent_set, hash_value = eval_module.solve(n, s, q, graph_dir)
+            algorithm_time = time.time() - solve_start
+
+            # Total time = loading + algorithm
+            total_solve_time = graph_load_time + algorithm_time
+            set_size = len(independent_set)
 
             print(f"  Graph loading: ~{graph_load_time:.4f}s")
             print(f"  Nodes: {num_nodes}, Edges: {num_edges}")
             print(f"  Algorithm (priority + greedy): ~{algorithm_time:.4f}s")
             print(f"  Total time: {total_solve_time:.4f}s")
         else:
-            # no_graph: no separate loading
+            # no_graph: no separate loading, time the full solve
+            solve_start = time.time()
+            independent_set, hash_value = eval_module.solve(n, s, q, graph_dir)
+            total_solve_time = time.time() - solve_start
+            set_size = len(independent_set)
+            algorithm_time = total_solve_time  # All time is algorithm time for no_graph
+
             print(f"  Algorithm (priority + greedy): {total_solve_time:.4f}s")
             print(f"  Total time: {total_solve_time:.4f}s")
 
@@ -180,7 +190,7 @@ def profile_variant(variant_name, eval_module, priority_func, n, s, q, graph_dir
             'num_edges': num_edges,
             'set_size': set_size,
             'graph_load_time': graph_load_time,
-            'algorithm_time': total_solve_time - graph_load_time if graph_load_time > 0 else total_solve_time,
+            'algorithm_time': algorithm_time,
             'total_time': total_solve_time,
             'success': True
         }
@@ -247,7 +257,30 @@ def main():
     print(f"\nLoading priority function from: {SPEC_PATH}")
     priority_func = load_priority_function(SPEC_PATH)
 
-    # Profile all combinations
+    # Warmup run: load all graphs into OS page cache for fair comparison
+    # This ensures all variants benefit equally from cached file reads
+    print(f"\n{'='*80}")
+    print("Warmup: Loading all graphs into OS page cache...")
+    print(f"{'='*80}")
+    for s in S_VALUES:
+        for n in N_VALUES:
+            for variant_name, eval_module in modules.items():
+                if variant_name == 'no_graph':
+                    continue  # no_graph doesn't load files
+                try:
+                    path = os.path.join(GRAPH_DIR, f"graph_d_s{s}_n{n}_q{Q}.lmdb")
+                    if os.path.exists(path):
+                        # Just load the graph to warm the cache
+                        if variant_name == 'graph_networkx':
+                            eval_module.load_graph(path)
+                        elif variant_name == 'graph_gt':
+                            eval_module.load_graph(path)
+                        print(f"  Warmed: s={s}, n={n}")
+                except Exception as e:
+                    print(f"  Warmup failed for s={s}, n={n}: {e}")
+    print("Warmup complete.\n")
+
+    # Profile all combinations (now with warm cache)
     results = []
     for s in S_VALUES:
         for n in N_VALUES:

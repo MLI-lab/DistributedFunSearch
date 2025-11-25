@@ -113,6 +113,7 @@ class LLM_model:
         self.system_message = system_message
         self.max_retries = max_retries
         self.random_seed = random_seed
+        self.generation_counter = 0  # Counter to increment seed for each generation call
         self.previous_total_registered_programs = 0
 
         # Cost tracking for API models
@@ -137,20 +138,9 @@ class LLM_model:
 
             logger.info(f"Initializing LOCAL vLLM model: {model} on device {device}")
 
-            # Set CUDA device if specified
-            if device is not None:
-                # Extract numeric device ID (handle both "cuda:0" and 0 formats)
-                if isinstance(device, str):
-                    device_id = device.split(":")[-1] if ":" in device else device
-                else:
-                    device_id = str(device)
-
-                os.environ["CUDA_VISIBLE_DEVICES"] = device_id
-                logger.info(f"Set CUDA_VISIBLE_DEVICES={device_id}")
-            else:
-                logger.info("Using auto device assignment for vLLM")
-
+            # Note: CUDA_VISIBLE_DEVICES must be set BEFORE importing vLLM (done in process_entry.py)
             # Initialize vLLM engine (loads model on GPU)
+            # enforce_eager=True disables CUDA graphs, which helps with memory cleanup (vllm#3874)
             try:
                 self.vllm_engine = vLLM_Engine(
                     model=model,
@@ -158,6 +148,7 @@ class LLM_model:
                     dtype="float16",
                     gpu_memory_utilization=0.90,
                     trust_remote_code=True,
+                    enforce_eager=True,  # Helps with GPU memory release on cleanup
                 )
                 logger.info(f"vLLM engine initialized successfully on GPU {device}")
             except Exception as e:
@@ -295,6 +286,14 @@ class LLM_model:
                 else:
                     logger.debug(f"vLLM: First prompt in batch:\n{'='*80}\n{prompts[0]}\n{'='*80}")
 
+            # Update seed for this generation call to ensure different outputs
+            # while maintaining reproducibility (same base_seed + counter = same sequence)
+            if self.random_seed is not None:
+                current_seed = self.random_seed + self.generation_counter
+                self.sampling_params.seed = current_seed
+                self.generation_counter += 1
+                logger.debug(f"vLLM: Using seed {current_seed} for generation #{self.generation_counter}")
+
             # vLLM batch generation
             outputs = self.vllm_engine.generate(prompts, self.sampling_params)
 
@@ -354,6 +353,14 @@ class LLM_model:
                     logger.info(f"LiteLLM: First prompt:\n{'='*80}\n{prompts[0]}\n{'='*80}")
                 else:
                     logger.debug(f"LiteLLM: First prompt in batch:\n{'='*80}\n{prompts[0]}\n{'='*80}")
+
+            # Update seed for this generation call to ensure different outputs
+            # while maintaining reproducibility (same base_seed + counter = same sequence)
+            if self.random_seed is not None:
+                current_seed = self.random_seed + self.generation_counter
+                self.generate_kwargs["seed"] = current_seed
+                self.generation_counter += 1
+                logger.debug(f"LiteLLM: Using seed {current_seed} for generation #{self.generation_counter}")
 
             # Create async tasks for all API calls (parallel execution)
             async def call_api(messages, idx):
@@ -450,17 +457,40 @@ class LLM_model:
             return [], [], []
 
     def cleanup(self):
-        """Clean up resources."""
+        """Clean up vLLM GPU memory (see vllm#1908 for known issues)."""
+        if not (self.use_local_vllm and getattr(self, 'vllm_engine', None)):
+            return
+
+        import gc
+        logger.info("LLM_model: Cleaning up vLLM...")
+
         try:
-            if self.use_local_vllm and hasattr(self, 'vllm_engine'):
-                # vLLM cleanup
-                del self.vllm_engine
-                if VLLM_AVAILABLE and torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                logger.info("vLLM engine cleaned up")
-            logger.info("LLM_model: Cleanup completed")
+            # 1. Destroy model parallel state (critical for memory release)
+            try:
+                from vllm.distributed.parallel_state import destroy_model_parallel
+                destroy_model_parallel()
+            except ImportError:
+                pass
+
+            # 2. Delete internal components in order
+            if hasattr(self.vllm_engine, 'llm_engine'):
+                if hasattr(self.vllm_engine.llm_engine, 'model_executor'):
+                    if hasattr(self.vllm_engine.llm_engine.model_executor, 'driver_worker'):
+                        self.vllm_engine.llm_engine.model_executor.driver_worker = None
+                    self.vllm_engine.llm_engine.model_executor = None
+                self.vllm_engine.llm_engine = None
+
+            # 3. Delete engine
+            self.vllm_engine = None
+
+            # 4. GC + CUDA cleanup
+            gc.collect()
+            if VLLM_AVAILABLE and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            logger.info("LLM_model: Cleanup done")
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            logger.error(f"LLM_model: Cleanup error: {e}")
 
 
 class Sampler:
@@ -642,7 +672,7 @@ class Sampler:
                     "version_generated": meta["version_generated"],
                     "expected_version": meta["expected_version"],
                     "gpu_time": time_per_sample,  # For API models this is API latency, for vLLM it's GPU time
-                    "input_tokens": input_token_counts[prompt_idx],
+                    "input_tokens": input_token_counts[prompt_idx] if sample_idx == 0 else 0,  # Input processed once per prompt
                     "output_tokens": output_token_counts[prompt_idx][sample_idx],
                     "parent_ids": meta.get("parent_ids", []),
                 }

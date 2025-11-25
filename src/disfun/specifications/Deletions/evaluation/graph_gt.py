@@ -116,7 +116,7 @@ def solve(n, s, q, graph_dir):
                 print(f" Graph too large to cache ({estimated_size_gb:.2f} GB > {cache_limit_gb} GB limit)", file=sys.stderr)
 
     priorities = {
-        node: priority(node, G, node_to_vertex, vertex_to_node, n, s, q)
+        node: priority(node, G, node_to_vertex, vertex_to_node, n, s)
         for node in vertex_to_node.values()
     }
 
@@ -147,6 +147,5 @@ def solve(n, s, q, graph_dir):
     return independent_set, hash_value
 
 
-def priority(node, G, node_to_vertex, vertex_to_node, n, s, q):
-    """ Placeholder, this function will be evolved. """
+def priority(node, G, node_to_vertex, vertex_to_node, n, s):
     pass

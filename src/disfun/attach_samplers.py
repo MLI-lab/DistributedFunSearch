@@ -9,6 +9,14 @@ from disfun.process_entry import sampler_process_entry
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+# Set multiprocessing start method to 'spawn' for CUDA compatibility
+# Must be called before any multiprocessing to avoid CUDA context conflicts
+# Required to prevent fork+threading deadlocks when dynamically scaling
+try:
+    mp.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
+
 
 class TaskManager:
     def __init__(self, config, check_interval, log_dir, config_path):
@@ -61,6 +69,7 @@ class TaskManager:
                         sampler_processes=self.sampler_processes,
                         sampler_entry_function=sampler_process_entry,
                         evaluator_entry_function=None,
+                        config=self.config,  # Pass full config for RabbitMQ access
                         config_path=self.config_path,
                         log_dir=self.log_dir,
                         template=None,
@@ -117,7 +126,7 @@ class TaskManager:
                 try:
                     proc = ctx.Process(
                         target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename),
+                        args=(self.config_path, device, self.log_dir, self.log_filename, i, True),  # use_parent_log=True
                         name=f"Sampler-{i}"
                     )
                     proc.start()
@@ -138,7 +147,7 @@ class TaskManager:
                 try:
                     proc = ctx.Process(
                         target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename),
+                        args=(self.config_path, device, self.log_dir, self.log_filename, i, True),  # use_parent_log=True
                         name=f"Sampler-{i}"
                     )
                     proc.start()
@@ -148,6 +157,11 @@ class TaskManager:
                 except Exception as e:
                     self.logger.error(f"Error starting sampler {i}: {e}")
                     continue
+
+        # Initialize ResourceManager's next_sampler_id to continue from where we left off
+        # This ensures dynamically scaled samplers get unique IDs that don't collide with initial ones
+        self.resource_manager.next_sampler_id = self.config.num_samplers
+        self.logger.info(f"Initialized next_sampler_id to {self.resource_manager.next_sampler_id} for dynamic scaling")
 
 
 

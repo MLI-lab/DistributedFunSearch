@@ -49,7 +49,7 @@ class ProgramsDatabaseConfig:
   """Configuration of a ProgramsDatabase.
 
   Attributes:
-    functions_per_prompt: Number of previous programs to include in current prompt.
+    functions_per_prompt: Number of previous programs to include in urrent prompt.
     num_islands: Number of islands to maintain for diversity.
     reset_period: The interval (in seconds) at which the weakest islands are reset. If None - resets occur only based on the number of stored programs.
     reset_programs: The number of stored programs after which the weakest islands are reset.
@@ -68,6 +68,7 @@ class ProgramsDatabaseConfig:
   prompts_per_batch= 10
   no_deduplication: bool = False
   save_lineage: bool = False
+  initial_program_copies: int = 10  # Number of copies of each initial program to publish for warm start. Set to num_evaluators to saturate all workers from the beginning.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,23 +83,26 @@ class SamplerConfig:
     max_new_tokens: The maximum number of tokens the LLM can generate in response.
     top_p: Determines the range of likely tokens the model samples from - keeping only the most probable ones.
     repetition_penalty: Penalizes repetitive text; values >1 discourage repetition - while 1 disables it.
-    model: Any LiteLLM-supported model: https://docs.litellm.ai/docs/providers or local model from huggingface 
+    model: Any LiteLLM-supported model: https://docs.litellm.ai/docs/providers or local model from huggingface
+    model_params_billions: Number of model parameters in billions for FLOP estimation (e.g., 15 for StarCoder2-15B).
+                          Used to compute inference FLOPs as 2*N*tokens. Set to None to disable FLOP logging.
     api_base: Custom API endpoint URL. Leave as None for standard cloud APIs (OpenAI - Anthropic - etc.).
     api_key: API key for authentication. Leave as None to automatically load from .env file.
     cache_dir: Optional directory for model cache (local models only). If None - defaults to ~/.cache/huggingface/
     reasoning_effort: Controls GPT-5/o3 internal chain-of-thought reasoning depth. Only works with GPT-5/o3 models.
     max_retries: Maximum number of retry attempts for failed API calls (default: 3). Only applies to API models.
   """
-  prompts_per_batch= 10
+  prompts_per_batch= 20
   samples_per_prompt: int = 2
   temperature_period= None
   temperature: float = 0.9444444444444444
-  max_new_tokens: int = 600 #246 - for reasoing set larger 
+  max_new_tokens: int = 246  #larger for reasoing set larger 
   top_p: float =  0.7777777777777778
   repetition_penalty: float = 1.222222
   reasoning_effort: str = "None"  # Set to "minimal", "low", "medium", "high", or None.
   max_retries: int = 3  # Maximum retry attempts for API calls
-  model: str = "gpt-4.1-mini" #"bigcode/starcoder2-15b"  # Local model (each sampler loads on GPU) or API model (gpt-5 - claude-3-5-sonnet-20241022)
+  model: str = "bigcode/starcoder2-15b" #"bigcode/starcoder2-15b"  # Local model (each sampler loads on GPU) or API model (gpt-5 - claude-3-5-sonnet-20241022)
+  model_params_billions: float = 15.0  # StarCoder2-15B has 15B params. Set to None to disable FLOP logging.
   api_base: str = None  # Leave as None for standard OpenAI. Only set for custom endpoints (vLLM server - Azure - etc.)
   api_key: str = None   # Leave as None - automatically loads OPENAI_API_KEY from /workspace/DistributedFunSearch/.env
   cache_dir: str = "/mnt/models"  # Directory for model cache (local models only). Defaults to ~/.cache/huggingface/ if None
@@ -129,12 +133,12 @@ class EvaluatorConfig:
     """
     evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/graph_networkx.py"  # Options: no_graph.py, graph_networkx.py, graph_gt.py
     initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/initial_functions/graph_networkx"  # Use "no_graph" for on-the-fly evaluation, "graph" for graph variants
-    s_values: List[int] = dataclasses.field(default_factory=lambda: [2])
-    start_n: List[int] = dataclasses.field(default_factory=lambda: [7])  # Hash is computed for n==start_n[0] (automatically substituted in specification)
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [12])  # Match available graphs (s1_n6 through s1_n11)
+    s_values: List[int] = dataclasses.field(default_factory=lambda: [1])
+    start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Hash is computed for n==start_n[0] (automatically substituted in specification)
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Match available graphs (s1_n6 through s1_n11)
     mode: str = "last"
-    timeout: int = 90
-    max_workers: int = 2
+    timeout: int = 30  # Timeout in seconds for sandboxed code execution
+    max_workers: int = 2  # Increased from 2 - each evaluator now spawns 8 parallel CPU processes for faster evaluation
     eval_code: bool = False
     include_nx: bool = True
     q: int = 2  # Set to 4 for DNA data storage use case (alphabet: A, C, G, T)
@@ -172,7 +176,7 @@ class PromptConfig:
     problem_description_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/problem_descriptions/baseline.txt"
 
     # How to format output
-    prompt_style_path: str | None = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/prompt_styles/eoh.txt"  # Set to None for code completion models (StarCoder) - or use absolute path for instruction-tuned models
+    prompt_style_path: str | None = None  # Set to None for code completion models (StarCoder) - or use absolute path for instruction-tuned models
     system_message_path: str | None = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/system_messages/graph.txt"  # System message for API models (GPT - Claude) - set to None to disable. Use "graph.txt" for graph-tool variant
     imports_path: str | None = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/imports/networkx.txt"  # Imports to inject after problem description and prompt style
 
@@ -199,6 +203,7 @@ class WandbConfig:
         project: W&B project name.
         entity: W&B entity (username or team name).
         run_name: Name for this run (default: None, auto-generated with timestamp).
+        run_name_tag: Tag to append to run name (e.g., "starcoder2" -> "run_20241125_starcoder2").
         log_interval: How often to log metrics in seconds (default: 300 = 5 minutes).
         tags: List of tags for this run.
         checkpoints_base_path: Base directory for checkpoints (default: "./Checkpoints"). Actual checkpoint folder will be: {checkpoints_base_path}/checkpoint_{run_name}/
@@ -207,6 +212,7 @@ class WandbConfig:
     project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
+    run_name_tag: str = "graph_input"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list)
     checkpoints_base_path: str = "/mnt/disfun/checkpoints" #"./Checkpoints" # Use "./Checkpoints" for local runs
@@ -249,7 +255,7 @@ class ScalingConfig:
     """
     enabled: bool = True
     check_interval: int = 60
-    max_samplers: int = 1000
+    max_samplers: int = 2
     max_evaluators: int = 1000
     sampler_scale_up_threshold: int = 50
     evaluator_scale_up_threshold: int = 10
@@ -257,7 +263,7 @@ class ScalingConfig:
     max_gpu_utilization: int = 50
     min_system_memory_gib: int = 30
     cpu_usage_threshold: int = 99
-    normalized_load_threshold: float = 0.99
+    normalized_load_threshold: float = 10.0  # Allow scaling up to 10 processes per core (was 0.99 - too conservative)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -312,11 +318,12 @@ class Config:
   scaling: ScalingConfig = dataclasses.field(default_factory=ScalingConfig)
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
-  num_samplers: int = 5
-  num_evaluators: int = 20
+  num_samplers: int = 2
+  num_evaluators: int = 15
   num_pdb: int = 1
   random_seed: int = 42  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic. Set to integer (e.g., 42) for reproducible experiments.
 
 
 
 
+#  export PATH="$HOME/.local/bin:$PATH"

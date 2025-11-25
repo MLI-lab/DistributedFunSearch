@@ -31,22 +31,15 @@ import dataclasses
 import time
 import logging
 import numpy as np
-import scipy
 import asyncio
 import pickle
-import threading
-import gc
 import os
-import multiprocessing
 from typing import Mapping, Any, List, Sequence, Optional
 from disfun import code_manipulation
 from disfun import specification_loader
 import json
 import aio_pika
 import re
-from logging.handlers import RotatingFileHandler
-import psutil
-from logging import FileHandler
 import datetime
 from disfun.profiling import async_time_execution
 
@@ -76,9 +69,6 @@ def _softmax(logits: np.ndarray, temperature: float) -> np.ndarray:
         probs = probs / total
     return probs
 
-
-
-import json
 
 def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], target_signatures=None) -> float:
     """
@@ -172,8 +162,8 @@ def _format_scores_for_prompt(
         relative_label: Prefix text for relative improvements.
 
     Returns:
-        Formatted string like "Absolute scores: {(6,1): 8 - (7,1): 14}" or
-                            "Relative to baseline: {(6,1): +0.0% - (7,1): +7.1%}".
+        Formatted string like "Absolute scores: {(6,1): 8, (7,1): 14}" or
+                            "Relative to baseline: {(6,1): +0.0%, (7,1): +7.1%}".
     """
     parsed_scores = {}
     for k, v in scores_per_test.items():
@@ -182,7 +172,7 @@ def _format_scores_for_prompt(
 
     if display_mode == "absolute":
         items = [f"{k}: {v}" for k, v in sorted(parsed_scores.items())]
-        return f"{absolute_label} {{{' - '.join(items)}}}"
+        return f"{absolute_label} {{{', '.join(items)}}}"
 
     elif display_mode == "relative":
         improvements = []
@@ -196,7 +186,7 @@ def _format_scores_for_prompt(
             else:
                 improvements.append(f"{dim}: {score_ours}")
 
-        return f"{relative_label} {{{' - '.join(improvements)}}}"
+        return f"{relative_label} {{{', '.join(improvements)}}}"
 
     return ""
 
@@ -317,6 +307,7 @@ class ProgramsDatabase:
         self._best_program_per_island = [None] * config.num_islands
         self._best_scores_per_test_per_island = [None] * config.num_islands
         self._last_reset_time = time.time()
+        self._total_resets = 0
         self.save_checkpoints_path = save_checkpoints_path  
         self.mode=mode
         self.eval_code = eval_code
@@ -346,14 +337,18 @@ class ProgramsDatabase:
         self.cumulative_sampler_gpu_time = 0.0
 
         self.cumulative_input_tokens  = 0
-        self.cumulative_output_tokens = 0         
+        self.cumulative_output_tokens = 0
 
-        self.dublicate_prompts=0
+        # Model parameters for FLOP estimation (2N FLOPs per token where N = params)
+        self.model_params_billions = sampler_config.model_params_billions if sampler_config and hasattr(sampler_config, 'model_params_billions') else None
+
+        self.duplicate_prompts=0
         self.total_prompts=0 # equals total processed messages as each message stored triggers a prompt
         self.total_stored_programs = 0
         self.version_mismatch_discarded = 0
         self.duplicates_discarded=0
         self.execution_failed = 0
+        self.next_sampler_id = 0  # Counter for unique sampler IDs (saved to checkpoint for reproducibility)
 
         # Evolutionary lineage tracking (optional - can be disabled via config)
         self.save_lineage = config.save_lineage if hasattr(config, 'save_lineage') else False
@@ -437,6 +432,7 @@ class ProgramsDatabase:
                 "repetition_penalty": sampler_config.repetition_penalty,
                 "model": sampler_config.model,
                 "prompts_per_batch_sampler": sampler_config.prompts_per_batch,
+                "model_params_billions": getattr(sampler_config, 'model_params_billions', None),
             })
 
         self._wandb_initialized = False
@@ -463,7 +459,7 @@ class ProgramsDatabase:
         self.cumulative_output_tokens = checkpoint_data.get("cumulative_output_tokens", 0)
 
         self.total_prompts=checkpoint_data.get("total_prompts", 0)
-        self.dublicate_prompts = checkpoint_data.get("dublicate_prompts", 0)
+        self.duplicate_prompts = checkpoint_data.get("duplicate_prompts", checkpoint_data.get("dublicate_prompts", 0))
 
         self.total_stored_programs = checkpoint_data.get("total_stored_programs",0)
         self.execution_failed= checkpoint_data.get("execution_failed",0)
@@ -492,6 +488,10 @@ class ProgramsDatabase:
             np.random.set_state(numpy_random_state)
             logger.info("Restored numpy random state from checkpoint")
 
+        # Restore sampler ID counter for reproducibility
+        self.next_sampler_id = checkpoint_data.get("next_sampler_id", 0)
+        logger.info(f"Restored next_sampler_id from checkpoint: {self.next_sampler_id}")
+
         for i, score in enumerate(checkpoint_data["best_score_per_island"]):
             self._best_score_per_island[i] = score
 
@@ -502,6 +502,7 @@ class ProgramsDatabase:
 
         self._best_scores_per_test_per_island = checkpoint_data["best_scores_per_test_per_island"]
         self._last_reset_time = checkpoint_data["last_reset_time"]
+        self._total_resets = checkpoint_data.get("total_resets", 0)
 
         # Restore islands
         for island_id, island_state in enumerate(checkpoint_data["islands_state"]):
@@ -545,9 +546,10 @@ class ProgramsDatabase:
             "best_program_per_island": [program.to_dict() if program else None for program in self._best_program_per_island],
             "best_scores_per_test_per_island": list(self._best_scores_per_test_per_island),
             "last_reset_time": self._last_reset_time,
+            "total_resets": self._total_resets,
             "total_prompts": self.total_prompts,
-            "dublicate_prompts": self.dublicate_prompts,
-            "perc_duplicate_prompts": (self.dublicate_prompts / self.total_prompts if self.total_prompts else 0),
+            "duplicate_prompts": self.duplicate_prompts,
+            "perc_duplicate_prompts": (self.duplicate_prompts / self.total_prompts if self.total_prompts else 0),
             "total_stored_programs": self.total_stored_programs,
             "execution_failed": self.execution_failed,
             "version_mismatch_discarded": self.version_mismatch_discarded,
@@ -557,6 +559,7 @@ class ProgramsDatabase:
             "wandb_run_id": self.wandb_run_id,  # Save W&B run ID for resumption
             "wandb_run_name": self.wandb_run_name,  # Save run name for checkpoint directory continuity
             "numpy_random_state": np.random.get_state(),  # Save numpy random state for reproducibility
+            "next_sampler_id": self.next_sampler_id,  # Save sampler ID counter for reproducibility on resume
             "islands_state": []
         }
 
@@ -655,6 +658,16 @@ class ProgramsDatabase:
         # 4. Token counts
         metrics["tokens/cumulative_input"] = self.cumulative_input_tokens
         metrics["tokens/cumulative_output"] = self.cumulative_output_tokens
+        metrics["tokens/cumulative_total"] = self.cumulative_input_tokens + self.cumulative_output_tokens
+
+        # 4b. FLOP estimation (2N FLOPs per token, where N = model parameters)
+        # This approximation comes from the forward pass requiring ~2N multiply-adds per token
+        if self.model_params_billions is not None:
+            total_tokens = self.cumulative_input_tokens + self.cumulative_output_tokens
+            model_params = self.model_params_billions * 1e9  # Convert to actual parameter count
+            cumulative_flops = 2 * model_params * total_tokens
+            metrics["compute/cumulative_flops"] = cumulative_flops
+            metrics["compute/cumulative_pflops"] = cumulative_flops / 1e15  # PetaFLOPs for readability
 
         # 5. Number of clusters per island and cluster sizes
         cluster_sizes_all = []
@@ -688,9 +701,12 @@ class ProgramsDatabase:
 
         # 8. Prompt statistics
         metrics["prompts/total"] = self.total_prompts
-        metrics["prompts/duplicate"] = self.dublicate_prompts
+        metrics["prompts/duplicate"] = self.duplicate_prompts
 
-        # 9. Optimal solution tracking
+        # 9. Island reset tracking
+        metrics["evolution/total_resets"] = self._total_resets
+
+        # 10. Optimal solution tracking
         if self.found_optimal_solution:
             metrics["solution/found_optimal"] = 1
             metrics["solution/prompts_since_optimal"] = self.prompts_since_optimal
@@ -852,7 +868,7 @@ class ProgramsDatabase:
 
         for i, entry in enumerate(lineage):
             is_current = (i == 0)
-            parent_str = " - ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None (baseline)"
+            parent_str = ", ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None (baseline)"
 
             code = ""
             if entry['program'] is not None:
@@ -962,7 +978,7 @@ class ProgramsDatabase:
                 is_baseline = (entry['generation'] == 0)
                 node_class = "current" if is_current else ("baseline" if is_baseline else "")
 
-                parent_str = " - ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None"
+                parent_str = ", ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None"
 
                 html += f"""            <div class="node {node_class}">
                 <div class="node-id">ID: {entry['program_id']}</div>
@@ -1005,7 +1021,7 @@ class ProgramsDatabase:
             lineage = self._trace_lineage(program.program_id) if self.save_lineage else []
 
             # Format detailed scores
-            scores_str = " - ".join(f"{k}:{v}" for k, v in scores_per_test.items()) if scores_per_test else "N/A"
+            scores_str = ", ".join(f"{k}:{v}" for k, v in scores_per_test.items()) if scores_per_test else "N/A"
 
             # Full code (not truncated)
             full_code = str(program)
@@ -1451,6 +1467,9 @@ class ProgramsDatabase:
         signature = self._get_signature(scores_per_test)
         program.hash_value = hash_value
 
+        # Calculate score once and reuse
+        score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.target_signatures)
+
         # Assign lineage tracking information
         if parent_ids is None:
             parent_ids = []
@@ -1477,7 +1496,7 @@ class ProgramsDatabase:
             if signature not in clusters:
                 logger.info(f"Creating new cluster with signature {scores_per_test}")
                 cluster_data = {}
-                cluster_data['score'] = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.target_signatures)
+                cluster_data['score'] = score
                 cluster_data['scores_per_test'] = scores_per_test
                 cluster_data['programs'] = [program]
                 clusters[signature] = cluster_data
@@ -1485,12 +1504,11 @@ class ProgramsDatabase:
                 logger.info(f"Registering on cluster with signature {scores_per_test}")
                 cluster_data = clusters[signature]
                 cluster_data['programs'].append(program)
-        
+
             island['num_programs'] += 1
 
             # Log lineage information for this program (only if enabled)
             if self.save_lineage:
-                score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.target_signatures)
                 self.lineage_log.append({
                     'program_id': program.program_id,
                     'parent_ids': program.parent_ids,
@@ -1506,22 +1524,18 @@ class ProgramsDatabase:
             logger.error(f"Could not append program: {e}")
 
         try:
-            # Calculate the score for the new program
-            score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.target_signatures)
-        
             # Check if the new score is higher than the current best score
             if score > self._best_score_per_island[island_id]:
                 self._best_program_per_island[island_id] = program
                 self._best_scores_per_test_per_island[island_id] = scores_per_test
                 self._best_score_per_island[island_id] = score
                 logger.info(f'Best score of island {island_id} increased to {score} with program {program} and scores {scores_per_test}')
-        
+
             # If the score is equal to the best score - check the program signature
             elif score == self._best_score_per_island[island_id]:
                 # Get the current best program's signature
-                current_best_program = self._best_program_per_island[island_id]
                 current_best_signature = self._get_signature(self._best_scores_per_test_per_island[island_id])
-            
+
                 # Compare signatures: if the new signature is lexicographically "larger"
                 if signature > current_best_signature:
                     self._best_program_per_island[island_id] = program
@@ -1529,7 +1543,7 @@ class ProgramsDatabase:
                     self._best_score_per_island[island_id] = score
                     logger.info(f'Best program of island {island_id} replaced with program {program} (signature comparison)')
 
-        except Exception as e: 
+        except Exception as e:
             logger.error(f"Could not update best score: {e}")
 
     async def reset_islands(self):
@@ -1580,6 +1594,8 @@ class ProgramsDatabase:
                     founder_parent_ids = [founder.program_id] if founder.program_id is not None else []
                     self._register_program_in_island(founder, island_id, founder_scores, None, founder_parent_ids)
                 await self.get_prompt()
+            self._total_resets += 1
+            logger.info(f"Island reset #{self._total_resets} completed. Reset {len(reset_islands_ids)} islands.")
         except Exception as e:
             logger.error(f"Error during island reset: {e}")
 
@@ -1931,7 +1947,7 @@ class ProgramsDatabase:
                 duplicate_prompt = False
                 if len(implementations) == 2 and implementations[0].hash_value == implementations[1].hash_value:
                     duplicate_prompt = True
-                    self.dublicate_prompts += 1
+                    self.duplicate_prompts += 1
                     try:
                         with open("duplicate_prompt.txt", "a") as f:
                             f.write(prompt_str)
@@ -2011,7 +2027,7 @@ class ProgramsDatabase:
             duplicate_prompt = False
             if len(implementations) == 2 and implementations[0].hash_value == implementations[1].hash_value:
                 duplicate_prompt = True
-                self.dublicate_prompts += 1
+                self.duplicate_prompts += 1
                 try:
                     with open("duplicate_prompt.txt", "a") as f:
                         f.write(prompt_str)
@@ -2058,14 +2074,7 @@ class ProgramsDatabase:
         else:
             # Normalize lengths as negative values to favor shorter programs
             normalized_lengths = (lengths - lengths.min()) / (lengths.max() - lengths.min() + 1e-6)
-            probabilities = self._softmax(-normalized_lengths, temperature=temperature)  # Softmax over negative lengths
+            probabilities = _softmax(-normalized_lengths, temperature)  # Softmax over negative lengths
         # Sample a program based on the probabilities
         sampled_index = np.random.choice(len(programs), p=probabilities)
         return programs[sampled_index]
-
-
-    def _softmax(self, logits: np.ndarray, temperature: float) -> np.ndarray:
-        """Tempered softmax for sampling."""
-        logits = np.array(logits, dtype=np.float32)
-        exp_logits = np.exp(logits / temperature)
-        return exp_logits / exp_logits.sum()

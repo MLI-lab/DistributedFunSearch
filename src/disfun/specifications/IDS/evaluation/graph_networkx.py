@@ -95,7 +95,7 @@ def solve(n, s, q, graph_dir):
 
     # Compute priorities
     priorities = {
-        node: priority(node, G_for_priority, n, s, q)
+        node: priority(node, G_for_priority, n, s)
         for node in G.nodes
     }
 
@@ -123,7 +123,7 @@ def solve(n, s, q, graph_dir):
     return independent_set, hash_value
 
 
-def priority(node, G, n, s, q):
+def priority(node, G, n, s):
     """
     This is the placeholder, LLM will generate the actual implementation.
     """

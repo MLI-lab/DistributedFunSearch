@@ -227,6 +227,9 @@ class TaskManager:
         if not run_name:
             if self.config.wandb.run_name is None:
                 run_name = f"run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                # Append tag if configured
+                if self.config.wandb.run_name_tag:
+                    run_name = f"{run_name}_{self.config.wandb.run_name_tag}"
                 self.logger.info(f"Auto-generated run name: {run_name}")
             else:
                 run_name = self.config.wandb.run_name
@@ -267,10 +270,24 @@ class TaskManager:
             from pathlib import Path
             initial_functions_dir = Path(self.config.evaluator.initial_functions_dir)
 
+            # Check if we should strip tags from initial functions
+            prompt_style_path = self.config.prompt.prompt_style_path if hasattr(self.config.prompt, 'prompt_style_path') else None
+            strip_tags = prompt_style_path is None
+
             if initial_functions_dir.exists() and initial_functions_dir.is_dir():
                 for txt_file in sorted(initial_functions_dir.glob("*.txt")):
                     try:
                         function_body = txt_file.read_text().strip()
+
+                        # If no prompt_style, strip tags from initial functions
+                        if strip_tags:
+                            import re
+                            function_body = re.sub(r'<thinking>.*?</thinking>\s*', '', function_body, flags=re.DOTALL)
+                            function_body = re.sub(r'<thought>.*?</thought>\s*', '', function_body, flags=re.DOTALL)
+                            function_body = re.sub(r'<code>(.*?)</code>', r'\1', function_body, flags=re.DOTALL)
+                            function_body = function_body.strip()
+                            self.logger.info(f"Stripped tags from initial function: {txt_file.name}")
+
                         initial_program_data = json.dumps({
                             "sample": function_body,
                             "island_id": None,
@@ -330,25 +347,48 @@ class TaskManager:
             try:
                 self.start_initial_processes(function_to_evolve, checkpoint_file)
                 self.logger.info("Initial processes started successfully.")
+
+                # Sync next_sampler_id from database (which may have loaded from checkpoint)
+                # This ensures dynamically scaled samplers get unique IDs that don't collide
+                if database.next_sampler_id > self.resource_manager.next_sampler_id:
+                    self.resource_manager.next_sampler_id = database.next_sampler_id
+                    self.logger.info(f"Synced next_sampler_id from checkpoint: {database.next_sampler_id}")
+
+                # Link resource_manager to database so sampler ID counter stays in sync for checkpointing
+                self.resource_manager.database = database
             except Exception as e:
                 self.logger.error(f"Failed to start initial processes: {e}")
 
-            # Give samplers a moment to register as consumers after model loading
-            self.logger.info("Waiting 5 seconds for sampler processes to register as consumers...")
-            await asyncio.sleep(5)
+            # Wait for at least one sampler to be ready before publishing
+            # Note: For local models (vLLM), sampler won't register as consumer until model is loaded (~5-10 min)
+            self.logger.info("Waiting for at least one sampler to connect (this may take several minutes for local models)...")
+            while True:
+                # Call declare() to get fresh queue info from RabbitMQ
+                queue_info = await sampler_queue.declare()
+                consumer_count = queue_info.consumer_count
+                self.logger.info(f"consumer_count is {consumer_count} while config num_samplers is {self.config.num_samplers}")
 
-            # Wait a bit for samplers to start - then publish initial programs
-            self.logger.info("Waiting 10 seconds for sampler processes to start...")
-            await asyncio.sleep(10)
+                if consumer_count >= 1 and checkpoint_file is None:
+                    # Publish initial programs (multiple copies for warm start)
+                    num_copies = getattr(self.config.programs_database, 'initial_program_copies', 1)
+                    all_publications = []
+                    for _ in range(num_copies):
+                        all_publications.extend(initial_programs)
 
-            if checkpoint_file is None:
-                # Publish all initial programs
-                for idx, initial_program_data in enumerate(initial_programs):
-                    await self.publish_initial_program_with_retry(initial_program_data)
-                    self.logger.info(f"Published initial program {idx + 1}/{len(initial_programs)}")
-            else:
-                await database.get_prompt()
-                self.logger.info(f"Loading from checkpoint: {checkpoint_file}")
+                    if all_publications:
+                        await asyncio.gather(*[
+                            self.publish_initial_program_with_retry(prog_data)
+                            for prog_data in all_publications
+                        ])
+                        self.logger.info(f"Published {len(all_publications)} initial programs ({len(initial_programs)} unique x {num_copies} copies)")
+                    break
+                elif consumer_count >= 1:
+                    await database.get_prompt()
+                    self.logger.info(f"Loading from checkpoint: {checkpoint_file}")
+                    break
+                else:
+                    self.logger.info("No consumers yet on sampler_queue. Retrying in 10 seconds...")
+                    await asyncio.sleep(10)
 
             # Start resource logging
             resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
@@ -434,7 +474,7 @@ class TaskManager:
                 try:
                     proc = ctx.Process(
                         target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename),
+                        args=(self.config_path, device, self.log_dir, self.log_filename, i),
                         name=f"Sampler-{i}"
                     )
                     proc.start()
@@ -460,7 +500,7 @@ class TaskManager:
                 try:
                     proc = ctx.Process(
                         target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename),
+                        args=(self.config_path, device, self.log_dir, self.log_filename, i),
                         name=f"Sampler-{i}"
                     )
                     proc.start()
@@ -470,6 +510,11 @@ class TaskManager:
                 except Exception as e:
                     self.logger.error(f"Error starting sampler {i}: {e}")
                     continue
+
+        # Initialize ResourceManager's next_sampler_id to continue from where we left off
+        # This ensures dynamically scaled samplers get unique IDs that don't collide with initial ones
+        self.resource_manager.next_sampler_id = self.config.num_samplers
+        self.logger.info(f"Initialized next_sampler_id to {self.resource_manager.next_sampler_id} for dynamic scaling")
 
         # Start initial evaluator processes
         ctx = mp.get_context('fork')  # Use fork for evaluators (no model loading - no deadlock risk)
@@ -872,7 +917,7 @@ if __name__ == "__main__":
 
     # Configure separate logger for time and memory logging
     time_memory_logger = logging.getLogger('time_memory_logger')
-    time_memory_logger.setLevel(logging.DEBUG)
+    time_memory_logger.setLevel(logging.INFO)
 
     os.makedirs(log_dir, exist_ok=True)
 
