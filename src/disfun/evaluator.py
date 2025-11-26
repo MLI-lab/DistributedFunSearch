@@ -361,7 +361,7 @@ class Evaluator:
     (e.g. - sandbox/sandbox<PID>/stderr_N.log). The stderr files are automatically cleaned up
     after evaluation completes.
     """
-    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2, graph_dir=None, cache_graphs=False, cache_size_limit_gb=2.0):
+    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2, graph_dir=None, cache_graphs=False, cache_size_limit_gb=2.0, rabbitmq_config=None):
         self.connection = connection
         self.channel = channel
         self.evaluator_queue = evaluator_queue
@@ -375,6 +375,8 @@ class Evaluator:
         self.graph_dir = graph_dir  # Store graph_dir for passing to sandbox
         self.cache_graphs = cache_graphs  # Enable graph caching in specifications
         self.cache_size_limit_gb = cache_size_limit_gb  # Size limit for cached graphs
+        self._rabbitmq_config = rabbitmq_config  # Store for reconnection
+        self._shutdown_requested = False  # Flag to stop reconnection on shutdown
         self.manager = Manager()
         self.call_count = self.manager.Value('i', 0)
         self.call_count_lock = self.manager.Lock()
@@ -384,6 +386,60 @@ class Evaluator:
         self.cumulative_cpu_time = 0.0  # Track total CPU time
         self.cpu_time_lock = self.manager.Lock()  # Lock to protect updates to cumulative CPU time
         self.target_signatures = target_signatures # Example {(6,1): 10, (7,1): 16, (8,1): 30, (9,1): 52, (10,1): 94, (11,1): 172}
+
+    def request_shutdown(self):
+        """Signal that shutdown is requested - stops reconnection attempts."""
+        self._shutdown_requested = True
+
+    async def _ensure_connection(self):
+        """Create or verify RabbitMQ connection is alive."""
+        from disfun import process_utils
+
+        if self._rabbitmq_config is None:
+            return True  # No config, can't reconnect
+
+        needs_reconnect = (
+            self.connection is None or
+            self.connection.is_closed or
+            self.channel is None or
+            self.channel.is_closed
+        )
+
+        if needs_reconnect:
+            logger.info(f"Evaluator {self.local_id}: Re-establishing RabbitMQ connection...")
+            try:
+                await self._close_connection()
+                self.connection = await process_utils.create_rabbitmq_connection(self._rabbitmq_config)
+                self.channel = await self.connection.channel()
+                self.evaluator_queue = await process_utils.declare_standard_queue(self.channel, "evaluator_queue")
+                self.database_queue = await process_utils.declare_standard_queue(self.channel, "database_queue")
+                logger.info(f"Evaluator {self.local_id}: Connection re-established")
+                return True
+            except Exception as e:
+                logger.error(f"Evaluator {self.local_id}: Reconnection failed: {e}")
+                return False
+        return True
+
+    async def _close_connection(self):
+        """Safely close existing connection."""
+        try:
+            if self.channel and not self.channel.is_closed:
+                await self.channel.close()
+        except Exception:
+            pass
+        try:
+            if self.connection and not self.connection.is_closed:
+                await self.connection.close()
+        except Exception:
+            pass
+        self.connection = None
+        self.channel = None
+        self.evaluator_queue = None
+        self.database_queue = None
+
+    async def async_cleanup(self):
+        """Async cleanup - close RabbitMQ connections (matches Sampler interface)."""
+        await self._close_connection()
 
     async def shutdown(self):
         logger.info(f"Evaluator {self.local_id}: Initiating shutdown process.")
@@ -446,51 +502,103 @@ class Evaluator:
 
 
     async def consume_and_process(self):
-        from disfun import process_utils
+        """Main consume loop with automatic connection recovery.
 
-        async def _consume_loop():
-            """Inner consume loop - will be wrapped with reconnection logic."""
-            async with self.channel:
-                await self.channel.set_qos(prefetch_count=1)
+        Uses the same reconnection pattern as Sampler for consistency.
+        Checks shutdown flag before any reconnection attempt.
+        """
+        reconnect_delay = 5.0
+        max_reconnect_delay = 60.0
 
-                async with self.evaluator_queue.iterator() as stream:
-                    message_count = 0
-                    async for message in stream:
-                        fetch_start_time = time.perf_counter()
+        while True:
+            # Check shutdown flag at top of loop
+            if self._shutdown_requested:
+                logger.info(f"Evaluator {self.local_id}: Shutdown requested, exiting consume loop")
+                break
 
-                        async with message.process():
-                            fetch_end_time = time.perf_counter()
-                            fetch_duration = fetch_end_time - fetch_start_time
-                            logger.debug(f"Time to fetch message from queue: {fetch_duration:.6f} seconds")
+            try:
+                # Ensure connection is alive (reconnect if needed)
+                if self._rabbitmq_config is not None:
+                    connected = await self._ensure_connection()
+                    if not connected:
+                        if self._shutdown_requested:
+                            break
+                        logger.error(f"Evaluator {self.local_id}: Connection failed, retrying in {reconnect_delay:.1f}s")
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                        continue
 
-                            try:
-                                await asyncio.wait_for(self.process_message(message), timeout=300)
-                            except asyncio.TimeoutError:
-                                logger.warning("Processing message timed out.")
-                            except Exception as e:
-                                logger.error(f"Evaluator: Error while processing message: {e}")
+                # Reset delay on successful connection
+                reconnect_delay = 5.0
 
-                        # Periodically clean up orphaned sandbox processes
-                        message_count += 1
-                        if message_count % 10 == 0:
-                            killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
-                            if killed > 0:
-                                logger.info(f"Cleaned up {killed} orphaned sandbox processes")
+                # Run consume loop
+                await self._consume_loop()
+                break
 
-        # Wrap consume loop with automatic reconnection
-        await process_utils.with_reconnection(
-            _consume_loop,
-            logger,
-            component_name=f"Evaluator {self.local_id}"
-        )
+            except asyncio.CancelledError:
+                logger.info(f"Evaluator {self.local_id}: Cancelled, exiting...")
+                break
+
+            except (aio_pika.exceptions.AMQPConnectionError,
+                    aio_pika.exceptions.ChannelClosed,
+                    aio_pika.exceptions.ChannelInvalidStateError,
+                    ConnectionError, OSError) as e:
+                if self._shutdown_requested:
+                    logger.info(f"Evaluator {self.local_id}: Connection error during shutdown, exiting")
+                    break
+
+                logger.warning(f"Evaluator {self.local_id}: Connection error: {e}. Reconnecting in {reconnect_delay:.1f}s...")
+                await self._close_connection()
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                continue
+
+            except Exception as e:
+                if self._shutdown_requested:
+                    break
+
+                logger.error(f"Evaluator {self.local_id}: Unexpected error: {e}. Reconnecting in {reconnect_delay:.1f}s...", exc_info=True)
+                await self._close_connection()
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                continue
 
         # Cleanup after loop exits
         try:
-            await asyncio.wait_for(self.shutdown(), timeout=100)
+            await asyncio.wait_for(self.shutdown(), timeout=30)
         except asyncio.TimeoutError:
-            logger.warning("Shutdown took too long and timed out.")
+            logger.warning(f"Evaluator {self.local_id}: Shutdown timed out")
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+            logger.error(f"Evaluator {self.local_id}: Error during shutdown: {e}")
+
+    async def _consume_loop(self):
+        """Inner consume loop - processes messages from queue."""
+        async with self.channel:
+            await self.channel.set_qos(prefetch_count=1)
+
+            async with self.evaluator_queue.iterator() as stream:
+                message_count = 0
+                async for message in stream:
+                    fetch_start_time = time.perf_counter()
+
+                    async with message.process():
+                        fetch_end_time = time.perf_counter()
+                        fetch_duration = fetch_end_time - fetch_start_time
+                        logger.debug(f"Time to fetch message from queue: {fetch_duration:.6f} seconds")
+
+                        try:
+                            await asyncio.wait_for(self.process_message(message), timeout=300)
+                        except asyncio.TimeoutError:
+                            logger.warning("Processing message timed out.")
+                        except Exception as e:
+                            logger.error(f"Evaluator: Error while processing message: {e}")
+
+                    # Periodically clean up orphaned sandbox processes
+                    message_count += 1
+                    if message_count % 10 == 0:
+                        killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
+                        if killed > 0:
+                            logger.info(f"Cleaned up {killed} orphaned sandbox processes")
 
 
     #async_time_execution

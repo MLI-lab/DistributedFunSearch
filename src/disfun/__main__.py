@@ -1076,25 +1076,37 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error closing main connection: {e}")
 
-        # Explicitly delete queues to ensure cleanup even if consumers didn't disconnect cleanly
+        # Clean up ResourceManager state
+        if hasattr(main.task_manager, 'resource_manager') and main.task_manager.resource_manager:
+            main.task_manager.resource_manager.cleanup()
+
+        # Delete queues - wait for consumers to disconnect first to avoid race condition
         print("Attempting to delete RabbitMQ queues...")
         try:
             cleanup_connection = await process_utils.create_rabbitmq_connection(
-                main.task_manager.config, timeout=5
+                main.task_manager.config, timeout=10
             )
             cleanup_channel = await cleanup_connection.channel()
 
             for queue_name in ['evaluator_queue', 'sampler_queue', 'database_queue']:
                 try:
-                    # Declare the queue first (passive=False) so we can delete it
+                    # First check queue status
                     queue = await cleanup_channel.declare_queue(
-                        queue_name,
-                        durable=False,
-                        auto_delete=False,
-                        passive=False  # Create if doesn't exist - get if exists
+                        queue_name, durable=False, auto_delete=False, passive=True
                     )
-                    await queue.delete(if_unused=False, if_empty=False)
+                    # Wait briefly if there are still consumers (they should be disconnecting)
+                    if queue.declaration_result.consumer_count > 0:
+                        print(f"Queue {queue_name} has {queue.declaration_result.consumer_count} consumers, waiting...")
+                        await asyncio.sleep(2)
+
+                    # Delete - prefer if_unused=True but fall back to force delete
+                    try:
+                        await queue.delete(if_unused=True, if_empty=False)
+                    except Exception:
+                        await queue.delete(if_unused=False, if_empty=False)
                     print(f"Deleted queue: {queue_name}")
+                except aio_pika.exceptions.ChannelNotFoundEntity:
+                    print(f"Queue {queue_name} does not exist, skipping")
                 except Exception as e:
                     print(f"Could not delete queue {queue_name}: {e}")
 

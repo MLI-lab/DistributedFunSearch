@@ -268,12 +268,17 @@ class LLM_model:
                 logger.error(f"Error adjusting temperature: {e}")
 
         if self.use_local_vllm:
-            return self._draw_batch_vllm(prompts)
+            return await self._draw_batch_vllm(prompts)
         else:
             return await self._draw_batch_api(prompts)
 
-    def _draw_batch_vllm(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
-        """Generate samples using local vLLM engine."""
+    async def _draw_batch_vllm(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
+        """Generate samples using local vLLM engine.
+
+        The vLLM generate() call is run in a thread pool to avoid blocking
+        the asyncio event loop, which would prevent RabbitMQ heartbeats from
+        being processed and cause connection timeouts.
+        """
         try:
             start_time = time.time()
 
@@ -294,8 +299,11 @@ class LLM_model:
                 self.generation_counter += 1
                 logger.debug(f"vLLM: Using seed {current_seed} for generation #{self.generation_counter}")
 
-            # vLLM batch generation
-            outputs = self.vllm_engine.generate(prompts, self.sampling_params)
+            # vLLM batch generation - run in thread pool to avoid blocking event loop
+            # This allows RabbitMQ heartbeats to be processed during long inference
+            outputs = await asyncio.to_thread(
+                self.vllm_engine.generate, prompts, self.sampling_params
+            )
 
             all_samples = []
             input_token_counts = []
@@ -496,12 +504,16 @@ class LLM_model:
 class Sampler:
     """Node that samples program continuations and sends them for evaluation."""
 
-    def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, device=None, log_dir=None, system_message=None, random_seed=None):
+    def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, device=None, log_dir=None, system_message=None, random_seed=None, rabbitmq_config=None):
         self.connection = connection
         self.channel = channel
         self.sampler_queue = sampler_queue
         self.evaluator_queue = evaluator_queue
         self._config = config
+        self._rabbitmq_config = rabbitmq_config  # Store for reconnection
+        self._shutdown_requested = False
+        self._reconnect_delay = 5.0  # Initial reconnect delay in seconds
+        self._max_reconnect_delay = 60.0  # Maximum reconnect delay
         self.device = device
         self.temperature_period = self._config.temperature_period
         self.samples_per_prompt = self._config.samples_per_prompt
@@ -532,11 +544,83 @@ class Sampler:
             logger.error(f"Error initializing model: {e}")
             raise
 
-    async def consume_and_process(self) -> None:
+    async def _ensure_connection(self):
+        """Create or verify RabbitMQ connection is alive.
+
+        If the connection is closed or None, creates a fresh connection,
+        channel, and queue objects. This enables automatic recovery from
+        network interruptions.
+        """
         from disfun import process_utils
 
+        if self._rabbitmq_config is None:
+            logger.warning("Sampler: No RabbitMQ config stored, cannot reconnect")
+            return False
+
+        # Check if connection needs to be recreated
+        needs_reconnect = (
+            self.connection is None or
+            self.connection.is_closed or
+            self.channel is None or
+            self.channel.is_closed
+        )
+
+        if needs_reconnect:
+            logger.info(f"Sampler ({self._config.model}): Establishing new RabbitMQ connection...")
+            try:
+                # Close any stale connections first
+                await self._close_connection()
+
+                # Create fresh connection
+                self.connection = await process_utils.create_rabbitmq_connection(
+                    self._rabbitmq_config, timeout=300
+                )
+                self.channel = await self.connection.channel()
+                self.sampler_queue = await process_utils.declare_standard_queue(
+                    self.channel, "sampler_queue"
+                )
+                # Also declare evaluator queue for publishing
+                await process_utils.declare_standard_queue(self.channel, "evaluator_queue")
+
+                logger.info(f"Sampler ({self._config.model}): RabbitMQ connection re-established successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Sampler ({self._config.model}): Failed to reconnect: {e}")
+                return False
+        return True
+
+    async def _close_connection(self):
+        """Safely close existing RabbitMQ connection and channel."""
+        try:
+            if self.channel is not None:
+                try:
+                    if not self.channel.is_closed:
+                        await self.channel.close()
+                except Exception as e:
+                    logger.debug(f"Sampler: Error closing channel: {e}")
+            if self.connection is not None:
+                try:
+                    if not self.connection.is_closed:
+                        await self.connection.close()
+                except Exception as e:
+                    logger.debug(f"Sampler: Error closing connection: {e}")
+        finally:
+            self.connection = None
+            self.channel = None
+            self.sampler_queue = None
+
+    async def consume_and_process(self) -> None:
+        """Main consume loop with automatic connection recovery.
+
+        This method implements a robust consume loop that:
+        1. Checks shutdown flag before any reconnection attempt
+        2. Ensures connection is alive before consuming
+        3. Catches connection errors and re-establishes the connection
+        4. Uses exponential backoff for reconnection attempts
+        """
+
         async def _consume_loop():
-            """Inner consume loop - will be wrapped with reconnection logic."""
+            """Inner consume loop - processes messages from the queue."""
             logger.info(f"Sampler ({self._config.model}): Setting QoS prefetch_count=10...")
             await self.channel.set_qos(prefetch_count=10)
 
@@ -594,12 +678,77 @@ class Sampler:
                         await self.process_batch_s(batch_to_process)
                         logger.debug(f"Sampler: Batch processing completed")
 
-        # Wrap consume loop with automatic reconnection
-        await process_utils.with_reconnection(
-            _consume_loop,
-            logger,
-            component_name=f"Sampler ({self._config.model})"
-        )
+        # Main reconnection loop
+        reconnect_delay = self._reconnect_delay
+
+        while True:
+            # Check shutdown flag at top of loop
+            if self._shutdown_requested:
+                logger.info(f"Sampler ({self._config.model}): Shutdown requested, exiting consume loop")
+                break
+
+            try:
+                # Ensure connection is alive (reconnect if needed)
+                if self._rabbitmq_config is not None:
+                    connected = await self._ensure_connection()
+                    if not connected:
+                        if self._shutdown_requested:
+                            break
+                        logger.error(f"Sampler ({self._config.model}): Failed to establish connection, retrying in {reconnect_delay:.1f}s...")
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
+                        continue
+
+                # Reset delay on successful connection
+                reconnect_delay = self._reconnect_delay
+
+                # Run the consume loop
+                await _consume_loop()
+
+                # If consume loop exits normally, break
+                break
+
+            except asyncio.CancelledError:
+                # Shutdown requested - exit cleanly without reconnection
+                logger.info(f"Sampler ({self._config.model}): Cancelled, exiting...")
+                break
+
+            except (aio_pika.exceptions.AMQPConnectionError,
+                    aio_pika.exceptions.ChannelClosed,
+                    aio_pika.exceptions.ChannelInvalidStateError,
+                    ConnectionError,
+                    OSError) as e:
+                # Check shutdown flag before attempting reconnection
+                if self._shutdown_requested:
+                    logger.info(f"Sampler ({self._config.model}): Connection error during shutdown, exiting")
+                    break
+
+                # Connection lost - attempt to reconnect
+                logger.warning(
+                    f"Sampler ({self._config.model}): Connection error: {e}. "
+                    f"Reconnecting in {reconnect_delay:.1f}s..."
+                )
+                await self._close_connection()
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
+                continue
+
+            except Exception as e:
+                # Check shutdown flag before attempting reconnection
+                if self._shutdown_requested:
+                    logger.info(f"Sampler ({self._config.model}): Error during shutdown, exiting")
+                    break
+
+                # Unexpected error - log and retry
+                logger.error(
+                    f"Sampler ({self._config.model}): Unexpected error: {e}. "
+                    f"Reconnecting in {reconnect_delay:.1f}s...",
+                    exc_info=True
+                )
+                await self._close_connection()
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
+                continue
 
     async def process_batch_s(self, batch: List[aio_pika.IncomingMessage]):
         prompts = []
@@ -687,8 +836,20 @@ class Sampler:
                 except Exception as e:
                     logger.error(f"Error publishing sample: {e}")
 
+    def request_shutdown(self):
+        """Signal that shutdown is requested - stops reconnection attempts."""
+        self._shutdown_requested = True
+
+    async def async_cleanup(self):
+        """Async cleanup - close RabbitMQ connections."""
+        try:
+            await self._close_connection()
+            logger.info("Sampler: RabbitMQ connections closed")
+        except Exception as e:
+            logger.error(f"Sampler: Error closing connections: {e}")
+
     def cleanup(self):
-        """Release LLM resources."""
+        """Release LLM resources (sync cleanup)."""
         import gc
         try:
             if hasattr(self, '_llm'):

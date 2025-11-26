@@ -117,35 +117,40 @@ def initialize_logger(log_dir, log_filename, process_type=None, use_custom_log_f
     return logger
 
 
-async def create_rabbitmq_connection(config, timeout=300, heartbeat=172800):
+async def create_rabbitmq_connection(config, timeout=60, heartbeat=60):
     """
     Create a robust RabbitMQ connection with standard configuration.
 
     Args:
         config: Configuration object with rabbitmq settings
-        timeout: Connection timeout in seconds
-        heartbeat: Heartbeat interval in seconds (default 172800 = 2 days)
-                   Set to 2 days for testing long-running experiments.
-                   If connection errors occur before this timeout - they are
-                   likely due to network issues or RabbitMQ server resource limits,
-                   not heartbeat timeouts.
+        timeout: Connection timeout in seconds (default 60)
+        heartbeat: Heartbeat interval in seconds (default 60)
+                   RabbitMQ detects dead connections within 2*heartbeat (~2 min).
+                   This enables faster failure detection in cluster scenarios.
 
     Returns:
         aio_pika.Connection: Robust connection to RabbitMQ
     """
+    # Use config heartbeat if available, otherwise use default
+    effective_heartbeat = getattr(config.rabbitmq, 'heartbeat', heartbeat)
+    effective_timeout = getattr(config.rabbitmq, 'connection_timeout', timeout)
+
+    logger = logging.getLogger('main_logger')
+
     try:
         amqp_url = URL(
             f'amqp://{config.rabbitmq.username}:{config.rabbitmq.password}@'
             f'{config.rabbitmq.host}:{config.rabbitmq.port}/{config.rabbitmq.vhost}'
-        ).update_query(heartbeat=heartbeat)
-        return await aio_pika.connect_robust(amqp_url, timeout=timeout)
-    except Exception:
-        # Try without vhost if it fails
+        ).update_query(heartbeat=effective_heartbeat)
+        return await aio_pika.connect_robust(amqp_url, timeout=effective_timeout)
+    except Exception as e:
+        # Log the error before retrying without vhost
+        logger.warning(f"RabbitMQ connection with vhost '{config.rabbitmq.vhost}' failed: {e}. Retrying without vhost...")
         amqp_url = URL(
             f'amqp://{config.rabbitmq.username}:{config.rabbitmq.password}@'
             f'{config.rabbitmq.host}:{config.rabbitmq.port}/'
-        ).update_query(heartbeat=heartbeat)
-        return await aio_pika.connect_robust(amqp_url, timeout=timeout)
+        ).update_query(heartbeat=effective_heartbeat)
+        return await aio_pika.connect_robust(amqp_url, timeout=effective_timeout)
 
 
 async def declare_standard_queue(channel, queue_name: str):
@@ -204,8 +209,8 @@ async def graceful_shutdown(component_type: str, local_id: int, logger: logging.
         local_id: Process ID or identifier
         logger: Logger instance
         loop: Asyncio event loop
-        connection: RabbitMQ connection
-        channel: RabbitMQ channel
+        connection: RabbitMQ connection (may be stale if instance reconnected)
+        channel: RabbitMQ channel (may be stale if instance reconnected)
         task: Async task to cancel
         instance: Component instance to cleanup (Sampler or Evaluator)
         cleanup_done_flag: Dict with 'done' key to track cleanup state
@@ -215,38 +220,47 @@ async def graceful_shutdown(component_type: str, local_id: int, logger: logging.
 
     logger.info(f"{component_type} {local_id}: Initiating graceful shutdown...")
 
-    # Cancel consume task
+    # CRITICAL: Set shutdown flag FIRST to stop reconnection attempts
+    if instance and hasattr(instance, 'request_shutdown'):
+        instance.request_shutdown()
+        logger.info(f"{component_type} {local_id}: Shutdown flag set")
+
+    # Cancel consume task - it will see the flag and exit cleanly
     if task and not task.done():
         logger.info(f"{component_type} {local_id}: Cancelling consume task...")
         task.cancel()
         try:
-            await asyncio.wait_for(task, timeout=2)
+            await asyncio.wait_for(task, timeout=5)
         except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
             pass
 
-    # Cleanup instance
+    # Cleanup instance - prefer async_cleanup for Samplers (handles reconnected connections)
     if instance:
         try:
             logger.info(f"{component_type} {local_id}: Cleaning up {component_type.lower()} instance...")
+            if hasattr(instance, 'async_cleanup'):
+                # Sampler: use async_cleanup to close current (possibly reconnected) connections
+                await instance.async_cleanup()
             if hasattr(instance, 'shutdown'):
                 await instance.shutdown()
-            elif hasattr(instance, 'cleanup'):
+            if hasattr(instance, 'cleanup'):
                 instance.cleanup()
         except Exception as e:
             logger.error(f"{component_type} {local_id}: Error during cleanup: {e}")
+    else:
+        # Fallback: Only close original connections if instance never initialized
+        # (otherwise instance.async_cleanup handles its own connections)
+        if channel:
+            try:
+                await channel.close()
+            except Exception:
+                pass
 
-    # Close connections (simplified - no verbose error handling)
-    if channel:
-        try:
-            await channel.close()
-        except Exception:
-            pass
-
-    if connection:
-        try:
-            await connection.close()
-        except Exception:
-            pass
+        if connection:
+            try:
+                await connection.close()
+            except Exception:
+                pass
 
     cleanup_done_flag['done'] = True
     logger.info(f"{component_type} {local_id}: Graceful shutdown complete.")
@@ -260,51 +274,20 @@ async def with_reconnection(consume_func: Callable, logger: logging.Logger,
     """
     Wrapper that adds automatic reconnection logic to consume functions.
 
-    When a connection error occurs - this wrapper will:
-    1. Log the error with helpful context
-    2. Wait with exponential backoff
-    3. Retry the consume function
-    4. Exit cleanly on cancellation signals
-
-    Args:
-        consume_func: Async function to wrap (should contain the consume loop)
-        logger: Logger instance for status messages
-        component_name: Name for log messages (e.g., "Evaluator", "Sampler")
-        initial_delay: Initial reconnection delay in seconds (default: 5)
-        max_delay: Maximum reconnection delay in seconds (default: 60)
-
-    Example:
-        async def consume_loop():
-            async with queue.iterator() as stream:
-                async for message in stream:
-                    await process(message)
-
-        await with_reconnection(consume_loop, logger, "Evaluator")
+    Note: For new code, prefer using RabbitMQConsumerMixin._run_with_reconnection()
+    which also handles shutdown coordination. This function is kept for ProgramsDatabase
+    which runs in main process and doesn't need shutdown flag coordination.
     """
     reconnect_delay = initial_delay
 
-    while True:  # Reconnection loop
+    while True:
         try:
             await consume_func()
-            # If consume_func exits normally - break the loop
             break
-
         except asyncio.CancelledError:
-            # Shutdown requested - exit reconnection loop
-            logger.info(f"{component_name} shutting down, exiting reconnection loop.")
+            logger.info(f"{component_name} shutting down.")
             break
-
         except Exception as e:
-            # Connection error occurred - log details and retry
-            logger.error(
-                f"{component_name} connection error: {e}\n"
-                f"Attempting to reconnect in {reconnect_delay:.1f} seconds..."
-            )
-
+            logger.error(f"{component_name} error: {e}. Reconnecting in {reconnect_delay:.1f}s...")
             await asyncio.sleep(reconnect_delay)
-
-            # Exponential backoff up to max
             reconnect_delay = min(reconnect_delay * 1.5, max_delay)
-
-            logger.info(f"{component_name} reconnecting after {type(e).__name__}...")
-            continue  # Retry connection

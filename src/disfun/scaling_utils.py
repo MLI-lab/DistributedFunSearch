@@ -33,6 +33,15 @@ class ResourceManager:
         self.next_sampler_id = 0  # Monotonically increasing counter for unique sampler IDs (never reused)
         self.next_evaluator_id = 0  # Monotonically increasing counter for unique evaluator IDs
         self.database = None  # Reference to ProgramsDatabase for syncing next_sampler_id to checkpoint
+        # Counter for detecting disconnected samplers (consecutive checks with 0 consumers)
+        self.sampler_zero_consumer_count = 0
+        # Flag to skip zero-consumer check during initial startup (model loading takes 5-10 min)
+        self.samplers_ever_connected = False
+        # Time-based tracking for faster disconnection detection
+        self.last_sampler_activity_time = None
+        # Scale-down idle tracking
+        self._evaluator_idle_checks = 0
+        self._sampler_idle_checks = 0
         if resource_logger is None:
             if log_dir is None:
                 raise ValueError("Either resource_logger or log_dir must be provided")
@@ -235,9 +244,23 @@ class ResourceManager:
         try:
             while True:
                 try:
-                    evaluator_message_count = await self.get_queue_message_count(evaluator_queue) if evaluator_queue else 0
-                    sampler_message_count = await self.get_queue_message_count(sampler_queue) if sampler_queue else 0
-                    self.resource_logger.info(f"Message counts are {evaluator_message_count} and {sampler_message_count}")
+                    # Clean up dead processes from lists (crashed/killed processes)
+                    if sampler_processes:
+                        dead_samplers = [p for p in sampler_processes if not p.is_alive()]
+                        for p in dead_samplers:
+                            sampler_processes.remove(p)
+                            self.resource_logger.warning(f"Removed dead sampler process (PID: {p.pid}) from tracking")
+                            self._free_device(p.pid)
+                    if evaluator_processes:
+                        dead_evaluators = [p for p in evaluator_processes if not p.is_alive()]
+                        for p in dead_evaluators:
+                            evaluator_processes.remove(p)
+                            self.resource_logger.warning(f"Removed dead evaluator process (PID: {p.pid}) from tracking")
+
+                    # Get message counts and consumer counts for both queues
+                    evaluator_message_count, evaluator_consumer_count = await self.get_queue_message_count(evaluator_queue) if evaluator_queue else (0, 0)
+                    sampler_message_count, sampler_consumer_count = await self.get_queue_message_count(sampler_queue) if sampler_queue else (0, 0)
+                    self.resource_logger.info(f"Message counts: evaluator={evaluator_message_count}, sampler={sampler_message_count}")
 
                     # Scale Evaluators
                     evaluator_scaled = False
@@ -248,10 +271,17 @@ class ResourceManager:
                             self.resource_logger.info(f"Can scale evaluators with messages in queue {evaluator_message_count}")
                             self.start_evaluator_process(evaluator_entry_function, config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, evaluator_processes, "Evaluator", log_filename)
                             evaluator_scaled = True
+                            self._evaluator_idle_checks = 0
                         elif evaluator_message_count == 0 and len(evaluator_processes) > min_evaluators:
-                            self.resource_logger.info(f"Zero messages in the queue and not last Evaluator, terminating ...")
-                            await self.terminate_process(evaluator_processes, "Evaluator")
-                            evaluator_scaled = True
+                            # Require 2 consecutive idle checks before scaling down (avoid killing during in-flight processing)
+                            self._evaluator_idle_checks += 1
+                            if self._evaluator_idle_checks >= 2:
+                                self.resource_logger.info(f"Queue empty for {self._evaluator_idle_checks} checks, terminating evaluator")
+                                await self.terminate_process(evaluator_processes, "Evaluator")
+                                evaluator_scaled = True
+                                self._evaluator_idle_checks = 0
+                        else:
+                            self._evaluator_idle_checks = 0  # Reset on non-empty queue
 
                     # Scale Samplers
                     sampler_scaled = False
@@ -261,16 +291,66 @@ class ResourceManager:
                              assignment = await self.can_scale_evaluator() # if we are in cpu only mode also check cpu load for samplers
                         self.resource_logger.info(f"Assignment is {assignment}")
                         sampler_threshold = self.scaling_config.sampler_scale_up_threshold if self.scaling_config else 50
-                        if sampler_message_count > sampler_threshold and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
-                            self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
-                            started = self.start_sampler_process(sampler_entry_function, config_path, log_dir, sampler_processes, "Sampler", assignment=assignment, log_filename=log_filename)
-                            if not started:
-                                self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
-                            sampler_scaled = True
-                        elif sampler_message_count == 0 and len(sampler_processes) > min_samplers:
-                            self.resource_logger.info(f"Can terminate a sampler with messages in queue {sampler_message_count}")
-                            await self.terminate_process(sampler_processes, "Sampler")
-                            sampler_scaled = True
+                        current_time = time.time()
+
+                        # Track if samplers have ever connected (to distinguish startup from disconnection)
+                        if sampler_consumer_count > 0:
+                            self.samplers_ever_connected = True
+                            self.sampler_zero_consumer_count = 0
+                            self.last_sampler_activity_time = current_time
+
+                        # CRITICAL: Detect disconnected samplers and spawn replacements
+                        # Triggers on EITHER:
+                        # 1. 2+ consecutive checks with 0 consumers, OR
+                        # 2. Messages waiting for >2 minutes with 0 consumers (time-based)
+                        if self.samplers_ever_connected and sampler_consumer_count == 0 and sampler_message_count > 0:
+                            self.sampler_zero_consumer_count += 1
+                            time_since_activity = (current_time - self.last_sampler_activity_time
+                                                   if self.last_sampler_activity_time else float('inf'))
+
+                            should_spawn = (
+                                self.sampler_zero_consumer_count >= 2 or
+                                time_since_activity > 120  # 2 minutes timeout
+                            )
+
+                            if should_spawn:
+                                self.resource_logger.warning(
+                                    f"ALERT: sampler_queue has {sampler_message_count} messages but 0 consumers "
+                                    f"({self.sampler_zero_consumer_count} checks, {time_since_activity:.0f}s since activity). "
+                                    f"Spawning replacement sampler..."
+                                )
+                                if assignment and await self.has_enough_system_memory():
+                                    started = self.start_sampler_process(
+                                        sampler_entry_function, config_path, log_dir, sampler_processes,
+                                        "Sampler", assignment=assignment, log_filename=log_filename
+                                    )
+                                    if started:
+                                        self.resource_logger.info("Successfully spawned replacement sampler.")
+                                        sampler_scaled = True
+                                    else:
+                                        self.resource_logger.warning("Failed to spawn replacement sampler (no GPU available).")
+                                else:
+                                    self.resource_logger.warning("Cannot spawn replacement sampler (resources unavailable).")
+
+                        # Normal scaling logic
+                        if not sampler_scaled:  # Only if we didn't already spawn a replacement
+                            if sampler_message_count > sampler_threshold and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
+                                self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
+                                started = self.start_sampler_process(sampler_entry_function, config_path, log_dir, sampler_processes, "Sampler", assignment=assignment, log_filename=log_filename)
+                                if not started:
+                                    self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
+                                sampler_scaled = True
+                                self._sampler_idle_checks = 0
+                            elif sampler_message_count == 0 and len(sampler_processes) > min_samplers:
+                                # Require 2 consecutive idle checks before scaling down
+                                self._sampler_idle_checks += 1
+                                if self._sampler_idle_checks >= 2:
+                                    self.resource_logger.info(f"Sampler queue empty for {self._sampler_idle_checks} checks, terminating sampler")
+                                    await self.terminate_process(sampler_processes, "Sampler")
+                                    sampler_scaled = True
+                                    self._sampler_idle_checks = 0
+                            else:
+                                self._sampler_idle_checks = 0  # Reset on non-empty queue
 
                     # If nothing was scaled - log that scaling was skipped
                     if not evaluator_scaled and not sampler_scaled:
@@ -534,6 +614,18 @@ class ResourceManager:
         # Fallback: return oldest eligible process
         return eligible[0][0]
 
+    def cleanup(self):
+        """Clean up ResourceManager state (call during shutdown)."""
+        self.resource_logger.info("ResourceManager: Cleaning up state...")
+        self.process_to_device_map.clear()
+        self.process_start_times.clear()
+        if not self.cpu_only:
+            try:
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
+        self.resource_logger.info("ResourceManager: Cleanup complete")
+
     async def terminate_process(self, processes, process_name, timeout=30):
         """Terminates a process and its children (vLLM may spawn subprocesses holding GPU memory)."""
         if not processes:
@@ -584,10 +676,13 @@ class ResourceManager:
 
     async def get_queue_message_count(self, queue):
         """
-        Retrieves the current number of messages in the queue using RabbitMQ HTTP management API.
+        Retrieves the current number of messages and consumers in the queue using RabbitMQ HTTP management API.
+
+        Returns:
+            tuple: (message_count, consumer_count) - both integers
         """
         if queue is None:
-            return 0
+            return 0, 0
 
         try:
             # Get RabbitMQ connection details from config
@@ -607,15 +702,15 @@ class ResourceManager:
                         count = data.get('messages', 0)
                         consumer_count = data.get('consumers', 0)
                         self.resource_logger.info(f"Queue '{queue.name}': messages={count}, consumers={consumer_count}")
-                        return count
+                        return count, consumer_count
                     else:
                         self.resource_logger.error(f"Failed to get queue stats from management API: {response.status}")
-                        return 0
+                        return 0, 0
         except Exception as e:
             self.resource_logger.error(
                 f"Error getting message count for queue '{queue.name}':\n{traceback.format_exc()}"
             )
-            return 0
+            return 0, 0
 
     async def get_rabbitmq_stats(self, config):
         """

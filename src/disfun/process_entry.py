@@ -71,38 +71,43 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
     async def run_sampler():
         nonlocal connection, channel, sampler_task, sampler_instance, cleanup_done
         try:
-            logger.info(f"Sampler {local_id}: Starting connection to RabbitMQ on device {device}...")
-            connection = await process_utils.create_rabbitmq_connection(
-                config, timeout=300
-            )
-            logger.info(f"Sampler {local_id}: Connected to RabbitMQ successfully.")
-            channel = await connection.channel()
-            logger.info(f"Sampler {local_id}: Channel established.")
+            # IMPORTANT: Initialize model BEFORE connecting to RabbitMQ
+            # Model loading can take 10+ minutes and blocks the event loop,
+            # which would cause RabbitMQ heartbeat timeouts if connected first.
+            logger.info(f"Sampler {local_id}: Initializing model {config.sampler.model} on device {device}...")
+            logger.info(f"Sampler {local_id}: (RabbitMQ connection will be established AFTER model loads)")
 
-            sampler_queue = await process_utils.declare_standard_queue(channel, "sampler_queue")
-            logger.info(f"Sampler {local_id}: Declared sampler_queue.")
+            # Calculate unique seed for this sampler
+            sampler_seed = None
+            if config.random_seed is not None:
+                sampler_seed = config.random_seed + sampler_id * 1_000_000
+                logger.info(f"Sampler {local_id}: Using base seed {sampler_seed} (config.random_seed={config.random_seed} + sampler_id={sampler_id} * 1M)")
 
-            evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
-            logger.info(f"Sampler {local_id}: Declared evaluator_queue.")
-
+            # Create sampler with model but without RabbitMQ connection yet
+            # Pass None for connection/channel - they'll be set via _ensure_connection()
             try:
-                logger.info(f"Sampler {local_id}: Initializing sampler with model {config.sampler.model} on device {device}...")
-
-                # Calculate unique seed for this sampler
-                # Each sampler gets a unique seed space: base_seed + sampler_id * 1_000_000
-                # This ensures no collision even with millions of generations per sampler
-                sampler_seed = None
-                if config.random_seed is not None:
-                    sampler_seed = config.random_seed + sampler_id * 1_000_000
-                    logger.info(f"Sampler {local_id}: Using base seed {sampler_seed} (config.random_seed={config.random_seed} + sampler_id={sampler_id} * 1M)")
-
                 sampler_instance = sampler.Sampler(
-                    connection, channel, sampler_queue, evaluator_queue, config.sampler, device=device, log_dir=log_dir, system_message=system_message, random_seed=sampler_seed
+                    None, None, None, None, config.sampler, device=device, log_dir=log_dir,
+                    system_message=system_message, random_seed=sampler_seed, rabbitmq_config=config
                 )
-                logger.info(f"Sampler {local_id}: Sampler instance initialized successfully.")
+                logger.info(f"Sampler {local_id}: Model loaded successfully.")
             except Exception as e:
-                logger.error(f"Sampler {local_id}: Could not start Sampler instance, {e}", exc_info=True)
+                logger.error(f"Sampler {local_id}: Could not initialize model: {e}", exc_info=True)
                 return
+
+            # NOW connect to RabbitMQ (model is loaded, heartbeats will work)
+            logger.info(f"Sampler {local_id}: Connecting to RabbitMQ...")
+            connection = await process_utils.create_rabbitmq_connection(config)
+            channel = await connection.channel()
+            sampler_queue = await process_utils.declare_standard_queue(channel, "sampler_queue")
+            evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
+            logger.info(f"Sampler {local_id}: Connected to RabbitMQ successfully.")
+
+            # Update sampler with connection
+            sampler_instance.connection = connection
+            sampler_instance.channel = channel
+            sampler_instance.sampler_queue = sampler_queue
+            sampler_instance.evaluator_queue = evaluator_queue
 
             logger.info(f"Sampler {local_id}: Starting consume_and_process task...")
             sampler_task = asyncio.create_task(sampler_instance.consume_and_process())
@@ -118,11 +123,22 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
             if not cleanup_done['done']:
                 cleanup_done['done'] = True
                 if sampler_instance:
+                    # Use sampler's async_cleanup to close its current connections
+                    # (which may have been reconnected and differ from our initial refs)
+                    await sampler_instance.async_cleanup()
                     sampler_instance.cleanup()
-                if channel:
-                    await channel.close()
-                if connection:
-                    await connection.close()
+                else:
+                    # Fallback: close our original references if sampler never initialized
+                    if channel:
+                        try:
+                            await channel.close()
+                        except Exception:
+                            pass
+                    if connection:
+                        try:
+                            await connection.close()
+                        except Exception:
+                            pass
 
     process_utils.setup_signal_handlers(
         loop, "Sampler", local_id, logger,
@@ -183,7 +199,8 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
                 max_workers=config.evaluator.max_workers,
                 graph_dir=config.evaluator.graph_dir,
                 cache_graphs=config.evaluator.cache_graphs,
-                cache_size_limit_gb=config.evaluator.cache_size_limit_gb
+                cache_size_limit_gb=config.evaluator.cache_size_limit_gb,
+                rabbitmq_config=config  # Pass config for reconnection
             )
 
             evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
