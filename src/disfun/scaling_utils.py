@@ -61,6 +61,12 @@ class ResourceManager:
         """Initialize NVML for GPU monitoring."""
         pynvml.nvmlInit()
 
+    def _free_device(self, pid):
+        """Free device associated with a process (called when process dies)."""
+        self.process_start_times.pop(pid, None)
+        if pid in self.process_to_device_map:
+            device = self.process_to_device_map.pop(pid)
+            self.resource_logger.info(f"Freed device {device} from dead process (PID: {pid})")
 
     async def has_enough_system_memory(self, min_free_gib=None):
         """Check if system has enough free memory.
