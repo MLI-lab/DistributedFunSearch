@@ -701,7 +701,8 @@ class ResourceManager:
 
             url = f"http://{rabbitmq_host}:{rabbitmq_port}/api/queues/{rabbitmq_vhost}/{queue.name}"
 
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=10)  # 10 second timeout for cluster networks
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, auth=aiohttp.BasicAuth(rabbitmq_user, rabbitmq_pass)) as response:
                     if response.status == 200:
                         data = await response.json()
