@@ -108,7 +108,7 @@ class ResourceManager:
         while True:
             try:
                 num_samples = max(1, sample_duration // sample_interval)
-                
+
                 # Collect samples
                 cpu_samples = []
                 io_wait_samples = []
@@ -415,7 +415,7 @@ class ResourceManager:
         min_memory = self.scaling_config.min_gpu_memory_gib if self.scaling_config else 20
         max_util = self.scaling_config.max_gpu_utilization if self.scaling_config else 50
         assignment = self.assign_gpu_device(min_free_memory_gib=min_memory, max_utilization=max_util)
-        return assignment  
+        return assignment
 
     async def can_scale_evaluator(self, cpu_usage_threshold=None, normalized_load_threshold=None, duration=10, interval=1):
         """
@@ -469,7 +469,7 @@ class ResourceManager:
         if self.database is not None:
             self.database.next_sampler_id = self.next_sampler_id
 
-        if assignment == True:  # CPU-only mode - no GPU assignment
+        if assignment is True:  # CPU-only mode - no GPU assignment
             proc = ctx.Process(
                 target=entry_function,
                 args=(config_path, None, log_dir, log_filename, sampler_id, True),  # use_parent_log=True
@@ -518,7 +518,7 @@ class ResourceManager:
                     return None
             else:
                 visible_devices = list(range(pynvml.nvmlDeviceGetCount()))
-            
+
 
             # Map host GPU index to container-visible index
             #id_to_container_index = {host_id: container_id for container_id, host_id in enumerate(visible_devices)}
@@ -533,7 +533,7 @@ class ResourceManager:
 
             for host_gpu in visible_devices:
                 container_device = f"cuda:{id_to_container_index[host_gpu]}"
-            
+
                 if container_device in assigned_gpus:
                     continue  # Skip GPUs that are already assigned in this loop
 
@@ -713,7 +713,7 @@ class ResourceManager:
                     else:
                         self.resource_logger.error(f"Failed to get queue stats from management API: {response.status}")
                         return 0, 0
-        except Exception as e:
+        except Exception:
             self.resource_logger.error(
                 f"Error getting message count for queue '{queue.name}':\n{traceback.format_exc()}"
             )
@@ -791,7 +791,7 @@ class ResourceManager:
 
         except aiohttp.ClientConnectorError:
             stats['error'] = "Cannot connect to RabbitMQ management API (is it enabled?)"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             stats['error'] = "Timeout connecting to RabbitMQ management API"
         except Exception as e:
             stats['error'] = f"Error fetching RabbitMQ stats: {e}"

@@ -1,118 +1,167 @@
-"""Helper module for loading modular specification files."""
+"""Helper module for loading template-based specification files."""
 
 from pathlib import Path
+import ast
 import logging
-import os
+import re
 
 logger = logging.getLogger('main_logger')
 
 
-def load_specification_files(problem_description_path: str, prompt_style_path: str | None, system_message_path: str | None = None, imports_path: str | None = None) -> tuple[str, str, str, str]:
-    """Load problem description - prompt style - system message - and imports files using absolute paths.
+def load_template(template_path: str) -> str:
+    """Load template file content."""
+    return Path(template_path).read_text()
+
+
+def load_placeholder_contents(placeholders: dict[str, str]) -> dict[str, tuple[str | None, dict | None]]:
+    """Load content for each placeholder (once at init).
 
     Args:
-        problem_description_path: Absolute path to problem description file
-        prompt_style_path: Absolute path to prompt style file - or None for code completion mode (no instructions)
-        system_message_path: Absolute path to system message file for API models - or None to disable
-        imports_path: Absolute path to imports file - or None to skip imports injection
+        placeholders: Dict mapping placeholder names to file/directory paths.
 
     Returns:
-        tuple: (problem_desc_content, prompt_style_content, system_message_content, imports_content)
+        Dict: {name: (content_if_file, dict_if_directory)}
+            - If file: (content_string, None)
+            - If directory: (None, {filename: (content, fewshot_override)})
     """
-    # Load problem description
-    problem_file = Path(problem_description_path)
-    if not problem_file.exists():
-        logger.warning(f"Problem description not found at {problem_file}")
-        problem_desc_content = ""
-    else:
-        problem_desc_content = problem_file.read_text()
-        logger.debug(f"Loaded problem description from {problem_file}")
+    result = {}
+    fs_pattern = re.compile(r'^fs(\d+)_')
 
-    # Load prompt style (if specified)
-    if prompt_style_path is None:
-        logger.debug("No prompt style specified, using code completion mode (no instructions)")
-        prompt_style_content = ""
-    else:
-        prompt_style_file = Path(prompt_style_path)
-        if not prompt_style_file.exists():
-            logger.warning(f"Prompt style not found at {prompt_style_file}, using empty style (code completion mode)")
-            prompt_style_content = ""
+    for name, path in placeholders.items():
+        if path is None:
+            result[name] = ("", None)
+        elif Path(path).is_dir():
+            # Load all .txt files from directory
+            styles = {}
+            for txt_file in Path(path).glob("*.txt"):
+                filename = txt_file.stem
+                content = txt_file.read_text().strip()
+                match = fs_pattern.match(filename)
+                fewshot_override = int(match.group(1)) if match else None
+                styles[filename] = (content, fewshot_override)
+            result[name] = (None, styles) if styles else ("", None)
+        elif Path(path).exists():
+            # Don't strip imports so trailing newline creates blank line before functions
+            content = Path(path).read_text()
+            if name != "imports":
+                content = content.strip()
+            result[name] = (content, None)
         else:
-            prompt_style_content = prompt_style_file.read_text().strip()
-            logger.debug(f"Loaded prompt style from {prompt_style_file}")
+            logger.warning(f"Placeholder path not found: {path}")
+            result[name] = ("", None)
 
-    # Load system message (if specified)
-    if system_message_path is None:
-        logger.debug("No system message specified, API models will not use a system message")
-        system_message_content = ""
-    else:
-        system_message_file = Path(system_message_path)
-        if not system_message_file.exists():
-            logger.warning(f"System message not found at {system_message_file}, API models will not use a system message")
-            system_message_content = ""
-        else:
-            system_message_content = system_message_file.read_text().strip()
-            logger.debug(f"Loaded system message from {system_message_file}")
-
-    # Load imports (if specified)
-    if imports_path is None:
-        logger.debug("No imports path specified, using template-based imports (if any)")
-        imports_content = ""
-    else:
-        imports_file = Path(imports_path)
-        if not imports_file.exists():
-            logger.warning(f"Imports file not found at {imports_file}, no imports will be injected")
-            imports_content = ""
-        else:
-            imports_content = imports_file.read_text().strip()
-            logger.debug(f"Loaded imports from {imports_file}")
-
-    return problem_desc_content, prompt_style_content, system_message_content, imports_content
+    return result
 
 
-def build_fewshot_examples(sampled_programs: list, prompt_config) -> str:
-    """Build few-shot examples based on prompt configuration.
+def extract_function_signature(initial_function_path: str) -> tuple[str, str]:
+    """Extract argument list and return type from initial function file using AST.
 
-    Args:
-        sampled_programs: List of (program - scores) tuples
-        prompt_config: PromptConfig object with fewshot settings
+    Handles files with <code>...</code> tags by extracting the code block first.
 
     Returns:
-        str: Formatted few-shot examples (complete functions without labels or tags)
+        tuple: (args_string, return_type_string)
+    """
+    content = Path(initial_function_path).read_text()
+
+    # Extract code from <code> tags if present
+    code_match = re.search(r'<code>(.*?)</code>', content, re.DOTALL)
+    if code_match:
+        content = code_match.group(1).strip()
+
+    tree = ast.parse(content)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            args = ", ".join(arg.arg for arg in node.args.args)
+            ret_type = ast.unparse(node.returns) if node.returns else "float"
+            return args, ret_type
+    raise ValueError(f"No function found in {initial_function_path}")
+
+
+def strip_function_from_code(code: str, function_name: str) -> str:
+    """Remove a function definition from code using AST.
+
+    Args:
+        code: Python source code as string.
+        function_name: Name of function to remove.
+
+    Returns:
+        Code with the function removed.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+
+    # Find the function to remove
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function_name:
+            start_line = node.lineno
+            end_line = node.end_lineno
+            lines = code.splitlines()
+            # Remove lines (1-indexed to 0-indexed)
+            new_lines = lines[:start_line - 1] + lines[end_line:]
+            # Clean up extra blank lines
+            result = "\n".join(new_lines)
+            # Remove multiple consecutive blank lines
+            while "\n\n\n" in result:
+                result = result.replace("\n\n\n", "\n\n")
+            return result.strip()
+
+    return code
+
+
+def build_fewshot_examples(sampled_programs: list, prompt_config, format_scores_fn=None) -> str:
+    """Build few-shot examples with optional score display.
+
+    Args:
+        sampled_programs: List of (program, scores) tuples
+        prompt_config: PromptConfig with fewshot and score display settings
+        format_scores_fn: Optional function to format scores for docstrings
+
+    Returns:
+        str: Formatted few-shot examples
     """
     if not sampled_programs:
         return ""
 
     examples = []
-    for i, (program, scores) in enumerate(sampled_programs, 1):
-        example_parts = []
+    for program, scores in sampled_programs:
+        parts = []
 
-        # Add thinking (if enabled and present)
-        if prompt_config.fewshot_show_thinking and hasattr(program, 'thinking') and program.thinking:
-            example_parts.append(f"<thinking>\n{program.thinking}\n</thinking>")
+        # Add thinking/thought if enabled
+        if prompt_config.fewshot_show_thinking and getattr(program, 'thinking', None):
+            parts.append(f"<thinking>\n{program.thinking}\n</thinking>")
+        if prompt_config.fewshot_show_thought and getattr(program, 'thought', None):
+            parts.append(f"<thought>\n{program.thought}\n</thought>")
 
-        # Add thought (if enabled and present)
-        if prompt_config.fewshot_show_thought and hasattr(program, 'thought') and program.thought:
-            example_parts.append(f"<thought>\n{program.thought}\n</thought>")
-
-        # Add code (if enabled) - show full function with signature
+        # Add code if enabled
         if prompt_config.fewshot_show_code:
-            # Construct complete function (program.args is already a string - not a list)
-            function_str = f"def {program.name}({program.args}):"
-            if program.docstring:
-                # Wrap docstring in triple quotes if not already present
-                if not program.docstring.strip().startswith('"""'):
-                    function_str += f'\n    """{program.docstring}"""'
+            func_str = f"def {program.name}({program.args}):"
+
+            # Build docstring with optional scores
+            docstring = program.docstring or ""
+            if prompt_config.show_eval_scores and scores and format_scores_fn:
+                score_text = format_scores_fn(scores)
+                docstring = docstring.replace("{score}", score_text).strip()
+            else:
+                # Remove {score} placeholder when not showing scores
+                docstring = docstring.replace("{score}", "")
+                # Remove lines that are empty or whitespace-only, then strip
+                lines = [line.rstrip() for line in docstring.split('\n') if line.strip()]
+                docstring = '\n'.join(lines)
+
+            if docstring:
+                if not docstring.startswith('"""'):
+                    func_str += f'\n    """{docstring}"""'
                 else:
-                    function_str += f"\n{program.docstring}"
+                    func_str += f"\n{docstring}"
+
             if program.body:
-                function_str += f"\n{program.body}"
+                func_str += f"\n{program.body}"
 
-            # Don't wrap in <code> tags - let the prompt style instruction guide the LLM
-            # The evaluator handles responses with or without <code> tags
-            example_parts.append(function_str)
+            parts.append(func_str)
 
-        if example_parts:
-            examples.append("\n\n".join(example_parts))
+        if parts:
+            examples.append("\n\n".join(parts))
 
     return "\n\n".join(examples)

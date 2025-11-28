@@ -4,17 +4,19 @@ This variant computes neighbors on-the-fly without loading pre-computed graphs f
 Useful when graph loading is slow or graph files are not available.
 """
 
-import os
 import sys
 import itertools
 import hashlib
-import numpy as np
 import Levenshtein
 
 
 def are_neighbors(node1, node2, s):
-    """Check if two nodes are neighbors (edit distance < 2s + 1, for ids code d_min  \geq 2s+1)."""
+    r"""Check if two nodes are neighbors (edit distance < 2s + 1, for ids code d_min  \geq 2s+1)."""
     return Levenshtein.distance(node1, node2) < 2 * s + 1
+
+
+def priority(node, n, s) -> float:
+    pass
 
 
 def hash_priority_mapping(priorities, sequences):
@@ -71,10 +73,3 @@ def solve(n, s, q, graph_dir):
         hash_value = hash_priority_mapping(priorities, nodes)
 
     return independent_set, hash_value
-
-
-def priority(node, n, s):
-    """
-    This is the placeholder, LLM will generate the actual implementation.
-    """
-    pass

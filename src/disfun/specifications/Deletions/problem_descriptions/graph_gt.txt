@@ -4,7 +4,5 @@ Nodes are binary strings of length n. Two nodes are neighbors if they share a su
 
 node_to_vertex: Dict mapping string to int vertex index. Example: node_to_vertex["01101"] -> 5
 vertex_to_node: Dict mapping int to string. Example: vertex_to_node[5] -> "01101"
-
-Improve the `priority_v{version}` function over its previous versions below.
 {prompt_style}
 """

@@ -23,8 +23,8 @@ It implements 2 classes representing unities of code:
 """
 
 import ast # to parse Python code into its Abstract Syntax Tree
-from collections.abc import Iterator, MutableSet, Sequence # to define types 
-import dataclasses # Provides decorators to simplify class structure 
+from collections.abc import Iterator, MutableSet, Sequence # to define types
+import dataclasses # Provides decorators to simplify class structure
 import io #  Handling input/output streams.
 import tokenize # Breaks python code into tokens
 import json
@@ -168,7 +168,7 @@ class Program:
 class ProgramVisitor(ast.NodeVisitor):
     def __init__(self, sourcecode: str, remove_classes: bool = False):
         self._remove_classes = remove_classes  # Flag for removing classes
-        self._class_lines: set[int] = set() 
+        self._class_lines: set[int] = set()
         self._codelines: list[str] = sourcecode.splitlines() # split the full source code into lines
         self._preface: str = ''
         self._functions: list[Function] = []
@@ -185,7 +185,7 @@ class ProgramVisitor(ast.NodeVisitor):
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Collects function definitions and captures the preface."""
         if node.col_offset == 0:  # Only consider top-level functions.
-            self._current_function = node.name 
+            self._current_function = node.name
             if not self._functions:
                 # Capture preface as all lines before the first function.
                 raw_preface = self._codelines[:node.lineno - 1]
@@ -251,8 +251,8 @@ def text_to_program(text: str, remove_classes: bool = False) -> Program:
     """
     Parse text into a class:`Program`.
 
-    - Builds a preface (everything before the first top-level function).  
-    - Collects every top-level function into class:`Function` objects.  
+    - Builds a preface (everything before the first top-level function).
+    - Collects every top-level function into class:`Function` objects.
     - When remove_classes is True - any code lines belonging to
       top-level class definitions are discarded before the preface and
       functions are assembled for the prompt to the LLM.
@@ -335,7 +335,7 @@ def rename_function_calls(code: str, source_name: str, target_name: str) -> str:
   if source_name not in code:
     return code
   modified_tokens = []
-  for token, is_call in _yield_token_and_is_call(code): 
+  for token, is_call in _yield_token_and_is_call(code):
     if is_call and token.string == source_name:
       # Replace the function name token
       modified_token = tokenize.TokenInfo(
@@ -346,7 +346,7 @@ def rename_function_calls(code: str, source_name: str, target_name: str) -> str:
           line=token.line,
       )
       modified_tokens.append(modified_token)
-     # if token doesnt meet criteria for renaming its added to #modified_tokens' unchanged  
+     # if token doesnt meet criteria for renaming its added to #modified_tokens' unchanged
     else:
       modified_tokens.append(token)
   # The sequence of original and modified tokens is then untokenized back into a coherent piece of code
@@ -363,7 +363,7 @@ def yield_decorated(code: str, name: str) -> Iterator[str]:
     """Yields names of functions decorated with `@name` in `code`."""
     tree = ast.parse(code)
     for node in ast.walk(tree):
-      #checks whether the current node is an instance of ast.FunctionDef - which is the node type representing a function definition. 
+      #checks whether the current node is an instance of ast.FunctionDef - which is the node type representing a function definition.
       #If the node is indeed a function definition - then it can potentially have decorators
         if isinstance(node, ast.FunctionDef):
             #For every FunctionDef node - there is a decorator_list attribute. This attribute contains a list of all the decorator nodes that are applied to the function.

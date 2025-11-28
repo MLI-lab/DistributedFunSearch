@@ -27,12 +27,10 @@ Key features:
 * vLLM backend support for 10-20x faster local inference vs HuggingFace transformers
 """
 
-import random
 import os
 import json
 import logging
 import asyncio
-from typing import List, Dict, Any, Optional
 import time
 
 import litellm
@@ -40,7 +38,6 @@ import aio_pika
 from dotenv import load_dotenv
 
 from disfun import programs_database
-from disfun.profiling import async_time_execution
 
 logger = logging.getLogger('main_logger')
 
@@ -63,6 +60,24 @@ try:
 except ImportError:
     VLLM_AVAILABLE = False
     logger.warning("vLLM not available. Only API-based models will work.")
+
+
+class VLLMTimeoutError(Exception):
+    """Raised when vLLM inference times out.
+
+    This exception signals that the sampler process should exit
+    so ResourceManager can respawn it with a fresh vLLM instance.
+    """
+    pass
+
+
+class VLLMRepeatedFailureError(Exception):
+    """Raised when vLLM fails repeatedly.
+
+    This exception signals that vLLM is in a bad state and the sampler
+    process should exit so ResourceManager can respawn it.
+    """
+    pass
 
 
 def is_local_model(model: str) -> bool:
@@ -91,13 +106,14 @@ class LLM_model:
             repetition_penalty: float,
             max_new_tokens: int,
             model: str,
-            api_base: Optional[str] = None,
-            api_key: Optional[str] = None,
-            device: Optional[int] = None,  # GPU device for local models
-            reasoning_effort: Optional[str] = None,  # For GPT-5/o3 models
-            system_message: Optional[str] = None,  # System message for API models
+            api_base: str | None = None,
+            api_key: str | None = None,
+            device: int | None = None,  # GPU device for local models
+            reasoning_effort: str | None = None,  # For GPT-5/o3 models
+            system_message: str | None = None,  # System message for API models
             max_retries: int = 3,  # Maximum retry attempts for API calls
-            random_seed: Optional[int] = None  # Random seed for reproducible generation
+            random_seed: int | None = None,  # Random seed for reproducible generation
+            inference_timeout: int = 300  # Timeout in seconds for vLLM inference
     ) -> None:
         self.inference_time = 0.0
         self._samples_per_prompt = samples_per_prompt
@@ -113,6 +129,7 @@ class LLM_model:
         self.system_message = system_message
         self.max_retries = max_retries
         self.random_seed = random_seed
+        self.inference_timeout = inference_timeout
         self.generation_counter = 0  # Counter to increment seed for each generation call
         self.previous_total_registered_programs = 0
 
@@ -121,6 +138,10 @@ class LLM_model:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.request_count = 0
+
+        # Consecutive failure tracking for vLLM health monitoring
+        self.consecutive_failures = 0
+        self.max_consecutive_failures = 5  # Exit process after this many consecutive failures
 
         # Logging flag for first prompt/output
         self._logged_first_prompt = False
@@ -244,10 +265,10 @@ class LLM_model:
 
     async def draw_batch_samples(
             self,
-            prompts: List[str],
+            prompts: list[str],
             total_registered_programs: int = 0,
             temperature_period: int = 10000
-    ) -> tuple[List[List[str]], List[int], List[List[int]]]:
+    ) -> tuple[list[list[str]], list[int], list[list[int]]]:
         """Generate samples for a batch of prompts.
 
         For API models - all prompts in the batch are processed in parallel using
@@ -272,7 +293,7 @@ class LLM_model:
         else:
             return await self._draw_batch_api(prompts)
 
-    async def _draw_batch_vllm(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
+    async def _draw_batch_vllm(self, prompts: list[str]) -> tuple[list[list[str]], list[int], list[list[int]]]:
         """Generate samples using local vLLM engine.
 
         The vLLM generate() call is run in a thread pool to avoid blocking
@@ -301,9 +322,20 @@ class LLM_model:
 
             # vLLM batch generation - run in thread pool to avoid blocking event loop
             # This allows RabbitMQ heartbeats to be processed during long inference
-            outputs = await asyncio.to_thread(
-                self.vllm_engine.generate, prompts, self.sampling_params
-            )
+            # Wrap with timeout to detect hung vLLM instances
+            try:
+                outputs = await asyncio.wait_for(
+                    asyncio.to_thread(self.vllm_engine.generate, prompts, self.sampling_params),
+                    timeout=self.inference_timeout
+                )
+            except TimeoutError as e:
+                logger.error(
+                    f"vLLM inference timed out after {self.inference_timeout}s for {len(prompts)} prompts. "
+                    f"Sampler will exit for restart by ResourceManager."
+                )
+                raise VLLMTimeoutError(
+                    f"vLLM inference exceeded {self.inference_timeout}s timeout"
+                ) from e
 
             all_samples = []
             input_token_counts = []
@@ -333,13 +365,37 @@ class LLM_model:
             self.inference_time = end_time - start_time
             logger.debug(f"vLLM inference time: {self.inference_time:.2f} sec")
 
+            # Reset consecutive failure counter on success
+            self.consecutive_failures = 0
+
             return all_samples, input_token_counts, all_output_token_counts
 
+        except VLLMTimeoutError:
+            # Re-raise timeout errors to be handled by consume_and_process
+            raise
+
         except Exception as e:
-            logger.error(f"Error during vLLM batch generation: {e}")
+            # Log full traceback to understand what's actually failing
+            logger.error(
+                f"Error during vLLM batch generation (failure {self.consecutive_failures + 1}/"
+                f"{self.max_consecutive_failures}): {type(e).__name__}: {e}",
+                exc_info=True
+            )
+
+            self.consecutive_failures += 1
+
+            if self.consecutive_failures >= self.max_consecutive_failures:
+                logger.error(
+                    f"vLLM has failed {self.consecutive_failures} times consecutively. "
+                    f"Sampler will exit for restart by ResourceManager."
+                )
+                raise VLLMRepeatedFailureError(
+                    f"vLLM failed {self.consecutive_failures} times consecutively"
+                ) from e
+
             return [], [], []
 
-    async def _draw_batch_api(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
+    async def _draw_batch_api(self, prompts: list[str]) -> tuple[list[list[str]], list[int], list[list[int]]]:
         """Generate samples using LiteLLM API client with parallel async calls."""
         try:
             start_time = time.time()
@@ -505,16 +561,28 @@ class Sampler:
     """Node that samples program continuations and sends them for evaluation."""
 
     def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, device=None, log_dir=None, system_message=None, random_seed=None, rabbitmq_config=None):
-        self.connection = connection
-        self.channel = channel
-        self.sampler_queue = sampler_queue
-        self.evaluator_queue = evaluator_queue
         self._config = config
-        self._rabbitmq_config = rabbitmq_config  # Store for reconnection
         self._shutdown_requested = False
         self._reconnect_delay = 5.0  # Initial reconnect delay in seconds
         self._max_reconnect_delay = 60.0  # Maximum reconnect delay
         self.device = device
+
+        # Use shared connection manager for RabbitMQ
+        from disfun import process_utils
+        self._conn_manager = process_utils.RabbitMQConnectionManager(
+            config=rabbitmq_config,
+            component_name=f"Sampler ({config.model})",
+            queue_names=["sampler_queue", "evaluator_queue"],
+            logger=logger,
+            timeout=300
+        )
+        # Initialize with passed-in connection (may be None for deferred connection)
+        self._conn_manager.connection = connection
+        self._conn_manager.channel = channel
+        if sampler_queue:
+            self._conn_manager.queues["sampler_queue"] = sampler_queue
+        if evaluator_queue:
+            self._conn_manager.queues["evaluator_queue"] = evaluator_queue
         self.temperature_period = self._config.temperature_period
         self.samples_per_prompt = self._config.samples_per_prompt
         self.samples_per_batch = self._config.prompts_per_batch
@@ -537,6 +605,7 @@ class Sampler:
                 system_message=self.system_message,
                 max_retries=self._config.max_retries,
                 random_seed=random_seed,
+                inference_timeout=getattr(self._config, 'inference_timeout', 300),
             )
             mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")
@@ -544,70 +613,46 @@ class Sampler:
             logger.error(f"Error initializing model: {e}")
             raise
 
+    # Properties for backward compatibility - delegate to connection manager
+    @property
+    def connection(self):
+        return self._conn_manager.connection
+
+    @connection.setter
+    def connection(self, value):
+        self._conn_manager.connection = value
+
+    @property
+    def channel(self):
+        return self._conn_manager.channel
+
+    @channel.setter
+    def channel(self, value):
+        self._conn_manager.channel = value
+
+    @property
+    def sampler_queue(self):
+        return self._conn_manager.get_queue("sampler_queue")
+
+    @sampler_queue.setter
+    def sampler_queue(self, value):
+        self._conn_manager.queues["sampler_queue"] = value
+
+    @property
+    def evaluator_queue(self):
+        return self._conn_manager.get_queue("evaluator_queue")
+
+    @evaluator_queue.setter
+    def evaluator_queue(self, value):
+        self._conn_manager.queues["evaluator_queue"] = value
+
     async def _ensure_connection(self):
-        """Create or verify RabbitMQ connection is alive.
-
-        If the connection is closed or None, creates a fresh connection,
-        channel, and queue objects. This enables automatic recovery from
-        network interruptions.
-        """
-        from disfun import process_utils
-
-        if self._rabbitmq_config is None:
-            logger.warning("Sampler: No RabbitMQ config stored, cannot reconnect")
-            return False
-
-        # Check if connection needs to be recreated
-        needs_reconnect = (
-            self.connection is None or
-            self.connection.is_closed or
-            self.channel is None or
-            self.channel.is_closed
-        )
-
-        if needs_reconnect:
-            logger.info(f"Sampler ({self._config.model}): Establishing new RabbitMQ connection...")
-            try:
-                # Close any stale connections first
-                await self._close_connection()
-
-                # Create fresh connection
-                self.connection = await process_utils.create_rabbitmq_connection(
-                    self._rabbitmq_config, timeout=300
-                )
-                self.channel = await self.connection.channel()
-                self.sampler_queue = await process_utils.declare_standard_queue(
-                    self.channel, "sampler_queue"
-                )
-                # Also declare evaluator queue for publishing
-                await process_utils.declare_standard_queue(self.channel, "evaluator_queue")
-
-                logger.info(f"Sampler ({self._config.model}): RabbitMQ connection re-established successfully")
-                return True
-            except Exception as e:
-                logger.error(f"Sampler ({self._config.model}): Failed to reconnect: {e}")
-                return False
-        return True
+        """Delegate to shared connection manager."""
+        return await self._conn_manager.ensure_connection()
 
     async def _close_connection(self):
-        """Safely close existing RabbitMQ connection and channel."""
-        try:
-            if self.channel is not None:
-                try:
-                    if not self.channel.is_closed:
-                        await self.channel.close()
-                except Exception as e:
-                    logger.debug(f"Sampler: Error closing channel: {e}")
-            if self.connection is not None:
-                try:
-                    if not self.connection.is_closed:
-                        await self.connection.close()
-                except Exception as e:
-                    logger.debug(f"Sampler: Error closing connection: {e}")
-        finally:
-            self.connection = None
-            self.channel = None
-            self.sampler_queue = None
+        """Delegate to shared connection manager."""
+        await self._conn_manager.close()
 
     async def consume_and_process(self) -> None:
         """Main consume loop with automatic connection recovery.
@@ -641,7 +686,7 @@ class Sampler:
                         batch.clear()
                         logger.debug(f"Sampler: Timeout task processing {len(batch_to_process)} messages")
                         await self.process_batch_s(batch_to_process)
-                        logger.debug(f"Sampler: Timeout task finished processing")
+                        logger.debug("Sampler: Timeout task finished processing")
 
                     # Clear timeout_task reference
                     timeout_task = None
@@ -651,7 +696,7 @@ class Sampler:
                         logger.debug(f"Sampler: Messages arrived during processing ({len(batch)}), creating new timeout task")
                         timeout_task = asyncio.create_task(process_batch_with_timeout())
                     else:
-                        logger.debug(f"Sampler: Timeout task completed, no pending messages")
+                        logger.debug("Sampler: Timeout task completed, no pending messages")
 
                 logger.info(f"Sampler ({self._config.model}): Consumer registered, now listening for messages...")
                 async for message in stream:
@@ -676,7 +721,7 @@ class Sampler:
                         batch_to_process = batch.copy()
                         batch.clear()
                         await self.process_batch_s(batch_to_process)
-                        logger.debug(f"Sampler: Batch processing completed")
+                        logger.debug("Sampler: Batch processing completed")
 
         # Main reconnection loop
         reconnect_delay = self._reconnect_delay
@@ -689,7 +734,7 @@ class Sampler:
 
             try:
                 # Ensure connection is alive (reconnect if needed)
-                if self._rabbitmq_config is not None:
+                if self._conn_manager.config is not None:
                     connected = await self._ensure_connection()
                     if not connected:
                         if self._shutdown_requested:
@@ -712,6 +757,26 @@ class Sampler:
                 # Shutdown requested - exit cleanly without reconnection
                 logger.info(f"Sampler ({self._config.model}): Cancelled, exiting...")
                 break
+
+            except VLLMTimeoutError as e:
+                # vLLM is hung - exit process so ResourceManager can respawn
+                logger.error(
+                    f"Sampler ({self._config.model}): {e}. "
+                    f"Exiting process for restart..."
+                )
+                await self._close_connection()
+                import sys
+                sys.exit(1)
+
+            except VLLMRepeatedFailureError as e:
+                # vLLM is in a bad state - exit process so ResourceManager can respawn
+                logger.error(
+                    f"Sampler ({self._config.model}): {e}. "
+                    f"Exiting process for restart..."
+                )
+                await self._close_connection()
+                import sys
+                sys.exit(1)
 
             except (aio_pika.exceptions.AMQPConnectionError,
                     aio_pika.exceptions.ChannelClosed,
@@ -750,7 +815,7 @@ class Sampler:
                 reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
                 continue
 
-    async def process_batch_s(self, batch: List[aio_pika.IncomingMessage]):
+    async def process_batch_s(self, batch: list[aio_pika.IncomingMessage]):
         prompts = []
         metadata = []
         flags = []
@@ -801,7 +866,7 @@ class Sampler:
         logger.debug(f"Batch inference time: {inference_time:.2f}s for {total_samples} samples = {time_per_sample:.4f}s per sample")
 
         # Publish results to the evaluator queue
-        for prompt_idx, (samples, meta, flag) in enumerate(zip(samples_list, metadata, flags)):
+        for prompt_idx, (samples, meta, flag) in enumerate(zip(samples_list, metadata, flags, strict=True)):
             # Log duplicated-prompt runs for manual inspection
             if flag:
                 try:

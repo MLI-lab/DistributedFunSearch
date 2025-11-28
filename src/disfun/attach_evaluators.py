@@ -3,11 +3,12 @@ import argparse
 import torch.multiprocessing as mp
 import os
 import sys
-from typing import Sequence, Any
+from typing import Any
+from collections.abc import Sequence
 from disfun.scaling_utils import ResourceManager
 from disfun import process_utils, code_manipulation
 from disfun.process_entry import evaluator_process_entry
-import json 
+import json
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -185,9 +186,9 @@ if __name__ == "__main__":
             target_signatures = {eval(k): v for k, v in target_signatures.items()}  # Convert string keys to tuples
         else:
             target_signatures=args.target_solutions
-            
-    except json.JSONDecodeError:
-        raise ValueError("Invalid JSON format for --target_solutions. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'.")
+
+    except json.JSONDecodeError as e:
+        raise ValueError("Invalid JSON format for --target_solutions. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'.") from e
 
     # Dynamic scaling is enabled unless --no-dynamic-scaling is passed.
     enable_dynamic_scaling = not args.no_dynamic_scaling
@@ -201,7 +202,7 @@ if __name__ == "__main__":
         eval_script_path = Path(config.evaluator.evaluation_script_path)
 
         try:
-            with open(eval_script_path, 'r') as file:
+            with open(eval_script_path) as file:
                 specification = file.read()
             if not isinstance(specification, str) or not specification.strip():
                 raise ValueError("Specification must be a non-empty string.")
@@ -221,7 +222,7 @@ if __name__ == "__main__":
         if not (len(config.evaluator.s_values) == len(config.evaluator.start_n) == len(config.evaluator.end_n)):
             raise ValueError("The number of elements in --s-values, --start-n, and --end-n must match.")
 
-        inputs = [(n, s, config.evaluator.q) for s, start_n, end_n in zip(config.evaluator.s_values, config.evaluator.start_n, config.evaluator.end_n) for n in range(start_n, end_n + 1)]
+        inputs = [(n, s, config.evaluator.q) for s, start_n, end_n in zip(config.evaluator.s_values, config.evaluator.start_n, config.evaluator.end_n, strict=True) for n in range(start_n, end_n + 1)]
 
         task_manager = TaskManager(
             specification=specification,

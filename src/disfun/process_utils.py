@@ -10,12 +10,10 @@ import asyncio
 import signal
 import logging
 import importlib.util
-import torch.multiprocessing as mp
-from logging import FileHandler
 from logging.handlers import RotatingFileHandler
 from yarl import URL
 import aio_pika
-from typing import Optional, Callable
+from collections.abc import Callable
 
 
 def load_config(config_path):
@@ -117,16 +115,16 @@ def initialize_logger(log_dir, log_filename, process_type=None, use_custom_log_f
     return logger
 
 
-async def create_rabbitmq_connection(config, timeout=60, heartbeat=60):
+async def create_rabbitmq_connection(config, timeout=60, heartbeat=0):
     """
     Create a robust RabbitMQ connection with standard configuration.
 
     Args:
         config: Configuration object with rabbitmq settings
         timeout: Connection timeout in seconds (default 60)
-        heartbeat: Heartbeat interval in seconds (default 60)
-                   RabbitMQ detects dead connections within 2*heartbeat (~2 min).
-                   This enables faster failure detection in cluster scenarios.
+        heartbeat: Heartbeat interval in seconds (default 0 = disabled)
+                   Disabled by default to prevent false disconnects when
+                   RabbitMQ Erlang VM is CPU-starved under heavy load.
 
     Returns:
         aio_pika.Connection: Robust connection to RabbitMQ
@@ -231,7 +229,7 @@ async def graceful_shutdown(component_type: str, local_id: int, logger: logging.
         task.cancel()
         try:
             await asyncio.wait_for(task, timeout=5)
-        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+        except (TimeoutError, asyncio.CancelledError, Exception):
             pass
 
     # Cleanup instance - prefer async_cleanup for Samplers (handles reconnected connections)
@@ -267,27 +265,115 @@ async def graceful_shutdown(component_type: str, local_id: int, logger: logging.
     loop.stop()
 
 
-async def with_reconnection(consume_func: Callable, logger: logging.Logger,
-                           component_name: str = "Component",
-                           initial_delay: float = 5.0,
-                           max_delay: float = 60.0):
+class RabbitMQConnectionManager:
     """
-    Wrapper that adds automatic reconnection logic to consume functions.
+    Shared RabbitMQ connection management for all components.
 
-    Note: For new code, prefer using RabbitMQConsumerMixin._run_with_reconnection()
-    which also handles shutdown coordination. This function is kept for ProgramsDatabase
-    which runs in main process and doesn't need shutdown flag coordination.
+    Provides unified connection, reconnection, and cleanup logic to reduce
+    code duplication across Sampler, Evaluator, and ProgramsDatabase.
+
+    Usage:
+        # In component __init__:
+        self._conn_manager = RabbitMQConnectionManager(
+            config=rabbitmq_config,
+            component_name="Sampler",
+            queue_names=["sampler_queue", "evaluator_queue"],
+            logger=logger
+        )
+
+        # To ensure connection before operations:
+        if await self._conn_manager.ensure_connection():
+            # Use self._conn_manager.connection, channel, queues
+
+        # For cleanup:
+        await self._conn_manager.close()
     """
-    reconnect_delay = initial_delay
 
-    while True:
+    def __init__(self, config, component_name: str, queue_names: list[str],
+                 logger: logging.Logger = None, timeout: int = 300):
+        """
+        Initialize the connection manager.
+
+        Args:
+            config: Full config object with rabbitmq settings
+            component_name: Name for logging (e.g., "Sampler", "Evaluator")
+            queue_names: List of queue names to declare on connection
+            logger: Logger instance (uses main_logger if not provided)
+            timeout: Connection timeout in seconds
+        """
+        self.config = config
+        self.component_name = component_name
+        self.queue_names = queue_names
+        self.logger = logger or logging.getLogger('main_logger')
+        self.timeout = timeout
+
+        # Connection state
+        self.connection = None
+        self.channel = None
+        self.queues = {}  # Maps queue_name -> queue object
+
+    def needs_reconnect(self) -> bool:
+        """Check if connection needs to be (re)established."""
+        return (
+            self.connection is None or
+            self.connection.is_closed or
+            self.channel is None or
+            self.channel.is_closed
+        )
+
+    async def ensure_connection(self) -> bool:
+        """
+        Ensure RabbitMQ connection is alive, reconnecting if necessary.
+
+        Returns:
+            bool: True if connection is valid, False if reconnection failed
+        """
+        if self.config is None:
+            self.logger.warning(f"{self.component_name}: No RabbitMQ config, cannot connect")
+            return False
+
+        if not self.needs_reconnect():
+            return True  # Connection is already valid
+
+        self.logger.info(f"{self.component_name}: Establishing RabbitMQ connection...")
         try:
-            await consume_func()
-            break
-        except asyncio.CancelledError:
-            logger.info(f"{component_name} shutting down.")
-            break
+            # Close any stale connections first
+            await self.close()
+
+            # Create fresh connection
+            self.connection = await create_rabbitmq_connection(self.config, timeout=self.timeout)
+            self.channel = await self.connection.channel()
+
+            # Declare all queues
+            self.queues.clear()
+            for queue_name in self.queue_names:
+                self.queues[queue_name] = await declare_standard_queue(self.channel, queue_name)
+
+            self.logger.info(f"{self.component_name}: RabbitMQ connection established successfully")
+            return True
+
         except Exception as e:
-            logger.error(f"{component_name} error: {e}. Reconnecting in {reconnect_delay:.1f}s...")
-            await asyncio.sleep(reconnect_delay)
-            reconnect_delay = min(reconnect_delay * 1.5, max_delay)
+            self.logger.error(f"{self.component_name}: Failed to connect: {e}")
+            return False
+
+    async def close(self):
+        """Safely close existing RabbitMQ connection and channel."""
+        try:
+            if self.channel is not None and not self.channel.is_closed:
+                await self.channel.close()
+        except Exception as e:
+            self.logger.debug(f"{self.component_name}: Error closing channel: {e}")
+
+        try:
+            if self.connection is not None and not self.connection.is_closed:
+                await self.connection.close()
+        except Exception as e:
+            self.logger.debug(f"{self.component_name}: Error closing connection: {e}")
+
+        self.connection = None
+        self.channel = None
+        self.queues.clear()
+
+    def get_queue(self, queue_name: str):
+        """Get a declared queue by name."""
+        return self.queues.get(queue_name)

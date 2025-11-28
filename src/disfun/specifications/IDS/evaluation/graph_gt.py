@@ -9,7 +9,6 @@ import os
 import sys
 import itertools
 import hashlib
-import numpy as np
 import graph_tool.all as gt
 import ujson as json
 import lmdb
@@ -65,7 +64,7 @@ def load_graph(graph_db_path):
                             continue
                         edge_list.append((src, dst))
 
-        # Add edges 
+        # Add edges
         G.add_edge_list(edge_list)
 
         return G, node_to_vertex, vertex_to_node
@@ -74,11 +73,15 @@ def load_graph(graph_db_path):
         graph_env.close()
 
 
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s) -> float:
+    pass
+
+
 def hash_priority_mapping(priorities, sequences):
     """Generate a hash based on the mapping of sequences to their priority scores."""
     mapping = [(seq, priorities[seq]) for seq in sequences]
     mapping_sorted = sorted(mapping, key=lambda x: x[0])
-    mapping_str = ','.join(f'{seq}:{score}' for seq, score in mapping_sorted) # string e.g. seq1:score1,seq2:score2,seq3:score3 gets hashed 
+    mapping_str = ','.join(f'{seq}:{score}' for seq, score in mapping_sorted) # string e.g. seq1:score1,seq2:score2,seq3:score3 gets hashed
     return hashlib.sha256(mapping_str.encode()).hexdigest()
 
 
@@ -145,8 +148,3 @@ def solve(n, s, q, graph_dir):
         hash_value = hash_priority_mapping(priorities, sequences)
 
     return independent_set, hash_value
-
-
-def priority(node, G, node_to_vertex, vertex_to_node, n, s):
-    """ Placeholder, this function will be evolved. """
-    pass

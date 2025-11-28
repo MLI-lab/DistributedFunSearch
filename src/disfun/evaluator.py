@@ -41,20 +41,15 @@ import copy
 import logging
 from disfun import code_manipulation
 from disfun import sandbox
-from pathlib import Path
 import json
 import aio_pika
 import sys
 import asyncio
-import concurrent.futures  
-from concurrent.futures import ProcessPoolExecutor, as_completed 
-from torch.multiprocessing import Manager # starts its own process on a cpu core 
+import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from torch.multiprocessing import Manager # starts its own process on a cpu core
 import gc
 import psutil
-import shutil
-import warnings
-import shutil
-from disfun.profiling import async_time_execution
 import time
 
 
@@ -158,12 +153,12 @@ def _extract_three_tier(generated_output: str) -> tuple[str, str | None, str | N
   # Remove thought/thinking tags from output and treat the rest as code
   code_to_parse = generated_output
   if thought_match or thinking_match:
-    logger.debug(f"Found <thought> or <thinking> tags without <code> tags. Extracting thought/thinking and parsing remainder as code.")
+    logger.debug("Found <thought> or <thinking> tags without <code> tags. Extracting thought/thinking and parsing remainder as code.")
     # Remove thought and thinking tags from the generated output
     code_to_parse = re.sub(r'<thinking>.*?</thinking>\s*', '', code_to_parse, flags=re.DOTALL)
     code_to_parse = re.sub(r'<thought>.*?</thought>\s*', '', code_to_parse, flags=re.DOTALL)
   else:
-    logger.debug(f"No XML tags found, treating entire output as code")
+    logger.debug("No XML tags found, treating entire output as code")
 
   cleaned_code = _trim_function_body_ast(code_to_parse)
   logger.debug(f"Cleaned code after AST parsing ({len(cleaned_code) if cleaned_code else 0} chars):\n{cleaned_code if cleaned_code else '(empty)'}")
@@ -362,10 +357,6 @@ class Evaluator:
     after evaluation completes.
     """
     def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2, graph_dir=None, cache_graphs=False, cache_size_limit_gb=2.0, rabbitmq_config=None):
-        self.connection = connection
-        self.channel = channel
-        self.evaluator_queue = evaluator_queue
-        self.database_queue = database_queue
         self.template = template
         self.function_to_evolve = function_to_evolve
         self.function_to_run = function_to_run
@@ -375,8 +366,24 @@ class Evaluator:
         self.graph_dir = graph_dir  # Store graph_dir for passing to sandbox
         self.cache_graphs = cache_graphs  # Enable graph caching in specifications
         self.cache_size_limit_gb = cache_size_limit_gb  # Size limit for cached graphs
-        self._rabbitmq_config = rabbitmq_config  # Store for reconnection
         self._shutdown_requested = False  # Flag to stop reconnection on shutdown
+
+        # Use shared connection manager for RabbitMQ
+        from disfun import process_utils
+        self._conn_manager = process_utils.RabbitMQConnectionManager(
+            config=rabbitmq_config,
+            component_name=f"Evaluator {local_id}",
+            queue_names=["evaluator_queue", "database_queue"],
+            logger=logger
+        )
+        # Initialize with passed-in connection (may be None for deferred connection)
+        self._conn_manager.connection = connection
+        self._conn_manager.channel = channel
+        if evaluator_queue:
+            self._conn_manager.queues["evaluator_queue"] = evaluator_queue
+        if database_queue:
+            self._conn_manager.queues["database_queue"] = database_queue
+
         self.manager = Manager()
         self.call_count = self.manager.Value('i', 0)
         self.call_count_lock = self.manager.Lock()
@@ -391,55 +398,50 @@ class Evaluator:
         """Signal that shutdown is requested - stops reconnection attempts."""
         self._shutdown_requested = True
 
+    # Properties for backward compatibility - delegate to connection manager
+    @property
+    def connection(self):
+        return self._conn_manager.connection
+
+    @connection.setter
+    def connection(self, value):
+        self._conn_manager.connection = value
+
+    @property
+    def channel(self):
+        return self._conn_manager.channel
+
+    @channel.setter
+    def channel(self, value):
+        self._conn_manager.channel = value
+
+    @property
+    def evaluator_queue(self):
+        return self._conn_manager.get_queue("evaluator_queue")
+
+    @evaluator_queue.setter
+    def evaluator_queue(self, value):
+        self._conn_manager.queues["evaluator_queue"] = value
+
+    @property
+    def database_queue(self):
+        return self._conn_manager.get_queue("database_queue")
+
+    @database_queue.setter
+    def database_queue(self, value):
+        self._conn_manager.queues["database_queue"] = value
+
     async def _ensure_connection(self):
-        """Create or verify RabbitMQ connection is alive."""
-        from disfun import process_utils
-
-        if self._rabbitmq_config is None:
-            return True  # No config, can't reconnect
-
-        needs_reconnect = (
-            self.connection is None or
-            self.connection.is_closed or
-            self.channel is None or
-            self.channel.is_closed
-        )
-
-        if needs_reconnect:
-            logger.info(f"Evaluator {self.local_id}: Re-establishing RabbitMQ connection...")
-            try:
-                await self._close_connection()
-                self.connection = await process_utils.create_rabbitmq_connection(self._rabbitmq_config)
-                self.channel = await self.connection.channel()
-                self.evaluator_queue = await process_utils.declare_standard_queue(self.channel, "evaluator_queue")
-                self.database_queue = await process_utils.declare_standard_queue(self.channel, "database_queue")
-                logger.info(f"Evaluator {self.local_id}: Connection re-established")
-                return True
-            except Exception as e:
-                logger.error(f"Evaluator {self.local_id}: Reconnection failed: {e}")
-                return False
-        return True
+        """Delegate to shared connection manager."""
+        return await self._conn_manager.ensure_connection()
 
     async def _close_connection(self):
-        """Safely close existing connection."""
-        try:
-            if self.channel and not self.channel.is_closed:
-                await self.channel.close()
-        except Exception:
-            pass
-        try:
-            if self.connection and not self.connection.is_closed:
-                await self.connection.close()
-        except Exception:
-            pass
-        self.connection = None
-        self.channel = None
-        self.evaluator_queue = None
-        self.database_queue = None
+        """Delegate to shared connection manager."""
+        await self._conn_manager.close()
 
     async def async_cleanup(self):
         """Async cleanup - close RabbitMQ connections (matches Sampler interface)."""
-        await self._close_connection()
+        await self._conn_manager.close()
 
     async def shutdown(self):
         logger.info(f"Evaluator {self.local_id}: Initiating shutdown process.")
@@ -452,7 +454,7 @@ class Evaluator:
                         asyncio.to_thread(self.executor.shutdown, wait=True),
                         timeout=5
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(f"Evaluator {self.local_id}: Executor shutdown timed out after 5s, forcing termination...")
                     # Force shutdown if timeout
                     self.executor.shutdown(wait=False)
@@ -495,7 +497,7 @@ class Evaluator:
             gc.collect()
 
             logger.info(f"Evaluator {self.local_id}: Shutdown process complete.")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Evaluator {self.local_id}: Timeout occurred during shutdown.")
         except Exception as e:
             logger.error(f"Evaluator {self.local_id}: Error during shutdown: {e}")
@@ -518,7 +520,7 @@ class Evaluator:
 
             try:
                 # Ensure connection is alive (reconnect if needed)
-                if self._rabbitmq_config is not None:
+                if self._conn_manager.config is not None:
                     connected = await self._ensure_connection()
                     if not connected:
                         if self._shutdown_requested:
@@ -566,7 +568,7 @@ class Evaluator:
         # Cleanup after loop exits
         try:
             await asyncio.wait_for(self.shutdown(), timeout=30)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Evaluator {self.local_id}: Shutdown timed out")
         except Exception as e:
             logger.error(f"Evaluator {self.local_id}: Error during shutdown: {e}")
@@ -588,7 +590,7 @@ class Evaluator:
 
                         try:
                             await asyncio.wait_for(self.process_message(message), timeout=300)
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             logger.warning("Processing message timed out.")
                         except Exception as e:
                             logger.error(f"Evaluator: Error while processing message: {e}")
@@ -682,7 +684,7 @@ CACHE_SIZE_LIMIT_GB = {self.cache_size_limit_gb}
                         error_details = ""
                         if error_file and error_file.exists():
                             try:
-                                with open(error_file, 'r') as f:
+                                with open(error_file) as f:
                                     error_content = f.read().strip()
                                     if error_content:
                                         # Only show first 500 chars of error
@@ -699,7 +701,7 @@ CACHE_SIZE_LIMIT_GB = {self.cache_size_limit_gb}
                     logger.error(f"Error during task execution for input {input}: {e}")
 
             logger.debug(f"Evaluator: Completed processing all {iteration_count} futures, got {len(scores_per_test)} scores")
-            
+
 
 
             if self.target_signatures:
@@ -757,7 +759,7 @@ CACHE_SIZE_LIMIT_GB = {self.cache_size_limit_gb}
             }
 
             message_body = json.dumps(serialized_result)
-        
+
             # Start timing before publishing
             publish_start_time = time.perf_counter()
 
@@ -773,7 +775,7 @@ CACHE_SIZE_LIMIT_GB = {self.cache_size_limit_gb}
             logger.debug(f"Time to publish message to queue: {publish_duration:.6f} seconds")
 
             logger.debug(f"Evaluator: Successfully published to database for island_id {island_id}.")
-    
+
         except Exception as e:
             logger.error(f"Evaluator: Problem in publishing to database for island_id {island_id}: {e}")
             # Optionally re-raise the exception if the caller needs to handle it.

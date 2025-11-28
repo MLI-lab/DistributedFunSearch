@@ -4,8 +4,4 @@ Nodes are q-ary strings of length n. Two nodes are neighbors if their edit dista
 
 For a code to correct s errors (insertions, deletions, or substitutions),
 all codewords must have pairwise edit distance >= 2s + 1.
-
-Improve the `priority_v{version}` function over its previous versions below.
-Keep the code short and comment for easy understanding.
-{prompt_style}
 """

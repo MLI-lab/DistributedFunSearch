@@ -4,11 +4,9 @@ This variant computes neighbors on-the-fly without loading pre-computed graphs f
 Useful when graph loading is slow or graph files are not available.
 """
 
-import os
 import sys
 import itertools
 import hashlib
-import numpy as np
 
 
 def lcs_length(s1, s2):
@@ -33,6 +31,10 @@ def lcs_length(s1, s2):
 def are_neighbors(node1, node2, n, s):
     """Check if two nodes are neighbors (share subsequence of length >= n-s)."""
     return lcs_length(node1, node2) >= n - s
+
+
+def priority(node, n, s, q) -> float:
+    pass
 
 
 def hash_priority_mapping(priorities, sequences):
@@ -87,7 +89,3 @@ def solve(n, s, q, graph_dir):
         hash_value = hash_priority_mapping(priorities, nodes)
 
     return independent_set, hash_value
-
-
-def priority(node, n, s, q):
-    pass

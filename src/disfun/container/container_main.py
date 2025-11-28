@@ -1,10 +1,8 @@
-import logging
 import pickle
 import sys
 import traceback
 import time
 import os
-import pathlib
 
 
 # Use the current working directory
@@ -41,7 +39,7 @@ def main(prog_file: str, input_file: str, output_file: str):
         with open(output_file, "wb") as of:
             pickle.dump({"result": ret, "cpu_time": execution_time}, of)
 
-    except Exception as e:
+    except Exception:
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)  # Exit with error code 1 to indicate failure
 

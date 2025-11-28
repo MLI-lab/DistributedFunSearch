@@ -2,9 +2,8 @@ import asyncio
 import argparse
 import torch.multiprocessing as mp
 import os
-import sys
 from disfun.scaling_utils import ResourceManager
-from disfun import sampler, process_utils
+from disfun import process_utils
 from disfun.process_entry import sampler_process_entry
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -188,7 +187,7 @@ if __name__ == "__main__":
         default="logs",
         help="Directory where logs will be stored (default: logs)."
     )
-    
+
     parser.add_argument(
         "--config-path",
         type=str,

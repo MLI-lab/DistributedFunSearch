@@ -10,7 +10,6 @@ import os
 import sys
 import itertools
 import hashlib
-import numpy as np
 import networkx as nx
 import ujson as json
 import lmdb
@@ -21,7 +20,7 @@ _GRAPH_CACHE = {}
 
 def load_graph(graph_db_path):
     """Load graph from LMDB database into NetworkX Graph."""
-    
+
 
     graph_env = lmdb.open(graph_db_path, readonly=True, lock=False,
                           readahead=True, max_readers=126)
@@ -47,6 +46,10 @@ def load_graph(graph_db_path):
     G.add_edges_from(edges)
 
     return G
+
+
+def priority(node, G, n, s) -> float:
+    pass
 
 
 def hash_priority_mapping(priorities, sequences):
@@ -90,7 +93,7 @@ def solve(n, s, q, graph_dir):
             else:
                 print(f"Graph too large to cache ({estimated_size_gb:.2f} GB > {cache_limit_gb} GB limit)", file=sys.stderr)
 
-    # Make a copy for priority computation 
+    # Make a copy for priority computation
     G_for_priority = G.copy()
 
     # Compute priorities
@@ -121,10 +124,3 @@ def solve(n, s, q, graph_dir):
         hash_value = hash_priority_mapping(priorities, sequences)
 
     return independent_set, hash_value
-
-
-def priority(node, G, n, s):
-    """
-    This is the placeholder, LLM will generate the actual implementation.
-    """
-    pass

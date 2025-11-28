@@ -1,0 +1,8 @@
+Please help me create a new algorithm that has a totally different form from the given ones.
+
+First, describe your new algorithm and main steps in one sentence. Next, implement it in Python.
+
+<thought>Your algorithm description in one sentence</thought>
+<code>Your implementation</code>
+
+Do not give additional explanations.

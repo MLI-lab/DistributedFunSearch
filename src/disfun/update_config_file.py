@@ -4,7 +4,7 @@ import sys
 def update_config_file(config_file, host_value):
     """Update the RabbitMQ host in the config file based on the assigned SLURM node."""
     try:
-        with open(config_file, 'r') as file:
+        with open(config_file) as file:
             content = file.read()
     except Exception as e:
         print(f"Couldnt not read content file {e}")

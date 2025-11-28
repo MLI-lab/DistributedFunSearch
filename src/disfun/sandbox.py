@@ -1,16 +1,13 @@
-import logging
 import ast
 import os
 import pathlib
-import sys
 from typing import Any
 import time
 import subprocess
 import cloudpickle
-import warnings
 import hashlib
 import psutil
-import shutil  
+import shutil
 
 
 # Define the main container path
@@ -84,7 +81,7 @@ class DummySandbox:
 class ExternalProcessSandbox(DummySandbox):
     """Sandbox that executes the code in a separate Python process on the same host."""
     def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", local_id=None, graph_dir=None):
-        super(ExternalProcessSandbox, self).__init__()
+        super().__init__()
         self.local_id = local_id
         self.output_path = ensure_dir_exists(pathlib.Path(base_path) / f"sandbox{self.local_id}")
         self.timeout_secs = timeout_secs
@@ -160,7 +157,7 @@ class ExternalProcessSandbox(DummySandbox):
                     pass
             return False
 
-        except Exception as e:
+        except Exception:
             # Clean up on any error
             if process and process.poll() is None:
                 try:
@@ -216,7 +213,7 @@ class ExternalProcessSandbox(DummySandbox):
         error_file = self.output_path / f"stderr_{count}.log"
         try:
             namespace = DummySandbox.compile_code(program)
-            prog_file = (call_data_folder / f"prog.pickle").absolute()
+            prog_file = (call_data_folder / "prog.pickle").absolute()
             with open(prog_file, "wb+") as f:
                 cloudpickle.dump(namespace[function_to_run], f)
 
@@ -224,13 +221,13 @@ class ExternalProcessSandbox(DummySandbox):
             if not retcode:
                 return None, False, 0.0, self.output_path, input_file, error_file
 
-            output_file = call_data_folder / f"output.pickle"
+            output_file = call_data_folder / "output.pickle"
             with open(output_file, "rb") as f:
                 result_data = cloudpickle.load(f)
                 result = result_data.get("result", None)
                 cpu_time = result_data.get("cpu_time", 0.0)
                 return result, True, cpu_time, self.output_path, input_file, error_file
-        except Exception as e:
+        except Exception:
             return None, False, 0.0, self.output_path, input_file, error_file
 
     def cleanup_call_directories(self, count: int):
@@ -246,7 +243,7 @@ class ExternalProcessSandbox(DummySandbox):
             call_data_folder = self.output_path / f"call{count}"
             if call_data_folder.exists():
                 shutil.rmtree(call_data_folder, ignore_errors=True)
-        except Exception as e:
+        except Exception:
             # Don't fail evaluation if cleanup fails, just log it
             pass
 
@@ -258,6 +255,6 @@ class ExternalProcessSandbox(DummySandbox):
         try:
             if self.output_path.exists():
                 shutil.rmtree(self.output_path, ignore_errors=True)
-        except Exception as e:
+        except Exception:
             # Don't fail if cleanup fails
             pass

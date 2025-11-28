@@ -3,9 +3,7 @@ Baseline implementation that assigns equal priority to all nodes.
 </thought>
 
 <code>
-def priority(node, G, n, s):
-    """Returns the priority with which we want to add `node` to the independent set.
-    {score}
-    """
+def priority(node, G, n, s) -> float:
+    """Returns the priority with which we want to add `node` to the independent set.{score}"""
     return 0.0
 </code>

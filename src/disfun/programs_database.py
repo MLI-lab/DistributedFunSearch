@@ -30,18 +30,18 @@ import copy
 import dataclasses
 import time
 import logging
+import re
 import numpy as np
 import asyncio
-import pickle
-import os
-from typing import Mapping, Any, List, Sequence, Optional
+import random
+from typing import Any
+from collections.abc import Mapping, Sequence
 from disfun import code_manipulation
 from disfun import specification_loader
+from disfun import checkpoint as checkpoint_module
+from disfun import wandb_logging
 import json
 import aio_pika
-import re
-import datetime
-from disfun.profiling import async_time_execution
 
 # Wandb import (optional)
 try:
@@ -103,7 +103,7 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
             ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
             parsed_scores[ns_key] = v
     except Exception as e:
-        raise ValueError(f"Failed to parse scores_per_test keys: {e}")
+        raise ValueError(f"Failed to parse scores_per_test keys: {e}") from e
 
     if not (len(start_n) == len(end_n) == len(s_values)):
         raise ValueError("The number of elements in start_n, end_n, and s_values must match.")
@@ -113,7 +113,7 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
 
     per_s_scores = []
 
-    for s, s_start_n, s_end_n in zip(s_values, start_n, end_n):
+    for s, s_start_n, s_end_n in zip(s_values, start_n, end_n, strict=True):
         all_dimensions = [(n, s) for n in range(s_start_n, s_end_n + 1)]
 
         if mode == "last":
@@ -125,7 +125,7 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
 
         elif mode == "weighted":
             weights = [dim[0] for dim in all_dimensions]
-            weighted_sum = sum(parsed_scores.get(dim, 0) * w for dim, w in zip(all_dimensions, weights))
+            weighted_sum = sum(parsed_scores.get(dim, 0) * w for dim, w in zip(all_dimensions, weights, strict=True))
             total_weight = sum(weights)
             per_s_scores.append(weighted_sum / total_weight if total_weight > 0 else 0)
 
@@ -191,24 +191,6 @@ def _format_scores_for_prompt(
     return ""
 
 
-def _get_q_description(q: int) -> str:
-    """
-    Returns a descriptive string for the alphabet size.
-
-    Args:
-        q: Alphabet size (2 for binary - 4 for quaternary - etc.)
-
-    Returns:
-        String like "binary" for q=2 - "quaternary" for q=4 - or "{q}-ary" for other values.
-    """
-    if q == 2:
-        return "binary"
-    elif q == 4:
-        return "quaternary"
-    else:
-        return f"{q}-ary"
-
-
 @dataclasses.dataclass(frozen=True)
 class Prompt:
     """A prompt produced by the ProgramsDatabase - to be sent to Samplers."""
@@ -267,13 +249,10 @@ class ProgramsDatabase:
         sampler_queue: aio_pika.Queue,
         evaluator_queue: aio_pika.Queue,
         config,
-        template: code_manipulation.Program,
         function_to_evolve: str,
         checkpoint_file: str = None,
         save_checkpoints_path: str=None,
         mode: str=None,
-        eval_code=False,
-        include_nx=True,
         start_n=[6],
         end_n=[11],
         s_values=[1],
@@ -291,16 +270,31 @@ class ProgramsDatabase:
         sampler_config=None,
         evaluator_config=None,
         prompt_config=None,
-        run_name=None
+        run_name=None,
+        rabbitmq_config=None
     ):
-        self._islands = [] 
-        self.connection = connection
-        self.channel = channel
-        self.database_queue = database_queue
-        self.sampler_queue = sampler_queue
-        self.evaluator_queue = evaluator_queue
+        self._islands = []
         self._config = config
-        self._template = template
+
+        # Use shared connection manager for RabbitMQ
+        from disfun import process_utils
+        self._conn_manager = process_utils.RabbitMQConnectionManager(
+            config=rabbitmq_config,
+            component_name="ProgramsDatabase",
+            queue_names=["database_queue", "sampler_queue", "evaluator_queue"],
+            logger=logger,
+            timeout=300
+        )
+        # Initialize with passed-in connection
+        self._conn_manager.connection = connection
+        self._conn_manager.channel = channel
+        if database_queue:
+            self._conn_manager.queues["database_queue"] = database_queue
+        if sampler_queue:
+            self._conn_manager.queues["sampler_queue"] = sampler_queue
+        if evaluator_queue:
+            self._conn_manager.queues["evaluator_queue"] = evaluator_queue
+
         self.samples_per_batch = config.prompts_per_batch
         self._function_to_evolve = function_to_evolve
         self._best_score_per_island = [-float('inf')] * config.num_islands
@@ -308,10 +302,8 @@ class ProgramsDatabase:
         self._best_scores_per_test_per_island = [None] * config.num_islands
         self._last_reset_time = time.time()
         self._total_resets = 0
-        self.save_checkpoints_path = save_checkpoints_path  
+        self.save_checkpoints_path = save_checkpoints_path
         self.mode=mode
-        self.eval_code = eval_code
-        self.include_nx = include_nx
         self.start_n= start_n
         self.end_n = end_n
         self.s_values= s_values
@@ -360,15 +352,16 @@ class ProgramsDatabase:
         self._island_locks = None
         self._locks_initialized = False
 
-        # Modular specification loading (for new two-dimensional prompt system)
+        # Template-based prompt system
         self.evaluator_config = evaluator_config
         self.prompt_config = prompt_config
-        self._problem_desc_content = None
-        self._prompt_style_content = None
-        self._system_message_content = None
-        self._imports_content = None
-        self._spec_files_loaded = False
-        self._logged_modular_prompt_system = False  # Flag to log modular prompt system message only once
+        self._template_str = None
+        self._placeholder_contents = None
+        self._function_args = None
+        self._inout_spec = None
+        self._function_header_template = None
+        self._template_loaded = False
+        self._logged_initial_prompt = False
 
         for _ in range(config.num_islands):
             island = {}
@@ -390,7 +383,7 @@ class ProgramsDatabase:
         self.wandb_init_config = {
             # ProgramsDatabase config
             "num_islands": config.num_islands,
-            "functions_per_prompt": config.functions_per_prompt,
+            "fewshot_num_examples": prompt_config.fewshot_num_examples if prompt_config else 2,
             "reset_period": config.reset_period,
             "reset_programs": config.reset_programs,
             "cluster_sampling_temperature_init": config.cluster_sampling_temperature_init,
@@ -403,8 +396,6 @@ class ProgramsDatabase:
             "end_n": str(end_n),
             "s_values": str(s_values),
             "q": q,
-            "eval_code": eval_code,
-            "include_nx": include_nx,
             # Prompt config
             "show_eval_scores": show_eval_scores,
             "display_mode": display_mode,
@@ -437,880 +428,228 @@ class ProgramsDatabase:
 
         self._wandb_initialized = False
 
+        # Load template system (once at init)
+        self._load_template_system()
+
+    def _load_template_system(self):
+        """Load template and placeholder contents once at init."""
+        if self._template_loaded or self.prompt_config is None:
+            return
+
+        try:
+            from pathlib import Path
+
+            # Load template
+            self._template_str = specification_loader.load_template(self.prompt_config.template_path)
+
+            # Load placeholder contents (files and directories)
+            self._placeholder_contents = specification_loader.load_placeholder_contents(
+                self.prompt_config.placeholders
+            )
+
+            # Extract function signature from initial function
+            initial_func_path = next(Path(self.evaluator_config.initial_functions_dir).glob("*.txt"))
+            self._function_args, self._return_type = specification_loader.extract_function_signature(str(initial_func_path))
+
+            # Pre-compute inout_spec (fully static)
+            self._inout_spec = f"The function should accept inputs: {self._function_args}.\nThe function should return output: {self._return_type}.\nDo not give additional explanations."
+
+            # Pre-compute function_header template ({version} and {prev_version} replaced per-prompt)
+            self._function_header_template = f"def {self._function_to_evolve}_v{{version}}({self._function_args}) -> {self._return_type}:\n    \"\"\"Improved version of `{self._function_to_evolve}_v{{prev_version}}`.\"\"\""
+
+            self._template_loaded = True
+            logger.info(f"Loaded template system: template={self.prompt_config.template_path}, args={self._function_args}")
+
+        except Exception as e:
+            logger.error(f"Failed to load template system: {e}")
+            self._template_loaded = True  # Prevent retry
+
     def load_checkpoint_file(self, checkpoint_file: str):
         logger.info(f"Checkpoint file is {checkpoint_file}")
         if checkpoint_file is not None:
-            self.load_checkpoint(checkpoint_file)
+            checkpoint_module.load_checkpoint(checkpoint_file, self)
         else:
             return
 
-    def load_checkpoint(self, checkpoint_file: str) -> None:
-        """
-        Loads the state from a checkpoint file.
-        """
-        with open(checkpoint_file, 'rb') as f:
-            checkpoint_data = pickle.load(f)
-
-
-        self.cumulative_evaluator_cpu_time = checkpoint_data.get("cumulative_evaluator_cpu_time", 0.0)
-        self.cumulative_sampler_gpu_time = checkpoint_data.get("cumulative_sampler_gpu_time", 0.0)
-
-        self.cumulative_input_tokens  = checkpoint_data.get("cumulative_input_tokens",  0)
-        self.cumulative_output_tokens = checkpoint_data.get("cumulative_output_tokens", 0)
-
-        self.total_prompts=checkpoint_data.get("total_prompts", 0)
-        self.duplicate_prompts = checkpoint_data.get("duplicate_prompts", checkpoint_data.get("dublicate_prompts", 0))
-
-        self.total_stored_programs = checkpoint_data.get("total_stored_programs",0)
-        self.execution_failed= checkpoint_data.get("execution_failed",0)
-        self.version_mismatch_discarded = checkpoint_data.get("version_mismatch_discarded", 0) 
-        self.duplicates_discarded=checkpoint_data.get("duplicates_discarded", 0) 
-
-        self.found_optimal_solution = checkpoint_data.get("found_optimal_solution", False)  # Restore flag
-        logger.info(f"Optimal solution was found in prev checkpoint {self.found_optimal_solution}")
-        self.prompts_since_optimal = checkpoint_data.get("prompts_since_optimal", 0)  # Restore flag
-        logger.info(f"Prompts_since_optimal are {self.prompts_since_optimal}")
-
-        # Load W&B run ID and name if they exist in checkpoint
-        self.wandb_run_id = checkpoint_data.get("wandb_run_id", None)
-        if self.wandb_run_id:
-            logger.info(f"Will resume W&B run: {self.wandb_run_id}")
-
-        # Load W&B run name from checkpoint (for checkpoint directory continuity)
-        checkpoint_run_name = checkpoint_data.get("wandb_run_name", None)
-        if checkpoint_run_name:
-            self.wandb_run_name = checkpoint_run_name
-            logger.info(f"Restored run name from checkpoint: {checkpoint_run_name}")
-
-        # Restore numpy random state for reproducibility
-        numpy_random_state = checkpoint_data.get("numpy_random_state", None)
-        if numpy_random_state:
-            np.random.set_state(numpy_random_state)
-            logger.info("Restored numpy random state from checkpoint")
-
-        # Restore sampler ID counter for reproducibility
-        self.next_sampler_id = checkpoint_data.get("next_sampler_id", 0)
-        logger.info(f"Restored next_sampler_id from checkpoint: {self.next_sampler_id}")
-
-        for i, score in enumerate(checkpoint_data["best_score_per_island"]):
-            self._best_score_per_island[i] = score
-
-        self._best_program_per_island = [
-            code_manipulation.Function.from_dict(program) if program else None
-            for program in checkpoint_data["best_program_per_island"]
-        ]
-
-        self._best_scores_per_test_per_island = checkpoint_data["best_scores_per_test_per_island"]
-        self._last_reset_time = checkpoint_data["last_reset_time"]
-        self._total_resets = checkpoint_data.get("total_resets", 0)
-
-        # Restore islands
-        for island_id, island_state in enumerate(checkpoint_data["islands_state"]):
-            logger.debug(f"Loading state for island id {island_id}")
-            island = self._islands[island_id]
-            self._load_island_state(island, island_state)
-        logger.info("Checkpoint loaded successfully.")
-
-    def _load_island_state(self, island, island_state):
-        """
-        Loads the state of a single island.
-        """
-        island['clusters'].clear()  # clear current clusters in the island if any
-        for signature_str, cluster_state in island_state["clusters"].items():
-            signature = eval(signature_str)
-            if isinstance(signature, list):
-                signature = tuple(signature)
-            cluster_data = {}
-            cluster_data['score'] = cluster_state['score']
-            cluster_data['scores_per_test'] = cluster_state.get('scores_per_test', {})
-            cluster_data['programs'] = [
-                code_manipulation.Function.from_dict(prog_dict)
-                for prog_dict in cluster_state['programs']
-            ]
-            island['clusters'][signature] = cluster_data
-
-        island['version'] = island_state['version']
-        island['num_programs'] = island_state['num_programs']
-
-
     def serialize_checkpoint(self) -> dict:
-        """
-        Serializes the necessary state of the database for checkpointing.
-        """
-        checkpoint_data = {
-            "cumulative_evaluator_cpu_time": self.cumulative_evaluator_cpu_time,
-            "cumulative_sampler_gpu_time": self.cumulative_sampler_gpu_time,
-            "cumulative_input_tokens":  self.cumulative_input_tokens,
-            "cumulative_output_tokens": self.cumulative_output_tokens,
-            "best_score_per_island": list(self._best_score_per_island),
-            "best_program_per_island": [program.to_dict() if program else None for program in self._best_program_per_island],
-            "best_scores_per_test_per_island": list(self._best_scores_per_test_per_island),
-            "last_reset_time": self._last_reset_time,
-            "total_resets": self._total_resets,
-            "total_prompts": self.total_prompts,
-            "duplicate_prompts": self.duplicate_prompts,
-            "perc_duplicate_prompts": (self.duplicate_prompts / self.total_prompts if self.total_prompts else 0),
-            "total_stored_programs": self.total_stored_programs,
-            "execution_failed": self.execution_failed,
-            "version_mismatch_discarded": self.version_mismatch_discarded,
-            "duplicates_discarded": self.duplicates_discarded,
-            "found_optimal_solution": self.found_optimal_solution,
-            "prompts_since_optimal":self.prompts_since_optimal,
-            "wandb_run_id": self.wandb_run_id,  # Save W&B run ID for resumption
-            "wandb_run_name": self.wandb_run_name,  # Save run name for checkpoint directory continuity
-            "numpy_random_state": np.random.get_state(),  # Save numpy random state for reproducibility
-            "next_sampler_id": self.next_sampler_id,  # Save sampler ID counter for reproducibility on resume
-            "islands_state": []
-        }
-
-
-        for island_id, island in enumerate(self._islands):
-            island_state = self._serialize_island_state(island)
-            checkpoint_data["islands_state"].append(island_state)
-
-        return checkpoint_data
-
-    def _serialize_island_state(self, island):
-        """
-        Serializes the state of a single island.
-        """
-        clusters_state = {}
-        for signature, cluster_data in island['clusters'].items():
-            clusters_state[str(signature)] = self._serialize_cluster_state(cluster_data)
-
-        island_state = {
-            "clusters": clusters_state,
-            "version": island['version'],
-            "num_programs": island['num_programs']
-        }
-
-        return island_state
-
-    def _serialize_cluster_state(self, cluster_data):
-        """
-        Serializes the state of a single cluster.
-        """
-        programs_serialized = [program.to_dict() for program in cluster_data['programs']]
-        cluster_state = {
-            "score": cluster_data['score'],
-            "programs": programs_serialized,
-            "scores_per_test": cluster_data.get('scores_per_test', {}),
-        }
-        return cluster_state
-
+        """Serializes the necessary state of the database for checkpointing."""
+        return checkpoint_module.serialize_checkpoint(self)
 
     async def periodic_checkpoint(self):
-        checkpoint_interval = 3600 
-        while True:
-            await asyncio.sleep(checkpoint_interval) 
-            try: 
-                current_pid = os.getpid()
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                checkpoint_dir = os.path.join(os.getcwd(), self.save_checkpoints_path)
-                if not os.path.exists(checkpoint_dir):
-                    os.makedirs(checkpoint_dir)
-                filepath = os.path.join(checkpoint_dir, f"checkpoint_{timestamp}.pkl")
-                data = self.serialize_checkpoint()
-                with open(filepath, "wb") as f:
-                    pickle.dump(data, f)
-                logger.info("Checkpoint has been saved.")
-            except Exception as e:
-                logger.error(f"Error in saving checkpoint file {e}")
+        """Periodically save checkpoints."""
+        await checkpoint_module.periodic_checkpoint(self)
 
 
     def _compute_wandb_metrics(self) -> dict:
         """Compute metrics for Weights & Biases logging."""
-        metrics = {}
-
-        # 1. Best score per island (overall and detailed per test input)
-        for island_id, score in enumerate(self._best_score_per_island):
-            metrics[f"island_{island_id}/best_score"] = score
-
-            # Log detailed scores for each evaluation input (n - s)
-            scores_per_test = self._best_scores_per_test_per_island[island_id]
-            if scores_per_test is not None:
-                for test_key, test_score in scores_per_test.items():
-                    # test_key is (n - s) tuple
-                    if isinstance(test_key, tuple) and len(test_key) >= 2:
-                        n, s = test_key[0], test_key[1]
-                        metrics[f"island_{island_id}/score_n{n}_s{s}"] = test_score
-                    else:
-                        metrics[f"island_{island_id}/score_{test_key}"] = test_score
-
-        # 2. Overall best score across all islands
-        metrics["overall/best_score"] = max(self._best_score_per_island)
-
-        # Log overall best detailed scores
-        best_island_id = np.argmax(self._best_score_per_island)
-        best_scores_per_test = self._best_scores_per_test_per_island[best_island_id]
-        if best_scores_per_test is not None:
-            for test_key, test_score in best_scores_per_test.items():
-                if isinstance(test_key, tuple) and len(test_key) >= 2:
-                    n, s = test_key[0], test_key[1]
-                    metrics[f"overall/score_n{n}_s{s}"] = test_score
-                else:
-                    metrics[f"overall/score_{test_key}"] = test_score
-
-        # 3. CPU and GPU times
-        metrics["resources/cumulative_cpu_time"] = self.cumulative_evaluator_cpu_time
-        metrics["resources/cumulative_gpu_time"] = self.cumulative_sampler_gpu_time
-
-        # 4. Token counts
-        metrics["tokens/cumulative_input"] = self.cumulative_input_tokens
-        metrics["tokens/cumulative_output"] = self.cumulative_output_tokens
-        metrics["tokens/cumulative_total"] = self.cumulative_input_tokens + self.cumulative_output_tokens
-
-        # 4b. FLOP estimation (2N FLOPs per token, where N = model parameters)
-        # This approximation comes from the forward pass requiring ~2N multiply-adds per token
-        if self.model_params_billions is not None:
-            total_tokens = self.cumulative_input_tokens + self.cumulative_output_tokens
-            model_params = self.model_params_billions * 1e9  # Convert to actual parameter count
-            cumulative_flops = 2 * model_params * total_tokens
-            metrics["compute/cumulative_flops"] = cumulative_flops
-            metrics["compute/cumulative_pflops"] = cumulative_flops / 1e15  # PetaFLOPs for readability
-
-        # 5. Number of clusters per island and cluster sizes
-        cluster_sizes_all = []
-        for island_id, island in enumerate(self._islands):
-            num_clusters = len(island['clusters'])
-            metrics[f"island_{island_id}/num_clusters"] = num_clusters
-            metrics[f"island_{island_id}/num_programs"] = island['num_programs']
-
-            # Get cluster sizes for this island
-            cluster_sizes = [len(cluster_data['programs'])
-                            for cluster_data in island['clusters'].values()]
-
-            if cluster_sizes:
-                metrics[f"island_{island_id}/avg_cluster_size"] = np.mean(cluster_sizes)
-                metrics[f"island_{island_id}/max_cluster_size"] = np.max(cluster_sizes)
-                metrics[f"island_{island_id}/min_cluster_size"] = np.min(cluster_sizes)
-                cluster_sizes_all.extend(cluster_sizes)
-
-        # 6. Overall cluster statistics
-        if cluster_sizes_all:
-            metrics["clusters/overall_avg_size"] = np.mean(cluster_sizes_all)
-            metrics["clusters/overall_max_size"] = np.max(cluster_sizes_all)
-            metrics["clusters/overall_min_size"] = np.min(cluster_sizes_all)
-            metrics["clusters/total_count"] = sum(len(island['clusters']) for island in self._islands)
-
-        # 7. Program statistics
-        metrics["programs/total_stored"] = self.total_stored_programs
-        metrics["programs/execution_failed"] = self.execution_failed
-        metrics["programs/version_mismatch_discarded"] = self.version_mismatch_discarded
-        metrics["programs/duplicates_discarded"] = self.duplicates_discarded
-
-        # 8. Prompt statistics
-        metrics["prompts/total"] = self.total_prompts
-        metrics["prompts/duplicate"] = self.duplicate_prompts
-
-        # 9. Island reset tracking
-        metrics["evolution/total_resets"] = self._total_resets
-
-        # 10. Optimal solution tracking
-        if self.found_optimal_solution:
-            metrics["solution/found_optimal"] = 1
-            metrics["solution/prompts_since_optimal"] = self.prompts_since_optimal
-        else:
-            metrics["solution/found_optimal"] = 0
-
-        # 10. Evolutionary lineage tracking (only if enabled)
-        if self.save_lineage and self.lineage_log:
-            # Basic statistics
-            generations = [entry['generation'] for entry in self.lineage_log]
-            metrics["lineage/max_generation"] = max(generations)
-            metrics["lineage/avg_generation"] = np.mean(generations)
-            metrics["lineage/total_programs_tracked"] = len(self.lineage_log)
-
-            # Recent lineage activity (last 100 programs)
-            recent_lineage = self.lineage_log[-100:]
-            recent_generations = [entry['generation'] for entry in recent_lineage]
-            metrics["lineage/recent_avg_generation"] = np.mean(recent_generations)
-            metrics["lineage/recent_max_generation"] = max(recent_generations)
-
-            # Count programs by generation
-            generation_counts = {}
-            for gen in generations:
-                generation_counts[gen] = generation_counts.get(gen, 0) + 1
-
-            # Log generation distribution (up to generation 10)
-            for gen in range(min(11, max(generations) + 1)):
-                metrics[f"lineage/generation_{gen}_count"] = generation_counts.get(gen, 0)
-
-            # Parent count statistics
-            parent_counts = [len(entry['parent_ids']) for entry in self.lineage_log]
-            metrics["lineage/avg_parents_per_program"] = np.mean(parent_counts)
-            metrics["lineage/programs_with_no_parents"] = sum(1 for count in parent_counts if count == 0)
-
-        return metrics
+        return wandb_logging.compute_wandb_metrics(self)
 
     def _get_program_by_id(self, program_id: int):
         """Find a program by its ID across all islands."""
-        for island in self._islands:
-            for cluster in island['clusters'].values():
-                for program in cluster.get('programs', []):
-                    if program.program_id == program_id:
-                        return program
-        return None
+        return wandb_logging.get_program_by_id(self, program_id)
 
     def _trace_lineage(self, program_id: int, max_depth: int = 100):
-        """Trace the full evolutionary lineage of a program.
-
-        Returns a list of dictionaries - each containing:
-        - program: The Function object
-        - generation: Generation number
-        - score: Program's score
-        - scores_per_test: Detailed scores
-        - parent_ids: List of parent IDs
-        """
-        lineage = []
-        visited = set()
-        current_ids = [program_id]
-        depth = 0
-
-        while current_ids and depth < max_depth:
-            next_ids = []
-            for pid in current_ids:
-                if pid in visited:
-                    continue
-                visited.add(pid)
-
-                # Find the program
-                program = self._get_program_by_id(pid)
-                if program is None:
-                    # Try to find in lineage_log
-                    for entry in self.lineage_log:
-                        if entry['program_id'] == pid:
-                            lineage.append({
-                                'program_id': pid,
-                                'program': None,  # Program no longer in memory
-                                'generation': entry['generation'],
-                                'score': entry['score'],
-                                'parent_ids': entry['parent_ids'],
-                                'timestamp': entry.get('timestamp'),
-                            })
-                            next_ids.extend(entry['parent_ids'])
-                            break
-                    continue
-
-                # Find the program's scores from lineage_log
-                program_entry = None
-                for entry in self.lineage_log:
-                    if entry['program_id'] == pid:
-                        program_entry = entry
-                        break
-
-                if program_entry:
-                    lineage.append({
-                        'program_id': pid,
-                        'program': program,
-                        'generation': program.generation,
-                        'score': program_entry['score'],
-                        'parent_ids': program.parent_ids or [],
-                        'timestamp': program.timestamp,
-                    })
-                    next_ids.extend(program.parent_ids or [])
-
-            current_ids = next_ids
-            depth += 1
-
-        return lineage
+        """Trace the full evolutionary lineage of a program."""
+        return wandb_logging.trace_lineage(self, program_id, max_depth)
 
     def _generate_lineage_html(self, program_id: int, island_id: int):
         """Generate an HTML visualization of a program's evolutionary lineage."""
-        lineage = self._trace_lineage(program_id)
-
-        if not lineage:
-            return "<html><body><h1>No lineage found</h1></body></html>"
-
-        # Sort lineage by generation (newest to oldest)
-        lineage.sort(key=lambda x: x['generation'], reverse=True)
-
-        html = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Evolutionary Lineage - Program {program_id}</title>
-    <style>
-        body {{ font-family: Arial - sans-serif; margin: 20px; background-color: #f5f5f5; }}
-        h1 {{ color: #333; }}
-        .program-card {{
-            background: white;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 15px 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        .program-card:hover {{ border-color: #4CAF50; }}
-        .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }}
-        .generation {{ background: #4CAF50; color: white; padding: 5px 10px; border-radius: 4px; font-weight: bold; }}
-        .score {{ background: #2196F3; color: white; padding: 5px 10px; border-radius: 4px; }}
-        .parent-ids {{ color: #666; font-size: 14px; margin: 5px 0; }}
-        .code-block {{
-            background: #f8f8f8;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 10px;
-            font-family: 'Courier New' - monospace;
-            font-size: 13px;
-            overflow-x: auto;
-            white-space: pre-wrap;
-        }}
-        .current {{ border-color: #FF9800; border-width: 3px; }}
-        .arrow {{ text-align: center; color: #999; font-size: 24px; margin: 10px 0; }}
-        .metadata {{ color: #666; font-size: 12px; margin-top: 5px; }}
-    </style>
-</head>
-<body>
-    <h1>Evolutionary Lineage - Island {island_id} - Program {program_id}</h1>
-    <p>Showing {num_ancestors} programs in the evolutionary chain (newest to oldest)</p>
-""".format(program_id=program_id, island_id=island_id, num_ancestors=len(lineage))
-
-        for i, entry in enumerate(lineage):
-            is_current = (i == 0)
-            parent_str = ", ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None (baseline)"
-
-            code = ""
-            if entry['program'] is not None:
-                code = str(entry['program'])
-            else:
-                code = "[Program no longer in memory]"
-
-            html += """
-    <div class="program-card{current}">
-        <div class="header">
-            <h3>Program ID: {pid}</h3>
-            <div>
-                <span class="generation">Gen {gen}</span>
-                <span class="score">Score: {score:.2f}</span>
-            </div>
-        </div>
-        <div class="parent-ids"><strong>Parents:</strong> {parents}</div>
-        <div class="code-block">{code}</div>
-        <div class="metadata">Timestamp: {timestamp}</div>
-    </div>
-""".format(
-                current=" current" if is_current else "",
-                pid=entry['program_id'],
-                gen=entry['generation'],
-                score=entry['score'],
-                parents=parent_str,
-                code=code.replace('<', '&lt;').replace('>', '&gt;'),
-                timestamp=entry.get('timestamp', 'N/A')
-            )
-
-            if i < len(lineage) - 1:
-                html += '    <div class="arrow">↓ evolved from ↓</div>\n'
-
-        html += """
-</body>
-</html>
-"""
-        return html
+        return wandb_logging.generate_lineage_html(self, program_id, island_id)
 
     def _generate_lineage_tree_diagram(self, program_id: int, island_id: int):
         """Generate a simple tree diagram showing the genealogy structure."""
-        lineage = self._trace_lineage(program_id)
-
-        if not lineage:
-            return "<html><body><h1>No lineage found</h1></body></html>"
-
-        # Build parent-child relationships
-        nodes = {}
-        for entry in lineage:
-            nodes[entry['program_id']] = entry
-
-        html = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Lineage Tree - Program {program_id}</title>
-    <style>
-        body {{ font-family: Arial - sans-serif; margin: 20px; background-color: #f5f5f5; }}
-        h1 {{ color: #333; }}
-        .tree {{ margin: 20px; }}
-        .node {{
-            background: white;
-            border: 2px solid #4CAF50;
-            border-radius: 8px;
-            padding: 10px 15px;
-            margin: 10px;
-            display: inline-block;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        .node:hover {{ background: #e8f5e9; }}
-        .current {{ border-color: #FF9800; border-width: 3px; background: #fff3e0; }}
-        .baseline {{ border-color: #9C27B0; background: #f3e5f5; }}
-        .node-id {{ font-weight: bold; color: #333; }}
-        .node-gen {{ color: #666; font-size: 12px; }}
-        .node-score {{ color: #2196F3; font-weight: bold; }}
-        .arrow {{ color: #999; margin: 0 10px; }}
-        .generation-group {{ margin: 20px 0; padding: 15px; background: white; border-radius: 8px; }}
-        .gen-label {{ font-weight: bold; color: #4CAF50; margin-bottom: 10px; }}
-    </style>
-</head>
-<body>
-    <h1>Lineage Tree - Island {island_id} - Program {program_id}</h1>
-    <p>Genealogy structure showing {num_programs} programs across {num_generations} generations</p>
-""".format(
-            program_id=program_id,
-            island_id=island_id,
-            num_programs=len(lineage),
-            num_generations=max((e['generation'] for e in lineage), default=0) + 1
-        )
-
-        # Group by generation
-        by_generation = {}
-        for entry in lineage:
-            gen = entry['generation']
-            if gen not in by_generation:
-                by_generation[gen] = []
-            by_generation[gen].append(entry)
-
-        # Display from newest to oldest generation
-        for gen in sorted(by_generation.keys(), reverse=True):
-            html += f'    <div class="generation-group">\n'
-            html += f'        <div class="gen-label">Generation {gen}</div>\n'
-            html += '        <div style="display: flex; flex-wrap: wrap; align-items: center;">\n'
-
-            for entry in by_generation[gen]:
-                is_current = (entry['program_id'] == program_id)
-                is_baseline = (entry['generation'] == 0)
-                node_class = "current" if is_current else ("baseline" if is_baseline else "")
-
-                parent_str = ", ".join(str(p) for p in entry['parent_ids']) if entry['parent_ids'] else "None"
-
-                html += f"""            <div class="node {node_class}">
-                <div class="node-id">ID: {entry['program_id']}</div>
-                <div class="node-gen">Gen: {entry['generation']}</div>
-                <div class="node-score">Score: {entry['score']:.2f}</div>
-                <div style="font-size: 11px; color: #888;">Parents: {parent_str}</div>
-            </div>\n"""
-
-            html += '        </div>\n'
-            html += '    </div>\n'
-
-        html += """
-    <div style="margin-top: 30px; padding: 15px; background: white; border-radius: 8px;">
-        <h3>Legend</h3>
-        <p><span class="node current" style="display: inline-block; margin: 5px;">Current Program</span> - The program you're viewing</p>
-        <p><span class="node baseline" style="display: inline-block; margin: 5px;">Baseline</span> - Initial programs (Generation 0)</p>
-        <p><span class="node" style="display: inline-block; margin: 5px;">Ancestor</span> - Programs in the evolutionary chain</p>
-    </div>
-</body>
-</html>
-"""
-        return html
+        return wandb_logging.generate_lineage_tree_diagram(self, program_id, island_id)
 
     def _log_top_programs_table(self):
         """Log a W&B table with the best program from each island and their lineage."""
-        if not self.wandb_enabled or not WANDB_AVAILABLE:
-            return
-
-        table_data = []
-
-        for island_id in range(len(self._islands)):
-            program = self._best_program_per_island[island_id]
-            if program is None or program.program_id is None:
-                continue
-
-            score = self._best_score_per_island[island_id]
-            scores_per_test = self._best_scores_per_test_per_island[island_id]
-
-            # Get lineage (only if enabled)
-            lineage = self._trace_lineage(program.program_id) if self.save_lineage else []
-
-            # Format detailed scores
-            scores_str = ", ".join(f"{k}:{v}" for k, v in scores_per_test.items()) if scores_per_test else "N/A"
-
-            # Full code (not truncated)
-            full_code = str(program)
-
-            # Generate and save HTML lineage (only if enabled)
-            if self.save_lineage:
-                try:
-                    import os
-                    os.makedirs(self.save_checkpoints_path, exist_ok=True)
-
-                    # Generate detailed lineage HTML with code
-                    html_content = self._generate_lineage_html(program.program_id, island_id)
-                    html_filename = f"lineage_detailed_island{island_id}_program{program.program_id}.html"
-                    html_path = f"{self.save_checkpoints_path}/{html_filename}"
-                    with open(html_path, 'w') as f:
-                        f.write(html_content)
-
-                    # Generate tree diagram HTML (structure only - no code)
-                    tree_content = self._generate_lineage_tree_diagram(program.program_id, island_id)
-                    tree_filename = f"lineage_tree_island{island_id}_program{program.program_id}.html"
-                    tree_path = f"{self.save_checkpoints_path}/{tree_filename}"
-                    with open(tree_path, 'w') as f:
-                        f.write(tree_content)
-
-                    # Log both as W&B artifacts (only if W&B is enabled and initialized)
-                    if self.wandb_enabled and self._wandb_initialized:
-                        try:
-                            artifact = wandb.Artifact(
-                                name=f"lineage_island{island_id}_step{self.total_prompts}",
-                                type="lineage_visualization",
-                                description=f"Evolutionary lineage for island {island_id} - program {program.program_id}"
-                            )
-                            artifact.add_file(html_path, name="detailed_with_code.html")
-                            artifact.add_file(tree_path, name="tree_diagram.html")
-                            wandb.log_artifact(artifact)
-                            lineage_link = f"See artifact: lineage_island{island_id}_step{self.total_prompts}"
-                        except Exception as e:
-                            logger.warning(f"Failed to upload lineage artifact to W&B: {e}")
-                            lineage_link = f"Local files: {html_filename} - {tree_filename}"
-                    else:
-                        lineage_link = f"Local files: {html_filename} - {tree_filename}"
-                except Exception as e:
-                    logger.error(f"Error generating lineage HTML: {e}")
-                    lineage_link = "Error generating lineage"
-            else:
-                lineage_link = "Disabled"
-
-            table_data.append([
-                island_id,
-                program.program_id,
-                program.generation,
-                score,
-                scores_str,
-                full_code,
-                len(lineage),
-                lineage_link
-            ])
-
-        if table_data:
-            table = wandb.Table(
-                columns=["Island", "Program ID", "Generation", "Score", "Detailed Scores", "Full Code", "Lineage Depth", "Lineage Visualization"],
-                data=table_data
-            )
-            wandb.log({"top_programs": table})
-            logger.info(f"Logged top programs table with {len(table_data)} entries")
-
+        wandb_logging.log_top_programs_table(self)
 
     async def _initialize_wandb(self):
         """Initialize W&B asynchronously (called once on first logging attempt)."""
-        if self._wandb_initialized:
-            return
-
-        if not self.wandb_config or not self.wandb_config.enabled:
-            return
-
-        if not WANDB_AVAILABLE:
-            logger.warning("W&B logging enabled but wandb not installed. Run: pip install wandb")
-            return
-
-        try:
-            # Run wandb.init in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-
-            # Check if we're resuming from a checkpoint with an existing run ID
-            if self.wandb_run_id:
-                # Try to resume existing run with strict mode
-                expected_run_id = self.wandb_run_id
-                logger.info(f"Attempting to resume W&B run with ID: {expected_run_id}")
-                logger.info(f"W&B project: {self.wandb_config.project}, entity: {self.wandb_config.entity}")
-
-                resume_failed = False
-                resume_error = None
-
-                try:
-                    await loop.run_in_executor(
-                        None,
-                        lambda: wandb.init(
-                            project=self.wandb_config.project,
-                            entity=self.wandb_config.entity,
-                            id=expected_run_id,
-                            resume="must",  # Fail if run doesn't exist or can't be resumed
-                            tags=self.wandb_config.tags,
-                            config=self.wandb_init_config,
-                            settings=wandb.Settings(
-                                console='off',  # Don't capture console output
-                                _disable_stats=False,
-                                _disable_meta=False,
-                            )
-                        )
-                    )
-
-                    # Verify that we actually resumed the expected run
-                    if wandb.run and wandb.run.id == expected_run_id:
-                        logger.info(f"Successfully resumed W&B run: {expected_run_id}")
-                        logger.info(f"W&B run URL: {wandb.run.url}")
-                    else:
-                        # This shouldn't happen with resume="must" - but check anyway
-                        logger.warning(f"Unexpected: W&B run ID mismatch. Expected {expected_run_id}, got {wandb.run.id if wandb.run else 'None'}")
-
-                except Exception as e:
-                    resume_failed = True
-                    resume_error = e
-                    logger.error(f"Failed to resume W&B run {expected_run_id}: {type(e).__name__}: {e}")
-
-                    # Provide specific guidance based on error type
-                    error_msg = str(e).lower()
-                    if "not found" in error_msg or "does not exist" in error_msg:
-                        logger.error(f"Reason: Run {expected_run_id} does not exist in project '{self.wandb_config.project}'")
-                        logger.error("Possible causes: Run was deleted, wrong project/entity, or run ID is incorrect")
-                    elif "finished" in error_msg or "completed" in error_msg:
-                        logger.error(f"Reason: Run {expected_run_id} is already marked as finished/completed")
-                        logger.error("Suggestion: Check W&B dashboard to verify run status")
-                    elif "permission" in error_msg or "access" in error_msg:
-                        logger.error(f"Reason: No permission to access run {expected_run_id}")
-                        logger.error("Suggestion: Verify entity/project permissions and API key")
-                    else:
-                        logger.error(f"Reason: Unknown error, {e}")
-
-                    # Close any partial W&B connection
-                    if wandb.run:
-                        wandb.finish()
-
-                    logger.info("Creating a new W&B run instead...")
-
-                # If resume failed - create a new run
-                if resume_failed:
-                    await loop.run_in_executor(
-                        None,
-                        lambda: wandb.init(
-                            project=self.wandb_config.project,
-                            entity=self.wandb_config.entity,
-                            name=self.wandb_run_name,
-                            tags=self.wandb_config.tags,
-                            config=self.wandb_init_config,
-                            settings=wandb.Settings(
-                                console='off',
-                                _disable_stats=False,
-                                _disable_meta=False,
-                            )
-                        )
-                    )
-                    if wandb.run:
-                        logger.info(f"Created new W&B run: {wandb.run.id}")
-                        logger.info(f"New run URL: {wandb.run.url}")
-                        logger.warning(f"Note: This is a NEW run, not a resumption of {expected_run_id}")
-
-            else:
-                # No checkpoint run ID - start fresh run
-                logger.info("No previous W&B run ID found. Creating a new run...")
-                await loop.run_in_executor(
-                    None,
-                    lambda: wandb.init(
-                        project=self.wandb_config.project,
-                        entity=self.wandb_config.entity,
-                        name=self.wandb_run_name,
-                        tags=self.wandb_config.tags,
-                        config=self.wandb_init_config,
-                        settings=wandb.Settings(
-                            console='off',  # Don't capture console output
-                            _disable_stats=False,
-                            _disable_meta=False,
-                        )
-                    )
-                )
-                if wandb.run:
-                    logger.info(f"Created new W&B run: {wandb.run.id}")
-                    logger.info(f"New run URL: {wandb.run.url}")
-
-            self.wandb_enabled = True
-            self.wandb_log_interval = self.wandb_config.log_interval
-            self._wandb_initialized = True
-
-            # Store the run ID (either new or resumed)
-            if wandb.run:
-                self.wandb_run_id = wandb.run.id
-                logger.info(f"W&B logging initialized: {wandb.run.url}")
-            else:
-                logger.warning("W&B run object is None after initialization")
-        except Exception as e:
-            logger.error(f"Failed to initialize W&B: {e}")
-            self.wandb_enabled = False
+        await wandb_logging.initialize_wandb(self)
 
     async def periodic_wandb_logging(self):
         """Periodically log metrics to Weights & Biases."""
-        # Initialize W&B asynchronously on first run
-        await self._initialize_wandb()
-
-        if not self.wandb_enabled:
-            return
-
-        try:
-            while True:
-                await asyncio.sleep(self.wandb_log_interval)
-                try:
-                    metrics = self._compute_wandb_metrics()
-                    wandb.log(metrics)
-                    logger.debug(f"Logged {len(metrics)} metrics to W&B")
-
-                    # Log top programs table with lineage
-                    self._log_top_programs_table()
-                except Exception as e:
-                    logger.error(f"Error logging to W&B: {e}")
-        except asyncio.CancelledError:
-            logger.info("W&B logging task cancelled. NOT finishing run to allow resumption from checkpoint.")
-            # Do NOT call wandb.finish() here - leave the run "running" so it can be resumed
-            # If the run is truly complete - the user should manually finish it in W&B UI
-            # or call wandb.finish() explicitly when termination conditions are met
-            if self.wandb_enabled and wandb.run is not None:
-                logger.info(f"W&B run {wandb.run.id} left in resumable state. Resume with: --checkpoint <path>")
-            raise
+        await wandb_logging.periodic_wandb_logging(self)
 
     def finish_wandb_run(self):
-        """
-        Explicitly finish the W&B run when the experiment is truly complete.
-        Call this manually when you know the run should be marked as finished (not resumable).
-        """
-        if self.wandb_enabled and wandb.run is not None:
-            try:
-                logger.info(f"Finishing W&B run {wandb.run.id}...")
-                wandb.finish()
-                logger.info("W&B run finished successfully")
-            except Exception as e:
-                logger.error(f"Error finishing W&B run: {e}")
+        """Explicitly finish the W&B run when the experiment is truly complete."""
+        wandb_logging.finish_wandb_run(self)
+
+    # Properties for backward compatibility - delegate to connection manager
+    @property
+    def connection(self):
+        return self._conn_manager.connection
+
+    @connection.setter
+    def connection(self, value):
+        self._conn_manager.connection = value
+
+    @property
+    def channel(self):
+        return self._conn_manager.channel
+
+    @channel.setter
+    def channel(self, value):
+        self._conn_manager.channel = value
+
+    @property
+    def database_queue(self):
+        return self._conn_manager.get_queue("database_queue")
+
+    @database_queue.setter
+    def database_queue(self, value):
+        self._conn_manager.queues["database_queue"] = value
+
+    @property
+    def sampler_queue(self):
+        return self._conn_manager.get_queue("sampler_queue")
+
+    @sampler_queue.setter
+    def sampler_queue(self, value):
+        self._conn_manager.queues["sampler_queue"] = value
+
+    @property
+    def evaluator_queue(self):
+        return self._conn_manager.get_queue("evaluator_queue")
+
+    @evaluator_queue.setter
+    def evaluator_queue(self, value):
+        self._conn_manager.queues["evaluator_queue"] = value
+
+    async def _close_connection(self):
+        """Delegate to shared connection manager."""
+        await self._conn_manager.close()
+
+    async def _ensure_connection(self):
+        """Delegate to shared connection manager."""
+        return await self._conn_manager.ensure_connection()
 
     async def consume_and_process(self) -> None:
-        """ Continuously consumes messages in batches from the database queue and processes them. """
-        from disfun import process_utils
+        """Main consume loop with automatic connection recovery.
 
+        Uses the same reconnection pattern as Sampler and Evaluator for consistency.
+        """
         batch_size = 10
         batch_timeout = 0.01
+        reconnect_delay = 5.0
+        max_reconnect_delay = 60.0
 
-        logger.info(f"Consume_and_process started")
+        logger.info("ProgramsDatabase: consume_and_process started")
 
         async def _consume_loop():
-            """Inner consume loop - will be wrapped with reconnection logic."""
+            """Inner consume loop - processes messages from the queue."""
             await self.channel.set_qos(prefetch_count=batch_size)
 
             async with self.database_queue.iterator() as stream:
                 batch = []
                 batch_start_time = time.time()
 
-                try:
-                    async for message in stream:
-                        logger.debug(f"Received message: {message.body.decode()}")
-                        batch.append(message)
-                        current_time = time.time()
+                async for message in stream:
+                    logger.debug(f"Received message: {message.body.decode()}")
+                    batch.append(message)
+                    current_time = time.time()
 
-                        # Check if the batch should be processed
-                        if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
-                            await self.process_batch(batch)
-                            batch.clear()
-                            batch_start_time = current_time
-
-                except asyncio.CancelledError:
-                    logger.info("Database task was canceled. Processing any remaining batch.")
-                    if batch:
+                    # Check if the batch should be processed
+                    if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
                         await self.process_batch(batch)
-                    raise  # Re-raise to ensure proper cancellation
+                        batch.clear()
+                        batch_start_time = current_time
 
-        # Wrap consume loop with automatic reconnection
-        await process_utils.with_reconnection(
-            _consume_loop,
-            logger,
-            component_name="ProgramsDatabase"
-        )
+        # Main reconnection loop
+        while True:
+            try:
+                # Ensure connection is alive (reconnect if needed)
+                connected = await self._ensure_connection()
+                if not connected:
+                    logger.error(f"ProgramsDatabase: Failed to establish connection, retrying in {reconnect_delay:.1f}s...")
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                    continue
+
+                # Reset delay on successful connection
+                reconnect_delay = 5.0
+
+                # Run the consume loop
+                await _consume_loop()
+
+                # If consume loop exits normally, break
+                break
+
+            except asyncio.CancelledError:
+                logger.info("ProgramsDatabase: Cancelled, exiting...")
+                break
+
+            except (aio_pika.exceptions.AMQPConnectionError,
+                    aio_pika.exceptions.ChannelClosed,
+                    aio_pika.exceptions.ChannelInvalidStateError,
+                    ConnectionError,
+                    OSError) as e:
+                # Connection lost - attempt to reconnect
+                logger.warning(
+                    f"ProgramsDatabase: Connection error: {e}. "
+                    f"Reconnecting in {reconnect_delay:.1f}s..."
+                )
+                await self._close_connection()
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                continue
+
+            except Exception as e:
+                # Unexpected error - log and retry
+                logger.error(
+                    f"ProgramsDatabase: Unexpected error: {e}. "
+                    f"Reconnecting in {reconnect_delay:.1f}s...",
+                    exc_info=True
+                )
+                await self._close_connection()
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                continue
 
 
     #@async_time_execution
-    async def process_batch(self, batch: List[aio_pika.IncomingMessage]):
+    async def process_batch(self, batch: list[aio_pika.IncomingMessage]):
         try:
             tasks = [self.process_message(message) for message in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1337,7 +676,7 @@ class ProgramsDatabase:
                 if found_optimal_solution and not self.found_optimal_solution:
                     self.found_optimal_solution = True  # Mark as found
                     self.prompts_since_optimal = 0  # Reset counter for additional programs
-               
+
 
                 self.cumulative_evaluator_cpu_time += evaluator_cpu_time
                 self.cumulative_sampler_gpu_time += sampler_gpu_time
@@ -1428,7 +767,7 @@ class ProgramsDatabase:
 
             if not self.no_deduplication and self.function_body_exists(island['clusters'], hash_value):
                 self.duplicates_discarded += 1
-                logger.debug(f"Program with identical body already exists in island. Skipping registration.")
+                logger.debug("Program with identical body already exists in island. Skipping registration.")
                 return
 
             if expected_version is not None:
@@ -1622,6 +961,16 @@ class ProgramsDatabase:
         code, flag_duplicate, version_generated, parent_ids = self._generate_prompt_for_island(island)
         expected_version = island['version']
 
+        # Log initial prompt to W&B (once)
+        if not self._logged_initial_prompt and code:
+            logger.info(f"Initial prompt:\n{'='*80}\n{code}\n{'='*80}")
+            if self.wandb_enabled and self._wandb_initialized and wandb.run:
+                try:
+                    wandb.run.summary["initial_prompt"] = code
+                except Exception as e:
+                    logger.warning(f"Failed to log initial prompt to W&B: {e}")
+            self._logged_initial_prompt = True
+
         prompt = Prompt(code, version_generated, island_id, expected_version)
         message_data = {
             "prompt": prompt.serialize(),
@@ -1642,7 +991,7 @@ class ProgramsDatabase:
             logger.error(f"Database: Error during prompt preparation or message sending: {e}")
 
 
-    def _generate_prompt_for_island(self, island, multiple=False) -> tuple[Optional[str], int, int, list[int]]:
+    def _generate_prompt_for_island(self, island, multiple=False) -> tuple[str | None, int, int, list[int]]:
         """Generate a prompt for an island.
 
         Returns:
@@ -1650,7 +999,7 @@ class ProgramsDatabase:
         """
         clusters = island['clusters']
         signatures = list(clusters.keys())
-        functions_per_prompt = self._config.functions_per_prompt
+        fewshot_num_examples = self.prompt_config.fewshot_num_examples if self.prompt_config else 2
         if not signatures:
             logger.warning(f"No clusters found in island {island}. Skipping prompt generation.")
             return None, False, 0, []
@@ -1719,22 +1068,22 @@ class ProgramsDatabase:
 
         # If there are multiple valid signatures:
         # Determine the number of clusters to sample.
-        if len(valid_signatures) >= functions_per_prompt:
+        if len(valid_signatures) >= fewshot_num_examples:
             logger.debug("Sampling from multiple valid clusters.")
-            # Sample exactly functions_per_prompt clusters without replacement.
+            # Sample exactly fewshot_num_examples clusters without replacement.
             cluster_indices = np.random.choice(
                 len(valid_signatures),
-                size=functions_per_prompt,
+                size=fewshot_num_examples,
                 p=valid_probabilities,
                 replace=False
             )
             sampled_signatures.update([valid_signatures[i] for i in cluster_indices])
         else:
             # If fewer than desired valid clusters are available - use all available ones.
-            logger.warning("Fewer valid clusters than functions_per_prompt; using all available clusters.")
+            logger.warning("Fewer valid clusters than fewshot_num_examples; using all available clusters.")
             sampled_signatures.update(valid_signatures)
             # Optionally - you could recalculate probabilities excluding these and sample additional ones if desired.
-    
+
         # Sample one program from each selected cluster.
         for signature in sampled_signatures:
             cluster = clusters[signature]
@@ -1755,291 +1104,85 @@ class ProgramsDatabase:
         prompt, flag_duplicate = self._generate_prompt(sorted_programs)
         return prompt, flag_duplicate, version_generated, parent_ids
 
-    def _load_specification_files(self):
-        """Load modular specification files if not already loaded."""
-        if self._spec_files_loaded:
-            return
-
-        # Check if we have prompt config with the new fields
-        if self.prompt_config is None:
-            logger.debug("No prompt config found, skipping modular spec loading")
-            self._spec_files_loaded = True
-            return
-
-        # Check if modular spec fields exist
-        if not hasattr(self.prompt_config, 'problem_description_path'):
-            logger.debug("prompt config missing problem_description_path, skipping modular spec loading")
-            self._spec_files_loaded = True
-            return
-
-        try:
-            # Get system_message_path and imports_path if they exist
-            system_message_path = getattr(self.prompt_config, 'system_message_path', None)
-            imports_path = getattr(self.prompt_config, 'imports_path', None)
-
-            # Load using specification_loader with full paths
-            self._problem_desc_content, self._prompt_style_content, self._system_message_content, self._imports_content = specification_loader.load_specification_files(
-                self.prompt_config.problem_description_path,
-                self.prompt_config.prompt_style_path,
-                system_message_path,
-                imports_path
-            )
-            logger.info(f"Loaded modular specifications: problem={self.prompt_config.problem_description_path}, style={self.prompt_config.prompt_style_path}, system={system_message_path}, imports={imports_path}")
-            self._spec_files_loaded = True
-        except Exception as e:
-            logger.warning(f"Failed to load modular specification files: {e}. Falling back to template-based prompts.")
-            self._spec_files_loaded = True
+    def _format_scores(self, scores: dict) -> str:
+        """Format scores for inclusion in fewshot docstrings."""
+        return _format_scores_for_prompt(
+            scores,
+            self.display_mode,
+            self.best_known_solutions,
+            self.absolute_label,
+            self.relative_label
+        )
 
     def _generate_prompt(self, implementations_with_scores: Sequence[tuple]) -> str:
-        # Load modular specification files if available
-        self._load_specification_files()
-
-        logger.debug(f"Type of `implementations_with_scores`: {type(implementations_with_scores)}")
+        """Generate prompt using template system."""
+        if not self._template_loaded or self._template_str is None:
+            logger.error("Template system not loaded")
+            return None, False
 
         implementations = [impl for impl, _ in implementations_with_scores]
         scores_list = [scores for _, scores in implementations_with_scores]
 
-        for i, implementation in enumerate(implementations):
-            logger.debug(f"Implementation {i}: Type: {type(implementation)}, Attributes: {dir(implementation)}")
-            logger.debug(f"Implementation {i}: Content: {implementation}")
-
+        # Version functions for fewshot display
         implementations = copy.deepcopy(implementations)
+        for i, impl in enumerate(implementations):
+            impl.name = f'{self._function_to_evolve}_v{i}'
+            if i > 0:
+                impl.docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`.'
 
-        versioned_functions = []
-        for i, implementation in enumerate(implementations):
-            new_function_name = f'{self._function_to_evolve}_v{i}'
-            implementation.name = new_function_name
+        num_examples = len(implementations)
+        version = num_examples  # Next version after v0, v1, ... is vN where N = num_examples
 
-            # Add scores to the docstring of evaluated implementations
-            if i >= 1:
-                # For i >= 1 (evolved functions) - create "Improved version" docstring
-                if self.show_eval_scores and scores_list[i]:
-                    score_text = _format_scores_for_prompt(
-                        scores_list[i],
-                        self.display_mode,
-                        self.best_known_solutions,
-                        self.absolute_label,
-                        self.relative_label
-                    )
-                    base_docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`.'
-                    implementation.docstring = f'{base_docstring} {score_text}'
-                else:
-                    implementation.docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`.'
-            elif i == 0:
-                # For i == 0 (baseline) - use {score} placeholder replacement
-                logger.debug(f"Processing baseline (i=0): show_eval_scores={self.show_eval_scores}, has_scores={bool(scores_list[i])}, scores={scores_list[i]}")
-                logger.debug(f"Baseline has docstring={bool(implementation.docstring)}, body contains {{score}}={'{score}' in implementation.body if implementation.body else False}")
+        # Determine fewshot count (may be overridden by prompt_style)
+        fewshot_override = None
+        prompt = self._template_str
 
-                if self.show_eval_scores and scores_list[i]:
-                    score_text = _format_scores_for_prompt(
-                        scores_list[i],
-                        self.display_mode,
-                        self.best_known_solutions,
-                        self.absolute_label,
-                        self.relative_label
-                    )
-                    logger.debug(f"Replacing {{score}} with: {score_text}")
+        # Fill static placeholders from pre-loaded contents
+        for name, (content, style_dict) in self._placeholder_contents.items():
+            if style_dict is not None:
+                # Directory: sample from in-memory dict
+                _, (content, fewshot_override) = random.choice(list(style_dict.items()))
+            # For evaluation_script: strip priority function and wrap in code fences
+            if name == "evaluation_script" and content:
+                content = specification_loader.strip_function_from_code(content, "priority")
+                content = f"```python\n{content}\n```"
+            prompt = prompt.replace(f"{{{name}}}", content or "")
 
-                    # Replace in docstring (if extracted)
-                    if implementation.docstring:
-                        implementation.docstring = implementation.docstring.replace('{score}', score_text)
-                        logger.debug(f"Docstring after replacement:\n{implementation.docstring}")
+        # Determine actual fewshot count
+        num_fewshot = fewshot_override if fewshot_override is not None else self.prompt_config.fewshot_num_examples
+        fewshot_programs = list(zip(implementations[:num_fewshot], scores_list[:num_fewshot], strict=True))
 
-                    # Replace in body (for backwards compatibility with old stored functions)
-                    if implementation.body and '{score}' in implementation.body:
-                        implementation.body = implementation.body.replace('{score}', score_text)
-                        logger.debug(f"Body after replacement:\n{implementation.body}")
-                else:
-                    # Remove {score} placeholder
-                    logger.debug("No scores or show_eval_scores=False, removing {score} placeholder")
-
-                    # Remove from docstring
-                    if implementation.docstring:
-                        docstring_lines = implementation.docstring.split('\n')
-                        filtered_lines = [line for line in docstring_lines if '{score}' not in line]
-                        implementation.docstring = '\n'.join(filtered_lines)
-                        logger.debug(f"Docstring after removal:\n{implementation.docstring}")
-
-                    # Remove from body
-                    if implementation.body and '{score}' in implementation.body:
-                        body_lines = implementation.body.split('\n')
-                        filtered_lines = [line for line in body_lines if '{score}' not in line]
-                        implementation.body = '\n'.join(filtered_lines)
-                        logger.debug(f"Body after removal:\n{implementation.body}")
-            try:
-                implementation_str = code_manipulation.rename_function_calls(
-                    str(implementation), self._function_to_evolve, new_function_name
-                )
-                versioned_functions.append(code_manipulation.text_to_function(implementation_str))
-            except Exception as e:
-                logger.error(f"Error in converting text to function: {e}")
-
-        next_version = len(implementations)
-        new_function_name = f'{self._function_to_evolve}_v{next_version}'
-
-        try:
-            # Create docstring for the template - just the basic "Improved version" text
-            template_docstring = f'Improved version of `{self._function_to_evolve}_v{next_version - 1}`.'
-
-            header = dataclasses.replace(
-                implementations[-1],
-                name=new_function_name,
-                body='',
-                docstring=template_docstring
-            )
-            versioned_functions.append(header)
-        except Exception as e:
-            logger.error(f"Error in creating header: {e}")
-
-        # Check if modular specification files are loaded
-        # Note: prompt_style_content can be empty for code completion mode (StarCoder - etc.)
-        use_modular_prompt = (
-            self._problem_desc_content is not None and
-            self._problem_desc_content.strip()
+        # Build fewshot examples (handles score display internally)
+        fewshot_examples = specification_loader.build_fewshot_examples(
+            fewshot_programs,
+            self.prompt_config,
+            self._format_scores if self.prompt_config.show_eval_scores else None
         )
 
-        if use_modular_prompt:
-            # Modular prompt construction
-            if not self._logged_modular_prompt_system:
-                logger.info("Using modular specification system for prompt construction")
-                self._logged_modular_prompt_system = True
+        # Fill reserved dynamic placeholders
+        prompt = prompt.replace("{fewshot_examples}", fewshot_examples)
+        prompt = prompt.replace("{num_examples}", str(num_fewshot))
+        prompt = prompt.replace("{version}", str(version))
+        function_header = self._function_header_template.replace("{version}", str(version)).replace("{prev_version}", str(version - 1))
+        prompt = prompt.replace("{function_header}", function_header)
+        prompt = prompt.replace("{inout_spec}", self._inout_spec)
 
-            try:
-                # Build few-shot examples (exclude the header which has empty body)
-                fewshot_implementations = [(impl, scores) for impl, scores in
-                                          zip(implementations, scores_list)]
-                fewshot_examples = specification_loader.build_fewshot_examples(
-                    fewshot_implementations,
-                    self.prompt_config  # Use prompt config directly
-                )
+        # Merge adjacent docstrings: """\n""" or """ """ becomes single continuation
+        # Match """, optional whitespace/newlines, then """ and merge them
+        prompt = re.sub(r'"""\s*"""', '', prompt)
 
-                # Construct the modular prompt
-                prompt_parts = []
+        # Clean up multiple consecutive blank lines from empty placeholders
+        while "\n\n\n" in prompt:
+            prompt = prompt.replace("\n\n\n", "\n\n")
 
-                # 1. Problem description with placeholders replaced
-                problem_desc = self._problem_desc_content.strip()
+        # Check for duplicates
+        duplicate_prompt = False
+        if len(implementations) == 2 and implementations[0].hash_value == implementations[1].hash_value:
+            duplicate_prompt = True
+            self.duplicate_prompts += 1
 
-                # Replace {version} with actual version number
-                problem_desc = problem_desc.replace("{version}", str(next_version))
-
-                # Replace {prompt_style} placeholder
-                if self._prompt_style_content and self._prompt_style_content.strip():
-                    problem_desc = problem_desc.replace("{prompt_style}", "\n" + self._prompt_style_content.strip())
-                else:
-                    problem_desc = problem_desc.replace("\n{prompt_style}", "")  # Remove placeholder and preceding newline
-
-                prompt_parts.append(problem_desc)
-
-                # 2. Imports (if specified)
-                if self._imports_content and self._imports_content.strip():
-                    prompt_parts.append(self._imports_content.strip())
-
-                # 3. Few-shot examples (if any) - just the functions - no labels
-                if fewshot_examples:
-                    prompt_parts.append(fewshot_examples)
-
-                # 4. Function header to complete
-                prompt_parts.append(str(header))
-
-                prompt_str = "\n\n".join(prompt_parts)
-
-                # Check for duplicates
-                duplicate_prompt = False
-                if len(implementations) == 2 and implementations[0].hash_value == implementations[1].hash_value:
-                    duplicate_prompt = True
-                    self.duplicate_prompts += 1
-                    try:
-                        with open("duplicate_prompt.txt", "a") as f:
-                            f.write(prompt_str)
-                        logger.info("Duplicate prompt written to 'duplicate_prompt.txt'.")
-                    except Exception as e:
-                        logger.error(f"Failed to write duplicate prompt to file: {e}")
-
-                logger.debug(f"Modular prompt constructed: {len(prompt_str)} characters")
-                logger.debug(f"Full prompt sent to LLM:\n{'='*80}\n{prompt_str}\n{'='*80}")
-                return prompt_str.rstrip('\n'), duplicate_prompt
-
-            except Exception as e:
-                logger.error(f"Error constructing modular prompt: {e}. Falling back to template-based approach.")
-                # Fall through to template-based approach
-
-        # Template-based prompt construction (original approach)
-        if hasattr(self._template, 'preface'):
-            preface = getattr(self._template, 'preface', '')
-
-            # Remove all existing imports
-            import_pattern = r"(?m)^import .*|from .* import .*"
-            preface_cleaned = re.sub(import_pattern, "", preface).strip()
-
-            # Replace generic "q-ary" with actual alphabet size description
-            q_description = _get_q_description(self.q)
-            preface_cleaned = preface_cleaned.replace("q-ary", q_description)
-
-            # Define required imports
-            imports = ["import numpy as np"]
-            if self.include_nx:
-                imports.append("import networkx as nx")
-
-            # If the preface starts with a docstring - leave it intact
-            if preface_cleaned.startswith('"""'):
-                docstring_end = preface_cleaned.index('"""', 3) + 3
-                initial_docstring = preface_cleaned[:docstring_end]
-                remaining_preface = preface_cleaned[docstring_end:].strip()
-            else:
-                initial_docstring = ""
-                remaining_preface = preface_cleaned
-
-            # Construct the new preface with specified newline rules
-            sections = []
-            if initial_docstring:
-                sections.append(initial_docstring.strip())
-            if remaining_preface:
-                sections.append(remaining_preface.strip())
-            sections.extend(imports)
-            sections.append("")  # Add a blank line after imports
-
-            # Join sections - ensuring appropriate newlines
-            preface = "\n".join(filter(None, sections))+ "\n" + "\n"
-            self._template = dataclasses.replace(self._template, preface=preface)
-
-        try:
-            if self.eval_code:
-                # hashing logic in eval script is excluded for constructing prompt
-                spec_path = '/Funsearch/implementation/specifications_construct/without_hash.txt'
-                with open(spec_path, 'r') as file:
-                    specification = file.read()
-                template_no_hash= code_manipulation.text_to_program(specification)
-                # Use the first two functions from the template - followed by versioned functions
-                first_two_functions = template_no_hash.functions[:4]
-                new_functions_list = first_two_functions + versioned_functions
-            else:
-                # Use only versioned functions
-                new_functions_list = versioned_functions
-
-            prompt = dataclasses.replace(self._template, functions=new_functions_list)
-
-            prompt_str = str(prompt)
-
-            logger.debug(f"Template-based prompt constructed: {len(prompt_str)} characters")
-            logger.debug(f"Full prompt sent to LLM:\n{'='*80}\n{prompt_str}\n{'='*80}")
-
-            # Write to a file if two programs have the same hash value
-            duplicate_prompt = False
-            if len(implementations) == 2 and implementations[0].hash_value == implementations[1].hash_value:
-                duplicate_prompt = True
-                self.duplicate_prompts += 1
-                try:
-                    with open("duplicate_prompt.txt", "a") as f:
-                        f.write(prompt_str)
-                    logger.info("Duplicate prompt written to 'duplicate_prompt.txt'.")
-                except Exception as e:
-                    logger.error(f"Failed to write duplicate prompt to file: {e}")
-
-            return prompt_str.rstrip('\n'), duplicate_prompt
-        except Exception as e:
-            logger.error(f"Error in replacing prompt: {e}")
-            return None, False
-
+        logger.debug(f"Template prompt constructed: {len(prompt)} characters")
+        return prompt.rstrip('\n'), duplicate_prompt
 
     def function_body_exists(self, clusters, hash_value: int) -> bool:
         assert hash_value is not None, "Error: No hash value computed! Check that hash value condition in the specification script is set to match start_n."

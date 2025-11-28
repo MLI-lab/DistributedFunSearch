@@ -1,345 +1,144 @@
-# Prompt Construction 
+# Prompt Construction
 
-DistributedFunSearch uses a modular setup where problem description, prompt format and evaluation are separated. 
+DistributedFunSearch uses a template-based system for flexible prompt construction.
 
-Prompts are built by combining three independent components:
+## Template System Overview
 
-**1. Problem Description** (what LLM sees)
-- Docstring explaining the problem and constraints
-- Visible imports (graph libraries shown or hidden depending on variant)
-- Uses `{version}` placeholder that gets replaced with actual version number
-- Located in `specifications/{Task}/problem_descriptions/`
-- Example: `baseline.txt` contains just the docstring and imports 
+Prompts are built using templates with `{placeholder}` syntax:
+1. **Template file** defines order/structure of components
+2. **Placeholders** map to file paths (loaded once at init into memory)
+3. **Directory placeholders** load all files at init, sample from memory at runtime
+4. **Reserved placeholders** are computed dynamically (fewshot examples, version, etc.)
 
-**2. Prompt Format** (how to structure output)
-- Instructions for how the LLM should structure its response
-- Whether to output code only, code with reasoning, or code with thinking
-- Which XML tags to use (<thinking>, <thought>, <code>)
-- Located in `specifications/{Task}/prompt_styles/`
+## File Structure
 
-**Evaluation Scripts** (execution logic, not shown to LLM except if included in problem description)
-- Complete evaluation functions (load_graph, solve, evaluate, priority)
-- Controls which parameters the priority function receives
-- Located in `specifications/{Task}/evaluation/`
-- Example: `deletion_codes.py` for deletion-correcting codes
+```
+specifications/Deletions/
+├── templates/
+│   ├── funsearch.txt       # FunSearch-style code completion
+│   └── eoh.txt             # EoH-style instruction-based
+├── problem_descriptions/
+│   └── baseline.txt        # Problem docstring
+├── prompt_styles/
+│   ├── funsearch.txt
+│   ├── eoh_minimal.txt
+│   └── eoh_full/           # Directory, sample one at runtime
+│       ├── e1.txt
+│       ├── e2.txt
+│       ├── fs1_m1.txt      # fs{N}_ prefix overrides fewshot count
+│       └── ...
+├── imports/
+│   └── networkx.txt
+├── evaluation/
+│   ├── graph_networkx.py   # Evaluation script (optional in prompt)
+│   ├── graph_gt.py
+│   └── no_graph.py
+└── components/
+    ├── fewshot_preamble.txt
+    └── evaluation_preamble.txt  # "This is how the priority function gets evaluated:"
+```
 
-These components are loaded and combined at runtime to create the full prompt sent to the LLM.
+## Example Templates
 
-## Available Options
+**FunSearch-style** (`templates/funsearch.txt`):
+```
+{problem_description}
+{evaluation_preamble}
+{evaluation_script}
+{prompt_style}
+{imports}
+{fewshot_examples}
+{function_header}
+```
 
-### Problem Descriptions
+**EoH-style** (`templates/eoh.txt`):
+```
+{problem_description}
+{fewshot_preamble}
+{fewshot_examples}
+{prompt_style}
+{inout_spec}
+```
 
-Located in `src/disfun/specifications/Deletions/problem_descriptions/`:
+## Reserved Placeholders
 
-**baseline.txt**
-- Generic problem description using graph-tool (faster than NetworkX)
-- "Nodes are connected if they share a subsequence of length at least n-s"
-- Shows `import graph_tool.all as gt` to LLM (allows graph operations)
-- Passes graph to priority: `priority(node, G_gt, node_to_vertex, vertex_to_node, n, s)`
-  - `node_to_vertex`: Maps node strings (e.g., "0110") to graph-tool vertex indices
-  - `vertex_to_node`: Maps graph-tool vertex indices back to node strings
-  - Needed because graph-tool uses integer indices internally
+These are computed at runtime, not loaded from files:
 
-**explicit_s1.txt**
-- Same as baseline but explicitly states "s = 1" in the problem statement
-- Helps the model understand the specific constraint value
-- Uses graph-tool, passes graph to priority function
+| Placeholder | Description |
+|-------------|-------------|
+| `{fewshot_examples}` | Built from sampled programs (includes scores if enabled) |
+| `{num_examples}` | Count of fewshot examples |
+| `{version}` | `num_examples + 1` |
+| `{function_header}` | `def priority_v{version}({args}):` where args/return type extracted from `initial_functions_dir` |
+| `{inout_spec}` | Input/output specification with args from `initial_functions_dir` |
 
-**no_graph.txt**
-- Hides graph library imports from LLM (inside `load_graph` function)
-- Does not pass graph to priority function: `priority(node, n, s)`
-- Forces LLM to use only string properties (no graph operations available)
 
-**string_properties.txt**
-- Like baseline (shows graph-tool import, passes graph to priority function)
-- Adds explicit hint: "Consider properties of the q-ary string `node`, such as specific patterns, the number of each symbol, or other unique features, to calculate the priority."
-- Guides the model to consider string-level features even when graph is available
-- Priority signature: `priority(node, G_gt, node_to_vertex, vertex_to_node, n, s)`
+## Problem Descriptions
 
-### Prompt Formats
+Located in `specifications/{Task}/problem_descriptions/`:
 
-Located in `src/disfun/specifications/Deletions/prompt_styles/`:
+| File | Description |
+|------|-------------|
+| `baseline.txt` | Generic problem description |
+| `explicit_s1.txt` | States "s = 1" explicitly |
+| `string_properties.txt` | Hints about string properties |
 
-**None** (Code Completion)
-- No prompt style file, pure code completion
-- For base models like StarCoder, Llama base (not instruction-tuned)
-- Model sees problem + examples + function header, completes naturally
-- Set `prompt_style_path=None` in config
-- Example output:
-  ```python
-  return G.degree(node)
-  ```
+## Prompt Styles
 
-**funsearch.txt** (FunSearch)
-- Code only with minimal instructions
-- For instruction-tuned models like GPT, Claude
-- Tells model to return only function body
-- Example output:
-  ```python
-  return G.degree(node)
-  ```
+Located in `specifications/{Task}/prompt_styles/`:
 
-**eoh.txt** (Evolution of Heuristics)
-- One-sentence algorithm description + code
-- Format:
-  ```
-  <thought>
-  Prioritize nodes with lower degree to reduce conflicts
-  </thought>
+| File/Directory | Description |
+|----------------|-------------|
+| `None` | Pure code completion (no instructions) |
+| `starcoder2.txt` | Minimal "Improve..." instruction |
+| `funsearch.txt` | "Improve..." + `<code>` tags |
+| `eoh_minimal.txt` | "Improve..." + `<thought>` + `<code>` |
+| `extended_eoh.txt` | "Improve..." + `<thinking>` + `<thought>` + `<code>` |
+| `eoh_full/` | Original EoH prompt styles (directory, samples one) |
 
-  <code>
-  return -G.degree(node)
-  </code>
-  ```
+### EoH Operators (`eoh_full/`)
 
-**extended_eoh.txt** (Extended EoH)
-- Full chain-of-thought reasoning + one-sentence summary + code
-- Format:
-  ```
-  <thinking>
-  Analysis of graph structure...
-  Why this approach works...
-  Generalization considerations...
-  </thinking>
+From the EoH paper (Liu et al., ICML 2024):
+- Source: https://github.com/FeiLiu36/EoH/blob/main/eoh/src/eoh/methods/eoh/eoh_evolution.py
 
-  <thought>
-  Prioritize nodes with lower degree
-  </thought>
+| File | Description |
+|------|-------------|
+| `e1.txt` | Create something completely different |
+| `e2.txt` | Identify patterns, add novel change |
+| `fs1_m1.txt` | Targeted improvements (1 fewshot) |
+| `fs1_m2.txt` | Vary parameters in fewshot example (1 fewshot) |
+| `fs1_m3.txt` | Remove redundant parts (1 fewshot) |
 
-  <code>
-  return -G.degree(node)
-  </code>
-  ```
+**Fewshot Override**: Files with `fs{N}_` prefix use N examples instead of config default.
 
-## Configuration
+## Evaluation Code in Prompt
 
-You can configure the prompt in `config.py`:
+Optionally include the evaluation script in the prompt so the LLM can see how the priority function is used:
 
 ```python
-from disfun.experiments.experiment1.config import Config, EvaluatorConfig, PromptConfig
-
-config = Config(
-    # Evaluation script (how code is executed)
-    evaluator=EvaluatorConfig(
-        # Uses absolute path: defaults to deletion_codes.py
-        # Override with: evaluation_script_path="/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/my_eval.py"
-        s_values=[1, 2],
-        start_n=[6, 7],
-        end_n=[10, 12]
-    ),
-
-    # Prompt construction (what LLM sees and how to format output)
-    prompt=PromptConfig(
-        # What content the LLM sees (absolute path)
-        # Defaults to baseline.txt, override with:
-        # problem_description_path="/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/problem_descriptions/explicit_s1.txt"
-        # Options: "baseline.txt", "explicit_s1.txt", "no_graph.txt", "string_properties.txt"
-
-        # How to format output (absolute path or None)
-        prompt_style_path=None,  # None for code completion (StarCoder)
-        # Or use: prompt_style_path="/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/prompt_styles/funsearch.txt"
-        # Options: None, "funsearch.txt", "eoh.txt", "extended_eoh.txt"
-
-        # Few-shot configuration
-        fewshot_num_examples=3,
-        fewshot_show_thinking=False,  # Show full reasoning (extended_eoh)
-        fewshot_show_thought=True,    # Show algorithm descriptions (eoh)
-        fewshot_show_code=True        # Show implementations
-    )
-)
+placeholders: dict = {
+    # ... other placeholders ...
+    "evaluation_preamble": ".../components/evaluation_preamble.txt",
+    "evaluation_script": ".../evaluation/graph_networkx.py",
+}
 ```
 
-## Score Display in Prompts
+When both are set:
+- `evaluation_preamble` provides intro text: "This is how the priority function gets evaluated:"
+- `evaluation_script` content is wrapped in \`\`\`python code 
 
-Control whether evaluation scores are shown in few-shot examples.
+When both are `None` (default), nothing appears in the prompt.
 
-**Basic usage:**
+## Score Display
 
-```python
-from disfun.config import Config, PromptConfig
+When `show_eval_scores=True`, scores are added to fewshot docstrings. Configure in `PromptConfig`:
+- `display_mode`: `"absolute"` or `"relative"`
+- `absolute_label` / `relative_label`: Prefix text for scores
+- `best_known_solutions`: Required for relative mode
 
-config = Config(
-    prompt=PromptConfig(
-        show_eval_scores=True,  # Show scores (default: False)
-        display_mode="absolute"  # "absolute" or "relative"
-    )
-)
-```
+## Creating Custom Templates
 
-**Absolute mode** shows raw scores: `(7, 2): 5, (8, 2): 7`
+1. Create template file with `{placeholder}` syntax
+2. Create files for each placeholder
+3. Configure paths in `PromptConfig`
 
-**Relative mode** shows percentage improvement over baseline: `(7, 2): +20%, (8, 2): +14%`
-- Requires `best_known_solutions` dictionary with baseline scores
-- Formula: `(Score_ours - Score_baseline) / |Score_baseline| × 100%`
-
-## How Prompts Are Built
-
-When the ProgramsDatabase generates a prompt:
-
-1. **Load specification files** (once per run)
-   - Load `problem_descriptions/{problem_description}.txt` - Problem context, imports, docstring
-   - Load `prompt_styles/{style}.txt` - Output format instructions (empty for code completion mode)
-
-2. **Build few-shot examples** (each prompt)
-   - Sample high-performing programs from database
-   - Format according to `PromptConfig.fewshot_*` settings
-   - Include thinking/thought/code based on config
-
-3. **Construct final prompt**
-
-   The prompt is assembled in this order:
-
-   ```
-   [1. Problem description with imports]
-   """
-   Finds large independent set in graph G where nodes are q-ary strings of length n.
-   Nodes in G are connected if they share a subsequence of length at least n-s.
-
-   Improve the `priority_v{version}` function over its previous versions below.
-   Keep the code short and comment for easy understanding.
-   """
-
-   import itertools
-   import hashlib
-   import numpy as np
-   import graph_tool.all as gt
-
-   [2. Few-shot examples - if any]
-   # Previous implementations:
-   Example 1:
-   <thought>
-   Algorithm description from stored program
-   </thought>
-   <code>
-   Function body from stored program
-   </code>
-
-   Example 2:
-   ...
-
-   [3. Prompt style instructions - placed BEFORE function header]
-   Return only the function body as valid Python code, without the function header.
-   Do not include code block markers such as ```python or ```.
-
-   [4. Function header to complete]
-   def priority_v5(node, G_gt, node_to_vertex, vertex_to_node, n, s):
-       [Model completes here]
-   ```
-
-   **For code completion models** (StarCoder, Llama base), step 3 is skipped (prompt_style=None),
-   so the model sees only parts 1, 2, 4 and completes the function naturally.
-
-   **For instruction-tuned models** (GPT, Claude), instructions appear before the function header
-   to clearly frame the task while maintaining code completion context.
-
-## Parsing LLM Output
-
-The evaluator automatically parses LLM responses based on XML tags:
-
-- XML tag extraction via regex
-- AST parsing for code validation
-- Falls back to code-only if tags missing
-
-
-**Extended EoH format:**
-```python
-# Extracts all three components
-<thinking>Full reasoning...</thinking>
-<thought>Algorithm summary</thought>
-<code>return value</code>
-
-# Stored in Function object:
-function.thinking = "Full reasoning..."
-function.thought = "Algorithm summary"
-function.body = "return value"
-```
-
-**EoH format:**
-```python
-# Extracts thought and code
-<thought>Algorithm summary</thought>
-<code>return value</code>
-
-# Stored:
-function.thinking = None
-function.thought = "Algorithm summary"
-function.body = "return value"
-```
-
-**FunSearch format:**
-```python
-# Raw code only
-return value
-
-# Stored:
-function.thinking = None
-function.thought = None
-function.body = "return value"
-```
-
-## Creating Custom Variants
-
-### Custom Problem Description
-
-Create `src/disfun/specifications/Deletions/problem_descriptions/my_variant.txt`:
-
-```python
-"""
-Your problem description here...
-Explain the task, constraints, and objectives.
-"""
-
-import required_libraries
-
-def helper_functions():
-    # Problem-specific helpers
-    pass
-
-def priority(node, G, n, s):
-    """Function to evolve."""
-    return 0.0
-```
-
-Set in config:
-```python
-prompt=PromptConfig(
-    problem_description_path="/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/problem_descriptions/my_variant.txt"
-)
-```
-
-### Custom Prompt Format
-
-Create `src/disfun/specifications/Deletions/prompt_styles/my_style.txt`:
-
-```
-Instructions for the LLM on how to format output.
-
-Use <tags> to structure the response.
-
-Example format:
-<tag1>
-Content for tag1
-</tag1>
-
-<tag2>
-Content for tag2
-</tag2>
-```
-
-Set in config:
-```python
-prompt=PromptConfig(
-    prompt_style_path="/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/prompt_styles/my_style.txt"
-)
-```
-
-### Custom Evaluation Logic
-
-Create `src/disfun/specifications/Deletions/evaluation/my_eval.py` to specify how the evolved function is evaluated.
-
-Set in config:
-```python
-evaluator=EvaluatorConfig(
-    evaluation_script_path="/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/my_eval.py"
-)
-``` 

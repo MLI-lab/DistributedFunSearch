@@ -1,3 +1,6 @@
-Continue the function implementation below.
-Output your implementation inside <code> tags:
+"""
+Improve the `priority_v{version}` function over its previous versions below.
+Keep the code short and comment for easy understanding.
+Output the continuation of the function inside <code> tags:
 <code>Your implementation</code>
+"""

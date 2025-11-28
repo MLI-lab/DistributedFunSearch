@@ -17,16 +17,16 @@
 This is a distributed implementation of FunSearch, adapted from DeepMind's original single-threaded version.
 It uses RabbitMQ and asyncio for asynchronous message passing, enabling parallel evaluation and sampling across multiple processes and nodes.
 
-In initialize_logger set logger.setLevel(logging.INFO) to logger.setLevel(logging.DEBUG) for more detailed logs including prompt sent to LLM. 
+In initialize_logger set logger.setLevel(logging.INFO) to logger.setLevel(logging.DEBUG) for more detailed logs including prompt sent to LLM.
 """
 
 import os
+import re
 import sys
 import time
 import glob
 
 import json
-import copy
 import shutil
 import signal
 import pickle
@@ -34,22 +34,16 @@ import argparse
 import logging
 import asyncio
 import datetime
-from typing import Sequence, Any
-from logging import FileHandler
-from multiprocessing import Manager, current_process
+from typing import Any
+from collections.abc import Sequence
 
 import torch.multiprocessing as mp
 import aio_pika
-from yarl import URL
 import psutil
-import GPUtil
-import pynvml
 
 from disfun import (
     programs_database,
-    sampler,
     code_manipulation,
-    evaluator,
     process_utils,
 )
 from disfun.scaling_utils import ResourceManager
@@ -108,7 +102,8 @@ def create_evaluation_inputs(config):
         for s, start_n, end_n in zip(
             config.evaluator.s_values,
             config.evaluator.start_n,
-            config.evaluator.end_n
+            config.evaluator.end_n,
+            strict=True
         )
         for n in range(start_n, end_n + 1)
     ]
@@ -118,7 +113,6 @@ def create_evaluation_inputs(config):
 class TaskManager:
     def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, target_signatures, config_path, sandbox_base_path):
         self.template = code_manipulation.text_to_program(specification)
-        self.template_pdb = code_manipulation.text_to_program(specification, remove_classes=True) # we do not include class definitions in prompt to LLM
         self.inputs = inputs
         self.config = config
         self.config_path = config_path  # Store for spawn compatibility
@@ -192,7 +186,7 @@ class TaskManager:
             for task in tasks:
                 coro_name = task.get_coro().__name__ if task.get_coro() else "Unknown"
                 self.logger.debug(f"Task: {task.get_name()}, Function: {coro_name}, Status: {task._state}")
-            
+
                 # Log the stack of the task if it's pending or blocked
                 if task._state == "PENDING":
                     stack = task.get_stack()
@@ -207,7 +201,6 @@ class TaskManager:
         # If resuming from checkpoint, try to load the original run name
         if checkpoint_file:
             # e.g., /path/checkpoint_run_20251109_120115/checkpoint_*.pkl to run_20251109_120115
-            import re
             path_match = re.search(r'/checkpoint_(run_\d{8}_\d{6})/', checkpoint_file)
             if path_match:
                 run_name = path_match.group(1)
@@ -250,9 +243,11 @@ class TaskManager:
             self.logger.info("Random state will be restored from checkpoint")
 
         try:
-            connection = await process_utils.create_rabbitmq_connection(
+            # Test RabbitMQ connectivity before proceeding
+            test_connection = await process_utils.create_rabbitmq_connection(
                 self.config, timeout=300
             )
+            await test_connection.close()
         except Exception as e:
             self.logger.error(f"Cannot connect to RabbitMQ: {e}")
             self.logger.info("Cannot connect to rabbitmq. Change config file.")
@@ -281,12 +276,17 @@ class TaskManager:
 
                         # If no prompt_style, strip tags from initial functions
                         if strip_tags:
-                            import re
                             function_body = re.sub(r'<thinking>.*?</thinking>\s*', '', function_body, flags=re.DOTALL)
                             function_body = re.sub(r'<thought>.*?</thought>\s*', '', function_body, flags=re.DOTALL)
                             function_body = re.sub(r'<code>(.*?)</code>', r'\1', function_body, flags=re.DOTALL)
                             function_body = function_body.strip()
                             self.logger.info(f"Stripped tags from initial function: {txt_file.name}")
+
+                        # Always remove {score} placeholder from initial functions
+                        # The placeholder is only used when building fewshot prompts with show_eval_scores=True
+                        function_body = function_body.replace("{score}", "")
+                        # Clean up extra whitespace/newlines from removed placeholder
+                        function_body = re.sub(r'\n\s*\n\s*\n', '\n\n', function_body)
 
                         initial_program_data = json.dumps({
                             "sample": function_body,
@@ -326,15 +326,16 @@ class TaskManager:
                 database = programs_database.ProgramsDatabase(
                     self.database_connection, self.database_channel, database_queue,
                     sampler_queue, evaluator_queue, self.config.programs_database,
-                    self.template_pdb, function_to_evolve, checkpoint_file, save_checkpoints_path,
-                    mode=self.config.evaluator.mode, eval_code=self.config.evaluator.eval_code, include_nx=self.config.evaluator.include_nx,
+                    function_to_evolve, checkpoint_file, save_checkpoints_path,
+                    mode=self.config.evaluator.mode,
                     start_n=self.config.evaluator.start_n, end_n=self.config.evaluator.end_n, s_values=self.config.evaluator.s_values, no_deduplication=self.config.programs_database.no_deduplication, prompt_limit=self.config.termination.prompt_limit if hasattr(self.config, 'termination') and self.config.termination else 400_000_000, optimal_solution_programs=self.config.termination.optimal_solution_programs if hasattr(self.config, 'termination') and self.config.termination else 200000, target_signatures=self.target_signatures,
                     show_eval_scores=self.config.prompt.show_eval_scores, display_mode=self.config.prompt.display_mode, best_known_solutions=self.config.prompt.best_known_solutions, absolute_label=self.config.prompt.absolute_label, relative_label=self.config.prompt.relative_label, q=self.config.evaluator.q,
                     wandb_config=self.config.wandb,
                     sampler_config=self.config.sampler,
                     evaluator_config=self.config.evaluator,
                     prompt_config=self.config.prompt,
-                    run_name=run_name
+                    run_name=run_name,
+                    rabbitmq_config=self.config
                 )
                 database_task = asyncio.create_task(database.consume_and_process())
             except Exception as e:
@@ -345,14 +346,20 @@ class TaskManager:
 
             # Start consumers before publishing
             try:
-                self.start_initial_processes(function_to_evolve, checkpoint_file)
+                # Get starting sampler ID from database (loaded from checkpoint if resuming)
+                # This ensures samplers get unique IDs that don't repeat seeds from previous runs
+                starting_sampler_id = database.next_sampler_id if checkpoint_file else 0
+                if checkpoint_file:
+                    self.logger.info(f"Resuming from checkpoint: starting sampler IDs at {starting_sampler_id}")
+
+                self.start_initial_processes(function_to_evolve, checkpoint_file, starting_sampler_id)
                 self.logger.info("Initial processes started successfully.")
 
-                # Sync next_sampler_id from database (which may have loaded from checkpoint)
+                # Sync next_sampler_id from database to resource manager
                 # This ensures dynamically scaled samplers get unique IDs that don't collide
                 if database.next_sampler_id > self.resource_manager.next_sampler_id:
                     self.resource_manager.next_sampler_id = database.next_sampler_id
-                    self.logger.info(f"Synced next_sampler_id from checkpoint: {database.next_sampler_id}")
+                    self.logger.info(f"Synced next_sampler_id to resource manager: {database.next_sampler_id}")
 
                 # Link resource_manager to database so sampler ID counter stays in sync for checkpointing
                 self.resource_manager.database = database
@@ -419,7 +426,7 @@ class TaskManager:
                         )
                     )
                     self.tasks.append(scaling_task)
-                except Exception as e: 
+                except Exception as e:
                     self.logger.error(f"Error enabling scaling {e}")
 
             self.channels = [self.database_channel, self.sampler_channel]
@@ -432,7 +439,7 @@ class TaskManager:
             self.logger.error(f"Exception occurred in main_task: {e}")
 
 
-    def start_initial_processes(self, function_to_evolve, checkpoint_file):
+    def start_initial_processes(self, function_to_evolve, checkpoint_file, starting_sampler_id=0):
         from disfun.sampler import is_local_model
         import traceback
 
@@ -443,6 +450,9 @@ class TaskManager:
             self.logger.error(f"Error checking model type: {e}")
             self.logger.error(traceback.format_exc())
             raise
+
+        # Track the next sampler ID to assign (starts from checkpoint value if resuming)
+        next_sampler_id = starting_sampler_id
 
         if use_local:
             # LOCAL MODEL: Each sampler loads model on assigned GPU
@@ -469,25 +479,27 @@ class TaskManager:
 
                 host_gpu, device = assignment
                 assigned_gpus.add(device)
-                self.logger.info(f"Assigning sampler {i} to GPU {device} (host GPU: {host_gpu})")
+                sampler_id = next_sampler_id
+                next_sampler_id += 1
+                self.logger.info(f"Assigning sampler (ID={sampler_id}) to GPU {device} (host GPU: {host_gpu})")
 
                 try:
                     proc = ctx.Process(
                         target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename, i),
-                        name=f"Sampler-{i}"
+                        args=(self.config_path, device, self.log_dir, self.log_filename, sampler_id),
+                        name=f"Sampler-{sampler_id}"
                     )
                     proc.start()
-                    self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid} on GPU {device}")
+                    self.logger.info(f"Started Sampler Process (ID={sampler_id}) with PID: {proc.pid} on GPU {device}")
                     self.sampler_processes.append(proc)
                     self.process_to_device_map[proc.pid] = device
 
                     # Delay between starting samplers to avoid model loading race conditions
                     if i < self.config.num_samplers - 1:
-                        self.logger.info(f"Waiting 10 seconds before starting next sampler...")
+                        self.logger.info("Waiting 10 seconds before starting next sampler...")
                         time.sleep(10)
                 except Exception as e:
-                    self.logger.error(f"Failed to start sampler {i}: {e}")
+                    self.logger.error(f"Failed to start sampler (ID={sampler_id}): {e}")
                     continue
         else:
             # API MODEL: Samplers are CPU processes
@@ -495,25 +507,27 @@ class TaskManager:
             self.logger.info("Samplers will use API (no GPU assignment needed)")
 
             ctx = mp.get_context('spawn')
-            for i in range(self.config.num_samplers):
+            for _ in range(self.config.num_samplers):
                 device = None  # No GPU for API models
+                sampler_id = next_sampler_id
+                next_sampler_id += 1
                 try:
                     proc = ctx.Process(
                         target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename, i),
-                        name=f"Sampler-{i}"
+                        args=(self.config_path, device, self.log_dir, self.log_filename, sampler_id),
+                        name=f"Sampler-{sampler_id}"
                     )
                     proc.start()
-                    self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid}")
+                    self.logger.info(f"Started Sampler Process (ID={sampler_id}) with PID: {proc.pid}")
                     self.sampler_processes.append(proc)
                     self.process_to_device_map[proc.pid] = device
                 except Exception as e:
-                    self.logger.error(f"Error starting sampler {i}: {e}")
+                    self.logger.error(f"Error starting sampler (ID={sampler_id}): {e}")
                     continue
 
         # Initialize ResourceManager's next_sampler_id to continue from where we left off
         # This ensures dynamically scaled samplers get unique IDs that don't collide with initial ones
-        self.resource_manager.next_sampler_id = self.config.num_samplers
+        self.resource_manager.next_sampler_id = next_sampler_id
         self.logger.info(f"Initialized next_sampler_id to {self.resource_manager.next_sampler_id} for dynamic scaling")
 
         # Start initial evaluator processes
@@ -529,239 +543,6 @@ class TaskManager:
             self.logger.debug(f"Started Evaluator Process {i} with PID: {proc.pid}")
             self.evaluator_processes.append(proc)
 
-
-
-    def sampler_process(self, device=None):
-        local_id = current_process().pid  # Use process ID as a local identifier
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        connection = None
-        channel = None
-        sampler_task = None
-        sampler_instance = None  # Make instance accessible for cleanup
-        cleanup_done = False  # Track if cleanup has been done
-
-        async def graceful_shutdown(loop, connection, channel, sampler_task, sampler_instance):
-            nonlocal cleanup_done
-            if cleanup_done:
-                return
-
-            self.logger.info(f"Sampler {local_id}: Initiating graceful shutdown...")
-
-            # Cancel the consume task first to stop processing
-            if sampler_task and not sampler_task.done():
-                self.logger.info(f"Sampler {local_id}: Cancelling consume task...")
-                sampler_task.cancel()
-                try:
-                    await asyncio.wait_for(sampler_task, timeout=2)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass  # Expected
-                except Exception as e:
-                    self.logger.warning(f"Sampler {local_id}: Error cancelling task: {e}")
-
-            # Then clean up LLM model to release GPU memory
-            if sampler_instance:
-                try:
-                    self.logger.info(f"Sampler {local_id}: Cleaning up LLM resources...")
-                    sampler_instance.cleanup()
-                    del sampler_instance
-                except Exception as e:
-                    self.logger.error(f"Sampler {local_id}: Error during sampler cleanup: {e}")
-
-            if channel:
-                try:
-                    await channel.close()
-                except Exception as e:
-                    self.logger.info(f"Sampler {local_id}: Error closing channel: {e}")
-
-            if connection:
-                try:
-                    await connection.close()
-                except Exception as e:
-                    self.logger.info(f"Sampler {local_id}: Error closing connection: {e}")
-
-            cleanup_done = True
-            self.logger.info(f"Sampler {local_id}: Graceful shutdown complete.")
-            loop.stop()  # Stop the event loop from within this coroutine
-
-
-
-        async def run_sampler():
-            nonlocal connection, channel, sampler_task, sampler_instance, cleanup_done
-            try:
-                self.logger.info(f"Sampler {local_id}: Starting connection to RabbitMQ on device {device}...")
-                connection = await process_utils.create_rabbitmq_connection(
-                    self.config, timeout=300
-                )
-                self.logger.info(f"Sampler {local_id}: Connected to RabbitMQ successfully.")
-                channel = await connection.channel()
-                self.logger.info(f"Sampler {local_id}: Channel established.")
-
-                sampler_queue = await process_utils.declare_standard_queue(channel, "sampler_queue")
-                self.logger.info(f"Sampler {local_id}: Declared sampler_queue.")
-
-                evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
-                self.logger.info(f"Sampler {local_id}: Declared evaluator_queue.")
-
-                try:
-                    self.logger.info(f"Sampler {local_id}: Initializing sampler with model {self.config.sampler.model} on device {device}...")
-                    sampler_instance = sampler.Sampler(
-                        connection, channel, sampler_queue, evaluator_queue, self.config.sampler, device=device
-                    )
-                    self.logger.info(f"Sampler {local_id}: Sampler instance initialized successfully.")
-                except Exception as e:
-                    self.logger.error(f"Sampler {local_id}: Could not start Sampler instance, {e}", exc_info=True)
-                    return
-
-                self.logger.info(f"Sampler {local_id}: Starting consume_and_process task...")
-                sampler_task = asyncio.create_task(sampler_instance.consume_and_process())
-                self.logger.info(f"Sampler {local_id}: consume_and_process task created, now awaiting...")
-                await sampler_task
-
-            except asyncio.CancelledError:
-                print(f"Sampler {local_id}: Process was cancelled.")
-            except Exception as e:
-                print(f"Sampler {local_id} encountered an error: {e}")
-            finally:
-                if not cleanup_done:
-                    if channel:
-                        await channel.close()
-                    if connection:
-                        await connection.close()
-                    self.logger.debug(f"Sampler {local_id}: Connection closed.")
-
-        # Set up signal handlers using utility function
-        process_utils.setup_signal_handlers(
-            loop, "Sampler", local_id, self.logger,
-            lambda: graceful_shutdown(loop, connection, channel, sampler_task, sampler_instance)
-        )
-
-        try:
-            loop.run_until_complete(run_sampler())
-        finally:
-            loop.close()
-            self.logger.info(f"Sampler {local_id}: Event loop closed.")
-            # Explicitly exit the process to prevent hanging
-            sys.exit(0)
-
-
-    def evaluator_process(self, template, inputs, target_signatures):
-        import disfun.evaluator
-        import signal
-        import asyncio
-
-        local_id = mp.current_process().pid  # Use process ID as a local identifier
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-
-        connection = None
-        channel = None
-        evaluator_task = None
-        evaluator_instance = None  # Make instance accessible for cleanup
-        cleanup_done = False  # Track if cleanup has been done
-
-        async def graceful_shutdown(loop, connection, channel, evaluator_task, evaluator_instance):
-            """Gracefully shut down the evaluator task - AMQP channel - and connection."""
-            nonlocal cleanup_done
-            if cleanup_done:
-                return
-
-            self.logger.info(f"Evaluator {local_id}: Initiating graceful shutdown...")
-
-            # Cancel the consume task first to stop processing
-            if evaluator_task and not evaluator_task.done():
-                self.logger.info(f"Evaluator {local_id}: Cancelling consume task...")
-                evaluator_task.cancel()
-                try:
-                    await asyncio.wait_for(evaluator_task, timeout=2)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass  # Expected
-                except Exception as e:
-                    self.logger.warning(f"Evaluator {local_id}: Error cancelling task: {e}")
-
-            # Then clean up executor and child processes
-            if evaluator_instance:
-                try:
-                    self.logger.info(f"Evaluator {local_id}: Shutting down evaluator instance...")
-                    await evaluator_instance.shutdown()
-                except Exception as e:
-                    self.logger.error(f"Evaluator {local_id}: Error during evaluator shutdown: {e}")
-
-            if channel:
-                try:
-                    await channel.close()
-                except Exception as e:
-                    self.logger.info(f"Evaluator {local_id}: Error closing channel: {e}")
-
-            if connection:
-                try:
-                    await connection.close()
-                except Exception as e:
-                    self.logger.info(f"Evaluator {local_id}: Error closing connection: {e}")
-
-            cleanup_done = True
-            self.logger.info(f"Evaluator {local_id}: Graceful shutdown complete.")
-            loop.stop()  # Stop the event loop from within this coroutine
-
-        async def run_evaluator():
-            """Main async entry: connects to AMQP - starts the evaluator task - etc."""
-            nonlocal connection, channel, evaluator_task, evaluator_instance, cleanup_done
-
-            try:
-                connection = await process_utils.create_rabbitmq_connection(
-                    self.config, timeout=300
-                )
-                channel = await connection.channel()
-
-                evaluator_queue = await process_utils.declare_standard_queue(channel, "evaluator_queue")
-                database_queue = await process_utils.declare_standard_queue(channel, "database_queue")
-
-                evaluator_instance = evaluator.Evaluator(
-                    connection, channel, evaluator_queue, database_queue,
-                    self.template, 'priority', 'evaluate', inputs, args.sandbox_base_path,
-                    timeout_seconds=self.config.evaluator.timeout,
-                    local_id=local_id,
-                    target_signatures=self.target_signatures,
-                    max_workers=self.config.evaluator.max_workers,
-                    graph_dir=self.config.evaluator.graph_dir,
-                    cache_graphs=self.config.evaluator.cache_graphs,
-                    cache_size_limit_gb=self.config.evaluator.cache_size_limit_gb
-                )
-
-                # Create the evaluator task.
-                evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
-
-                # Wait for the evaluator task to finish (or get cancelled).
-                await evaluator_task
-
-            except asyncio.CancelledError:
-                self.logger.info(f"Evaluator {local_id}: Process was cancelled.")
-            except Exception as e:
-                self.logger.info(f"Evaluator {local_id}: Error occurred: {e}")
-            finally:
-                # In case we didn't go through graceful_shutdown yet - close everything
-                if not cleanup_done:
-                    if channel:
-                        await channel.close()
-                    if connection:
-                        await connection.close()
-                    self.logger.debug(f"Evaluator {local_id}: Connection/Channel closed.")
-
-        # Set up signal handlers using utility function
-        process_utils.setup_signal_handlers(
-            loop, "Evaluator", local_id, self.logger,
-            lambda: graceful_shutdown(loop, connection, channel, evaluator_task, evaluator_instance)
-        )
-
-        try:
-            loop.run_until_complete(run_evaluator())
-        finally:
-            loop.close()
-            self.logger.info(f"Evaluator {local_id}: Event loop closed.")
-            # Explicitly exit the process to prevent hanging
-            sys.exit(0)
 
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -894,8 +675,8 @@ if __name__ == "__main__":
             # Use config value
             target_signatures = config.termination.target_solutions if config.termination.target_solutions else None
 
-    except json.JSONDecodeError:
-        raise ValueError("Invalid JSON format for --target_solutions. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'.")
+    except json.JSONDecodeError as e:
+        raise ValueError("Invalid JSON format for --target_solutions. Example: '{\"(6, 1)\": 8, \"(7, 1)\": 14, \"(8, 1)\": 25}'.") from e
 
     if backup_enabled:
         # Define the source directory (current working directory)
@@ -934,7 +715,7 @@ if __name__ == "__main__":
         eval_script_path = Path(config.evaluator.evaluation_script_path)
 
         try:
-            with open(eval_script_path, 'r') as file:
+            with open(eval_script_path) as file:
                 specification = file.read()
             if not isinstance(specification, str) or not specification.strip():
                 raise ValueError("Specification must be a non-empty string.")
@@ -956,7 +737,7 @@ if __name__ == "__main__":
 
         # Generate evaluation input tuples
         inputs = create_evaluation_inputs(config)
- 
+
         # Initialize the task manager
         task_manager = TaskManager(
             specification=specification,
