@@ -16,10 +16,10 @@
 """Unified LiteLLM-based Sampler with vLLM support.
 
 This sampler replaces both the original sampler.py (HuggingFace transformers)
-and gpt.py (Azure OpenAI) with a single unified implementation using LiteLLM.
+and gpt.py (Azure OpenAI) with a single unified implemeOntation using LiteLLM.
 
 Key features:
-* Supports 100+ LLM providers through LiteLLM (OpenAI - Anthropic - Together AI - local vLLM - etc.)
+* Supports 100+ LLM providers through LiteLLM (OpenAI, Anthropic, Together AI, local vLLM, etc.)
 * Dynamic batching based on message load (10ms window - up to 10 prompts per batch)
 * Dynamic temperature adjustment based on stored program count
 * Token tracking for both input and output
@@ -330,8 +330,7 @@ class LLM_model:
                 )
             except TimeoutError as e:
                 logger.error(
-                    f"vLLM inference timed out after {self.inference_timeout}s for {len(prompts)} prompts. "
-                    f"Sampler will exit for restart by ResourceManager."
+                    f"vLLM inference timed out after {self.inference_timeout}s for {len(prompts)} prompts."
                 )
                 raise VLLMTimeoutError(
                     f"vLLM inference exceeded {self.inference_timeout}s timeout"
@@ -386,8 +385,7 @@ class LLM_model:
 
             if self.consecutive_failures >= self.max_consecutive_failures:
                 logger.error(
-                    f"vLLM has failed {self.consecutive_failures} times consecutively. "
-                    f"Sampler will exit for restart by ResourceManager."
+                    f"vLLM has failed {self.consecutive_failures} times consecutively."
                 )
                 raise VLLMRepeatedFailureError(
                     f"vLLM failed {self.consecutive_failures} times consecutively"
@@ -758,21 +756,12 @@ class Sampler:
                 logger.info(f"Sampler ({self._config.model}): Cancelled, exiting...")
                 break
 
-            except VLLMTimeoutError as e:
-                # vLLM is hung - exit process so ResourceManager can respawn
+            except (VLLMTimeoutError, VLLMRepeatedFailureError) as e:
+                # vLLM is dead - exit immediately for clean restart
+                # Don't try reinit: it rarely helps and a fresh process is more reliable
                 logger.error(
                     f"Sampler ({self._config.model}): {e}. "
-                    f"Exiting process for restart..."
-                )
-                await self._close_connection()
-                import sys
-                sys.exit(1)
-
-            except VLLMRepeatedFailureError as e:
-                # vLLM is in a bad state - exit process so ResourceManager can respawn
-                logger.error(
-                    f"Sampler ({self._config.model}): {e}. "
-                    f"Exiting process for restart..."
+                    f"Exiting process for clean restart by ResourceManager..."
                 )
                 await self._close_connection()
                 import sys
@@ -856,7 +845,11 @@ class Sampler:
                 prompts, total_registered_programs, self.temperature_period
             )
             inference_time = self._llm.inference_time
+        except (VLLMTimeoutError, VLLMRepeatedFailureError):
+            # Fatal errors - vLLM engine is dead, need process restart
+            raise
         except Exception as e:
+            # Transient errors - skip this batch, continue with next
             logger.error(f"LLM sampling failed: {e}")
             return
 

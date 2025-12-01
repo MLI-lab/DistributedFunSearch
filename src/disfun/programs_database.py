@@ -451,8 +451,16 @@ class ProgramsDatabase:
             initial_func_path = next(Path(self.evaluator_config.initial_functions_dir).glob("*.txt"))
             self._function_args, self._return_type = specification_loader.extract_function_signature(str(initial_func_path))
 
-            # Pre-compute inout_spec (fully static)
-            self._inout_spec = f"The function should accept inputs: {self._function_args}.\nThe function should return output: {self._return_type}.\nDo not give additional explanations."
+            # Load inout_spec template from components if provided, otherwise empty
+            inout_spec_path = self.prompt_config.placeholders.get("inout_spec")
+            if inout_spec_path and Path(inout_spec_path).exists():
+                inout_spec_template = Path(inout_spec_path).read_text().strip()
+                self._inout_spec = inout_spec_template.format(
+                    function_args=self._function_args,
+                    return_type=self._return_type
+                )
+            else:
+                self._inout_spec = ""
 
             # Pre-compute function_header template ({version} and {prev_version} replaced per-prompt)
             self._function_header_template = f"def {self._function_to_evolve}_v{{version}}({self._function_args}) -> {self._return_type}:\n    \"\"\"Improved version of `{self._function_to_evolve}_v{{prev_version}}`.\"\"\""
@@ -1128,7 +1136,7 @@ class ProgramsDatabase:
         for i, impl in enumerate(implementations):
             impl.name = f'{self._function_to_evolve}_v{i}'
             if i > 0:
-                impl.docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`.'
+                impl.docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`. {{score}}'
 
         num_examples = len(implementations)
         version = num_examples  # Next version after v0, v1, ... is vN where N = num_examples

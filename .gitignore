@@ -92,3 +92,6 @@ src/experiments/experiment1/exp1.sh
 .env
 *.env
 !.env.example
+
+# Ignore plan files
+REEVO_PLAN.md

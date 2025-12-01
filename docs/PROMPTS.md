@@ -35,7 +35,8 @@ specifications/Deletions/
 │   └── no_graph.py
 └── components/
     ├── fewshot_preamble.txt
-    └── evaluation_preamble.txt  # "This is how the priority function gets evaluated:"
+    ├── evaluation_preamble.txt  # "This is how the priority function gets evaluated:"
+    └── inout_spec.txt           # Template for input/output specification
 ```
 
 ## Example Templates
@@ -62,15 +63,20 @@ specifications/Deletions/
 
 ## Reserved Placeholders
 
-These are computed at runtime, not loaded from files:
+Computed at runtime (per prompt):
 
 | Placeholder | Description |
 |-------------|-------------|
 | `{fewshot_examples}` | Built from sampled programs (includes scores if enabled) |
 | `{num_examples}` | Count of fewshot examples |
 | `{version}` | `num_examples + 1` |
+
+Computed once at initialization:
+
+| Placeholder | Description |
+|-------------|-------------|
 | `{function_header}` | `def priority_v{version}({args}):` where args/return type extracted from `initial_functions_dir` |
-| `{inout_spec}` | Input/output specification with args from `initial_functions_dir` |
+| `{inout_spec}` | Loaded from `placeholders["inout_spec"]` template file, or empty if not set |
 
 
 ## Problem Descriptions
@@ -111,6 +117,17 @@ From the EoH paper (Liu et al., ICML 2024):
 
 **Fewshot Override**: Files with `fs{N}_` prefix use N examples instead of config default.
 
+### `{inout_spec}` Placeholder
+
+Template file (`components/inout_spec.txt`) with `{function_args}` and `{return_type}` placeholders:
+```
+The function should accept inputs: {function_args}.
+The function should return output: {return_type}.
+Do not give additional explanations.
+```
+
+These placeholders are replaced with values extracted from the initial function signature at initialization. If no `inout_spec` path is configured, the placeholder is replaced with an empty string.
+
 ## Evaluation Code in Prompt
 
 Optionally include the evaluation script in the prompt so the LLM can see how the priority function is used:
@@ -135,6 +152,20 @@ When `show_eval_scores=True`, scores are added to fewshot docstrings. Configure 
 - `display_mode`: `"absolute"` or `"relative"`
 - `absolute_label` / `relative_label`: Prefix text for scores
 - `best_known_solutions`: Required for relative mode
+
+### How Fewshot Docstrings Work
+
+The first fewshot example (`priority_v0`) keeps the docstring from the initial function file (e.g., `zero.txt`). Use `{score}` as a placeholder where you want scores inserted:
+
+```python
+def priority(node, n, s, q) -> float:
+    """Returns the priority with which we want to add `node` to the independent set.{score}"""
+    return 0.0
+```
+
+When `show_eval_scores=True`, `{score}` is replaced with formatted scores. When disabled, `{score}` is removed.
+
+All subsequent fewshot examples (`priority_v1`, `priority_v2`, etc.) have their docstrings set to `"Improved version of \`priority_v{N-1}\`."` with scores appended when enabled.
 
 ## Creating Custom Templates
 

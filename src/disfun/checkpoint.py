@@ -4,6 +4,7 @@ import os
 import pickle
 import datetime
 import logging
+import random
 import numpy as np
 
 from disfun import code_manipulation
@@ -49,11 +50,16 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
         database.wandb_run_name = checkpoint_run_name
         logger.info(f"Restored run name from checkpoint: {checkpoint_run_name}")
 
-    # Restore numpy random state for reproducibility
+    # Restore random states for reproducibility
     numpy_random_state = checkpoint_data.get("numpy_random_state", None)
     if numpy_random_state:
         np.random.set_state(numpy_random_state)
         logger.info("Restored numpy random state from checkpoint")
+
+    python_random_state = checkpoint_data.get("python_random_state", None)
+    if python_random_state:
+        random.setstate(python_random_state)
+        logger.info("Restored Python random state from checkpoint")
 
     # Restore sampler ID counter for reproducibility
     database.next_sampler_id = checkpoint_data.get("next_sampler_id", 0)
@@ -136,6 +142,7 @@ def serialize_checkpoint(database) -> dict:
         "wandb_run_id": database.wandb_run_id,
         "wandb_run_name": database.wandb_run_name,
         "numpy_random_state": np.random.get_state(),
+        "python_random_state": random.getstate(),
         "next_sampler_id": database.next_sampler_id,
         "islands_state": []
     }

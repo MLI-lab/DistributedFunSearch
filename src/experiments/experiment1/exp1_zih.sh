@@ -19,6 +19,11 @@ PROJECT_DIR="/home/frwe188h/DistributedFunSearch"
 EXPERIMENT_DIR="${PROJECT_DIR}/src/experiments/${EXPERIMENT_NAME}"
 RABBITMQ_VHOST="${EXPERIMENT_NAME}"
 
+# RabbitMQ ports (must match rabbitmq.conf)
+RABBITMQ_PORT=5673
+RABBITMQ_MANAGEMENT_PORT=15673
+RABBITMQ_CONF="${EXPERIMENT_DIR}/rabbitmq.conf"
+
 # Store large caches on horse (not home) - model weights can be 10-100+ GB
 export HF_HOME="${WORKSPACE}/cache/huggingface"
 export TORCH_HOME="${WORKSPACE}/cache/torch"
@@ -57,29 +62,13 @@ source "${WORKSPACE}/venv/bin/activate"
 # Add Erlang to PATH (for RabbitMQ)
 export PATH="/data/horse/ws/frwe188h-disfun/erlang/bin:\$PATH"
 
-# Update config with RabbitMQ hostname and vhost
+# Update config with RabbitMQ hostname, vhost, and ports
 python3 "${PROJECT_DIR}/src/disfun/update_config_file.py" \
-    "${EXPERIMENT_DIR}/config.py" "${RABBITMQ_HOSTNAME}" "${RABBITMQ_VHOST}"
+    "${EXPERIMENT_DIR}/config.py" "${RABBITMQ_HOSTNAME}" "${RABBITMQ_VHOST}" "${RABBITMQ_PORT}" "${RABBITMQ_MANAGEMENT_PORT}"
 
-# Configure RabbitMQ to allow guest from any host (before starting)
+# Configure RabbitMQ using the config file from the experiment directory
 mkdir -p /data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/etc/rabbitmq
-cat > /data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/etc/rabbitmq/rabbitmq.conf << 'RMQCONF'
-# Disable guest user loopback restriction
-loopback_users.guest = false
-
-# CRITICAL: Disable heartbeats to prevent false disconnects under high CPU load
-# RabbitMQ Erlang VM can get CPU-starved and miss heartbeat frames
-heartbeat = 0
-
-# Performance tuning
-vm_memory_high_watermark.relative = 0.6
-frame_max = 524288
-channel_max = 4096
-tcp_listen_options.backlog = 4096
-tcp_listen_options.sndbuf = 196608
-tcp_listen_options.recbuf = 196608
-collect_statistics_interval = 60000
-RMQCONF
+cp "${RABBITMQ_CONF}" /data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/etc/rabbitmq/rabbitmq.conf
 
 # Start RabbitMQ
 /data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/sbin/rabbitmq-server &
@@ -95,8 +84,8 @@ sleep 30
 echo "RabbitMQ ready"
 
 # Create reverse tunnel to login node for management access
-ssh -N -f -R 15672:localhost:15672 ${LOGIN_NODE} 2>/dev/null || true
-echo "Reverse tunnel to ${LOGIN_NODE}:15672 created"
+ssh -N -f -R ${RABBITMQ_MANAGEMENT_PORT}:localhost:${RABBITMQ_MANAGEMENT_PORT} ${LOGIN_NODE} 2>/dev/null || true
+echo "Reverse tunnel to ${LOGIN_NODE}:${RABBITMQ_MANAGEMENT_PORT} created"
 
 # Run main experiment
 cd "${EXPERIMENT_DIR}"
@@ -126,7 +115,7 @@ export XDG_CACHE_HOME="${WORKSPACE}/cache"
 source "${WORKSPACE}/venv/bin/activate"
 
 python3 "${PROJECT_DIR}/src/disfun/update_config_file.py" \
-    "${EXPERIMENT_DIR}/config.py" "${RABBITMQ_HOSTNAME}"
+    "${EXPERIMENT_DIR}/config.py" "${RABBITMQ_HOSTNAME}" "${RABBITMQ_VHOST}" "${RABBITMQ_PORT}" "${RABBITMQ_MANAGEMENT_PORT}"
 
 cd "${EXPERIMENT_DIR}"
 python3 -u -m disfun.attach_evaluators --sandbox_base_path "${WORKSPACE}/sandbox/${EXPERIMENT_NAME}" &

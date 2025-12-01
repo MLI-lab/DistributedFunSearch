@@ -2,7 +2,6 @@ Please identify the main algorithm parameters and assist me in creating a new al
 
 First, describe your new algorithm and main steps in one sentence. Next, implement it in Python.
 
+Use this format:
 <thought>Your algorithm description in one sentence</thought>
 <code>Your implementation</code>
-
-Do not give additional explanations.

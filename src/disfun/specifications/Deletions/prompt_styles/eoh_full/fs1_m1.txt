@@ -2,7 +2,7 @@ Please assist me in creating a new algorithm that has a different form but can b
 
 First, describe your new algorithm and main steps in one sentence. Next, implement it in Python.
 
+Use this format:
 <thought>Your algorithm description in one sentence</thought>
 <code>Your implementation</code>
 
-Do not give additional explanations.

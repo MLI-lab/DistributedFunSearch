@@ -138,15 +138,16 @@ def build_fewshot_examples(sampled_programs: list, prompt_config, format_scores_
         if prompt_config.fewshot_show_code:
             func_str = f"def {program.name}({program.args}):"
 
-            # Build docstring with optional scores
-            docstring = program.docstring or ""
+            # Determine score replacement text
             if prompt_config.show_eval_scores and scores and format_scores_fn:
                 score_text = format_scores_fn(scores)
-                docstring = docstring.replace("{score}", score_text).strip()
             else:
-                # Remove {score} placeholder when not showing scores
-                docstring = docstring.replace("{score}", "")
-                # Remove lines that are empty or whitespace-only, then strip
+                score_text = ""
+
+            # Build docstring
+            docstring = (program.docstring or "").replace("{score}", score_text)
+            if score_text == "":
+                # Clean up empty lines when score removed
                 lines = [line.rstrip() for line in docstring.split('\n') if line.strip()]
                 docstring = '\n'.join(lines)
 
@@ -157,7 +158,8 @@ def build_fewshot_examples(sampled_programs: list, prompt_config, format_scores_
                     func_str += f"\n{docstring}"
 
             if program.body:
-                func_str += f"\n{program.body}"
+                body = program.body.replace("{score}", score_text)
+                func_str += f"\n{body}"
 
             parts.append(func_str)
 

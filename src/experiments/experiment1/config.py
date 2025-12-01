@@ -67,7 +67,7 @@ class ProgramsDatabaseConfig:
   prompts_per_batch= 10
   no_deduplication: bool = False
   save_lineage: bool = False
-  initial_program_copies: int = 10 
+  initial_program_copies: int = 30 
 
 
 @dataclasses.dataclass(frozen=True)
@@ -125,13 +125,13 @@ class EvaluatorConfig:
         cache_graphs: Enable in-memory graph caching to avoid reloading graphs for every evaluation (default: False). Each evaluator will have its own cache, so this increases RAM usage.
         cache_size_limit_gb: Only cache graphs smaller than this size in GiB (default: 2.0). Set to float('inf') to cache all graphs regardless of size.
     """
-    evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/graph_networkx.py"  # Options: no_graph.py, graph_networkx.py, graph_gt.py
-    initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/initial_functions/graph_networkx"  # Use "no_graph" for on-the-fly evaluation, "graph" for graph variants
+    evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/no_graph.py"  # Options: no_graph.py, graph_networkx.py, graph_gt.py
+    initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/initial_functions/no_graph"  # Use "no_graph" for on-the-fly evaluation, "graph" for graph variants
     s_values: List[int] = dataclasses.field(default_factory=lambda: [1])
     start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Hash is computed for n==start_n[0] (automatically substituted in specification)
     end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Match available graphs (s1_n6 through s1_n11)
     mode: str = "last"
-    timeout: int = 30  
+    timeout: int = 60  
     max_workers: int = 2  
     q: int = 2  
     graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"  
@@ -147,8 +147,11 @@ class PromptConfig:
         template_path: Path to template file defining prompt structure via {placeholder} syntax.
         placeholders: Dict mapping placeholder names to file/directory paths.
                      If path is directory, one file is sampled at runtime.
-                     Reserved placeholders (fewshot_examples, num_examples, version, function_header, inout_spec)
+                     Reserved placeholders (fewshot_examples, num_examples, version, function_header)
                      are computed at runtime and should not be in this dict.
+                     Optional: inout_spec can be a path to a template file with {function_args} and
+                     {return_type} placeholders (see components/inout_spec.txt). If not provided,
+                     {inout_spec} is replaced with empty string.
         system_message_path: Path to system message file for API models. Set to None to disable.
         fewshot_num_examples: Number of examples in few-shot prompts.
         fewshot_show_thinking: Include <thinking> in few-shot examples.
@@ -165,7 +168,7 @@ class PromptConfig:
     placeholders: dict = dataclasses.field(default_factory=lambda: {
         "problem_description": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/problem_descriptions/baseline.txt",
         "prompt_style": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/prompt_styles/starcoder2.txt",  # None for code completion, or path to file/directory
-        "imports": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/imports/networkx.txt",
+        "imports": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/imports/no_graph.txt",
         "fewshot_preamble": None, 
         "evaluation_preamble": None,  
         "evaluation_script": None,  
@@ -204,7 +207,7 @@ class WandbConfig:
     project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
-    run_name_tag: str = "test"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
+    run_name_tag: str = "no_graph_seed10"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list) # e.g. ["gpt4o", "reasoning", "deduplication"]
     checkpoints_base_path: str = "/mnt/disfun/checkpoints" 
@@ -222,7 +225,7 @@ class PathsConfig:
                        Can be overridden by --backup CLI flag.
     """
     log_dir: str = "./logs"
-    sandbox_base_path: str = "/mnt/disfun/sandbox"
+    sandbox_base_path: str = "/temp/sandbox"
     backup_enabled: bool = False
 
 
@@ -309,10 +312,10 @@ class Config:
   scaling: ScalingConfig = dataclasses.field(default_factory=ScalingConfig)
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
-  num_samplers: int = 1
-  num_evaluators: int = 1
+  num_samplers: int = 2
+  num_evaluators: int = 30
   num_pdb: int = 1
-  random_seed: int = 42  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
+  random_seed: int = 10  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
 
 
 

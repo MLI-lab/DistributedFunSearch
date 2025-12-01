@@ -2,7 +2,6 @@ First, identify the main components in the function below. Next, analyze whether
 
 Finally, describe your simplified algorithm in one sentence, and provide the revised code.
 
+Use this format:
 <thought>Your algorithm description in one sentence</thought>
 <code>Your implementation</code>
-
-Do not give additional explanations.

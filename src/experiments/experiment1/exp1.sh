@@ -67,7 +67,31 @@ ssh -p "${SSH_PORT}" -N -f -R "${PORT2}:localhost:${PORT2}" "${SSH_USER}@${SSH_H
 RABBITMQ_LOG="/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/logs/rabbitmq_monitor.log"
 (
   echo "$(date '+%Y-%m-%d %H:%M:%S') - RabbitMQ monitoring started" >> "$RABBITMQ_LOG"
+  FAIL_COUNT=0
+  MAX_FAILS=3
   while true; do
+    # Health check - restart RabbitMQ if unresponsive
+    if ! curl -s -u guest:guest "http://localhost:${PORT}/api/overview" > /dev/null 2>&1; then
+      ((FAIL_COUNT++))
+      echo "$(date '+%Y-%m-%d %H:%M:%S') - RabbitMQ health check failed ($FAIL_COUNT/$MAX_FAILS)" >> "$RABBITMQ_LOG"
+      if [ $FAIL_COUNT -ge $MAX_FAILS ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Restarting RabbitMQ..." >> "$RABBITMQ_LOG"
+        pkill -f "rabbitmq-server" || true
+        sleep 5
+        rabbitmq-server &
+        sleep 30
+        # Re-create vhost and permissions after restart
+        curl -s -u guest:guest -X PUT "http://localhost:${PORT}/api/vhosts/${RABBITMQ_VHOST}" || true
+        curl -s -u guest:guest -X PUT -H 'content-type: application/json' \
+          -d '{"configure":".*","write":".*","read":".*"}' \
+          "http://localhost:${PORT}/api/permissions/${RABBITMQ_VHOST}/guest" || true
+        FAIL_COUNT=0
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - RabbitMQ restarted" >> "$RABBITMQ_LOG"
+      fi
+    else
+      FAIL_COUNT=0
+    fi
+
     echo "========== $(date '+%Y-%m-%d %H:%M:%S') ==========" >> "$RABBITMQ_LOG"
 
     # Connection count and details

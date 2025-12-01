@@ -25,6 +25,7 @@ import re
 import sys
 import time
 import glob
+import random
 
 import json
 import shutil
@@ -237,6 +238,7 @@ class TaskManager:
         # This controls: (1) prompt construction (cluster/program sampling), (2) LLM generation
         if checkpoint_file is None and self.config.random_seed is not None:
             import numpy as np
+            random.seed(self.config.random_seed)
             np.random.seed(self.config.random_seed)
             self.logger.info(f"Initialized random seed: {self.config.random_seed} (controls prompt construction + LLM generation)")
         elif checkpoint_file:
@@ -281,12 +283,6 @@ class TaskManager:
                             function_body = re.sub(r'<code>(.*?)</code>', r'\1', function_body, flags=re.DOTALL)
                             function_body = function_body.strip()
                             self.logger.info(f"Stripped tags from initial function: {txt_file.name}")
-
-                        # Always remove {score} placeholder from initial functions
-                        # The placeholder is only used when building fewshot prompts with show_eval_scores=True
-                        function_body = function_body.replace("{score}", "")
-                        # Clean up extra whitespace/newlines from removed placeholder
-                        function_body = re.sub(r'\n\s*\n\s*\n', '\n\n', function_body)
 
                         initial_program_data = json.dumps({
                             "sample": function_body,
