@@ -67,7 +67,7 @@ class ProgramsDatabaseConfig:
   prompts_per_batch= 10
   no_deduplication: bool = False
   save_lineage: bool = False
-  initial_program_copies: int = 30 
+  initial_program_copies: int = 30
 
 
 @dataclasses.dataclass(frozen=True)
@@ -125,8 +125,8 @@ class EvaluatorConfig:
         cache_graphs: Enable in-memory graph caching to avoid reloading graphs for every evaluation (default: False). Each evaluator will have its own cache, so this increases RAM usage.
         cache_size_limit_gb: Only cache graphs smaller than this size in GiB (default: 2.0). Set to float('inf') to cache all graphs regardless of size.
     """
-    evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/no_graph.py"  # Options: no_graph.py, graph_networkx.py, graph_gt.py
-    initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/initial_functions/no_graph"  # Use "no_graph" for on-the-fly evaluation, "graph" for graph variants
+    evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/graph_networkx.py"  # Options: no_graph.py, graph_networkx.py, graph_gt.py
+    initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/initial_functions/graph_networkx"  # Use "no_graph" for on-the-fly evaluation, "graph" for graph variants
     s_values: List[int] = dataclasses.field(default_factory=lambda: [1])
     start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Hash is computed for n==start_n[0] (automatically substituted in specification)
     end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Match available graphs (s1_n6 through s1_n11)
@@ -168,7 +168,7 @@ class PromptConfig:
     placeholders: dict = dataclasses.field(default_factory=lambda: {
         "problem_description": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/problem_descriptions/baseline.txt",
         "prompt_style": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/prompt_styles/starcoder2.txt",  # None for code completion, or path to file/directory
-        "imports": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/imports/no_graph.txt",
+        "imports": "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/imports/networkx.txt",
         "fewshot_preamble": None, 
         "evaluation_preamble": None,  
         "evaluation_script": None,  
@@ -207,7 +207,7 @@ class WandbConfig:
     project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
-    run_name_tag: str = "no_graph_seed10"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
+    run_name_tag: str = "graph_seed_613"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list) # e.g. ["gpt4o", "reasoning", "deduplication"]
     checkpoints_base_path: str = "/mnt/disfun/checkpoints" 
@@ -249,8 +249,8 @@ class ScalingConfig:
     """
     enabled: bool = True
     check_interval: int = 60
-    max_samplers: int = 2
-    max_evaluators: int = 1000
+    max_samplers: int = 10 
+    max_evaluators: int = 10000
     sampler_scale_up_threshold: int = 50
     evaluator_scale_up_threshold: int = 10
     min_gpu_memory_gib: int = 35
@@ -273,15 +273,15 @@ class TerminationConfig:
                          Example: {(6,1): 10, (7,1): 16, (8,1): 30}
                          If None or empty dict, early termination based on optimal solutions is disabled.
     """
-    prompt_limit: int = 400_000_000
+    prompt_limit: int = 400_000
     optimal_solution_programs: int = 20_000
     target_solutions: dict = dataclasses.field(default_factory=lambda: {
-        (6, 1): 10,
-        (7, 1): 16,
-        (8, 1): 30,
-        (9, 1): 52,
-        (10, 1): 94,
-        (11, 1): 172
+        (6, 1, 2): 10,
+        (7, 1, 2): 16,
+        (8, 1, 2): 30,
+        (9, 1, 2): 52,
+        (10, 1, 2): 94,
+        (11, 1, 2): 172
     })
 
 
@@ -312,10 +312,10 @@ class Config:
   scaling: ScalingConfig = dataclasses.field(default_factory=ScalingConfig)
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
-  num_samplers: int = 2
-  num_evaluators: int = 30
+  num_samplers: int = 4
+  num_evaluators: int = 40
   num_pdb: int = 1
-  random_seed: int = 10  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
+  random_seed: int = 613  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
 
 
 

@@ -1,6 +1,7 @@
 """
 Construct insertion/deletion/substitution-correcting codes by finding large independent sets.
 Nodes are q-ary strings of length n. Two nodes are neighbors if their edit distance < 2s + 1.
+The priority function must return a numeric value (int or float). Higher priority nodes are added first.
 
 For a code to correct s errors (insertions, deletions, or substitutions),
 all codewords must have pairwise edit distance >= 2s + 1.

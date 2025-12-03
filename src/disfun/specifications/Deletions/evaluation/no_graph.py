@@ -13,16 +13,23 @@ import re
 import random
 import time
 import binascii
+import collections
+import pandas as pd
 from itertools import groupby, combinations, permutations, product
-from functools import reduce
+from functools import reduce, lru_cache
+from typing import Dict, List, Set, Tuple, Optional
 from collections import Counter, defaultdict
 from binascii import hexlify
-from math import log, sqrt, exp, ceil, floor, factorial, gcd
+from math import log, log2, sqrt, exp, ceil, floor, factorial, gcd
 from numpy import zeros, ones, array
 
 # Python 2 compatibility
 xrange = range
 
+# Binary string helpers
+def str2int(s): return int(s, 2)
+def int2str(n, length): return format(n, f'0{length}b')
+def hamming_distance(s1, s2): return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
 
 def lcs_length(s1, s2):

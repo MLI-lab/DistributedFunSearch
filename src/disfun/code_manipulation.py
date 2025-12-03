@@ -55,8 +55,12 @@ class Function:
     def __str__(self) -> str:
         """ Maps Function object to str correctly formatted. """
         return_type_str = f' -> {self.return_type}' if self.return_type else ''
-        docstring_str = f'    """{self.docstring}"""' if self.docstring else ''
-        function_str = f'def {self.name}({self.args}){return_type_str}:\n{docstring_str}\n{self.body}\n'
+        # Only include docstring line if docstring exists (avoid empty line after def)
+        if self.docstring:
+            docstring_str = f'    """{self.docstring}"""\n'
+        else:
+            docstring_str = ''
+        function_str = f'def {self.name}({self.args}){return_type_str}:\n{docstring_str}{self.body}\n'
         return function_str
 
     def clean_body(self):
@@ -217,12 +221,28 @@ class ProgramVisitor(ast.NodeVisitor):
                     else:
                         body_start_line = function_end_line
 
+            # Handle one-liner functions where body is on same line as def
+            # e.g., "def str2int(s): return int(s, 2)"
+            if body_start_line == node.lineno - 1 and function_end_line == node.lineno:
+                # One-liner: extract just the body part after the colon
+                full_line = self._codelines[body_start_line]
+                # Find the colon after the closing parenthesis of args
+                colon_idx = full_line.find(':')
+                if colon_idx != -1:
+                    body_part = full_line[colon_idx + 1:].strip()
+                    # Ensure proper indentation for the body
+                    body = f'    {body_part}'
+                else:
+                    body = "\n".join(self._codelines[body_start_line:function_end_line])
+            else:
+                body = "\n".join(self._codelines[body_start_line:function_end_line])
+
             self._functions.append(Function(
                 name=node.name,
                 args=ast.unparse(node.args),
                 return_type=ast.unparse(node.returns) if node.returns else None,
                 docstring=docstring,
-                body="\n".join(self._codelines[body_start_line:function_end_line]),
+                body=body,
             ))
         self.generic_visit(node)
 

@@ -5,11 +5,10 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=56
 #SBATCH --gres=gpu:4
-#SBATCH --mem=250G
-#SBATCH --time=4-00:00:00
+#SBATCH --mem=300G
+#SBATCH --time=7-00:00:00
 #SBATCH --output=/home/frwe188h/DistributedFunSearch/src/experiments/experiment1/logs/experiment_%j.out
 #SBATCH --error=/home/frwe188h/DistributedFunSearch/src/experiments/experiment1/logs/experiment_%j.err
-
 
 
 # ===== Configuration =====
@@ -62,13 +61,25 @@ source "${WORKSPACE}/venv/bin/activate"
 # Add Erlang to PATH (for RabbitMQ)
 export PATH="/data/horse/ws/frwe188h-disfun/erlang/bin:\$PATH"
 
+RABBITMQ_BASE_DIR="${WORKSPACE}/rabbitmq/${SLURM_JOB_ID}"
+mkdir -p "\${RABBITMQ_BASE_DIR}/mnesia" "\${RABBITMQ_BASE_DIR}/log"
+
 # Update config with RabbitMQ hostname, vhost, and ports
 python3 "${PROJECT_DIR}/src/disfun/update_config_file.py" \
     "${EXPERIMENT_DIR}/config.py" "${RABBITMQ_HOSTNAME}" "${RABBITMQ_VHOST}" "${RABBITMQ_PORT}" "${RABBITMQ_MANAGEMENT_PORT}"
 
 # Configure RabbitMQ using the config file from the experiment directory
 mkdir -p /data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/etc/rabbitmq
-cp "${RABBITMQ_CONF}" /data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/etc/rabbitmq/rabbitmq.conf
+RABBITMQ_ETC_DIR="/data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/etc/rabbitmq"
+
+# Copy config file (mnesia/log paths are set via environment variables above)
+cp "${RABBITMQ_CONF}" "\${RABBITMQ_ETC_DIR}/rabbitmq.conf"
+
+# Set environment variables for RabbitMQ directories (these work, config file settings don't)
+export RABBITMQ_MNESIA_DIR="\${RABBITMQ_BASE_DIR}/mnesia"
+export RABBITMQ_LOG_DIR="\${RABBITMQ_BASE_DIR}/log"
+
+echo "RabbitMQ dirs: MNESIA=\${RABBITMQ_MNESIA_DIR}, LOG=\${RABBITMQ_LOG_DIR}"
 
 # Start RabbitMQ
 /data/horse/ws/frwe188h-disfun/rabbitmq_server-3.13.3/sbin/rabbitmq-server &

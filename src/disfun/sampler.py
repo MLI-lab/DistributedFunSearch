@@ -761,11 +761,19 @@ class Sampler:
                 # Don't try reinit: it rarely helps and a fresh process is more reliable
                 logger.error(
                     f"Sampler ({self._config.model}): {e}. "
-                    f"Exiting process for clean restart by ResourceManager..."
+                    f"Force-exiting process for clean restart by ResourceManager..."
                 )
-                await self._close_connection()
-                import sys
-                sys.exit(1)
+                # Try to close connection with timeout - don't block forever
+                try:
+                    await asyncio.wait_for(self._close_connection(), timeout=5.0)
+                except (asyncio.TimeoutError, Exception) as close_err:
+                    logger.warning(f"Connection close failed/timed out: {close_err}")
+
+                # Use os._exit() to force immediate termination
+                # sys.exit() can hang waiting for the stuck vLLM thread to finish
+                import os
+                logger.error("Calling os._exit(1) to force process termination...")
+                os._exit(1)
 
             except (aio_pika.exceptions.AMQPConnectionError,
                     aio_pika.exceptions.ChannelClosed,

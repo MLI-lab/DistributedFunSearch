@@ -27,6 +27,9 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
             device_id = str(device)
         os.environ["CUDA_VISIBLE_DEVICES"] = device_id
         print(f"Sampler process: Set CUDA_VISIBLE_DEVICES={device_id}")
+        # After setting CUDA_VISIBLE_DEVICES to a single GPU, that GPU becomes cuda:0
+        # in the subprocess's view. Update the device string accordingly.
+        device = "cuda:0"
 
     # Import process_utils AFTER setting CUDA_VISIBLE_DEVICES (it imports torch)
     from disfun import process_utils
