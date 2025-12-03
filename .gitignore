@@ -18,7 +18,7 @@ logs/
 *.pyc
 
 # Ignore specific analysis files or directories
-analysis/FilterBest/best_programs.py
+analysis/analysis_*
 
 # Ignore PDFs
 *.pdf
