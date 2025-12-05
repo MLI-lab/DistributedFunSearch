@@ -246,12 +246,11 @@ class ScalingConfig:
         min_system_memory_gib: Minimum free system RAM in GiB required for scaling.
         cpu_usage_threshold: Maximum average CPU usage percentage to allow evaluator scale-up.
         normalized_load_threshold: Maximum normalized system load (load/cores) to allow evaluator scale-up.
-        sampler_startup_timeout: Seconds to wait before killing a stuck sampler (alive but GPU idle).
     """
     enabled: bool = True
     check_interval: int = 60
-    max_samplers: int = 10
-    max_evaluators: int = 10000
+    max_samplers: int = 50
+    max_evaluators: int = 10
     sampler_scale_up_threshold: int = 50
     evaluator_scale_up_threshold: int = 10
     min_gpu_memory_gib: int = 35
@@ -259,7 +258,6 @@ class ScalingConfig:
     min_system_memory_gib: int = 30
     cpu_usage_threshold: int = 99
     normalized_load_threshold: float = 0.99
-    sampler_startup_timeout: int = 600  # 10 minutes
 
 
 @dataclasses.dataclass(frozen=True)
@@ -320,7 +318,7 @@ class Config:
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
   num_samplers: int = 4
-  num_evaluators: int = 40
+  num_evaluators: int = 20
   num_pdb: int = 1
   random_seed: int = 42  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
 

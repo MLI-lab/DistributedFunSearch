@@ -105,7 +105,7 @@ std::vector<DeletionPattern> generate_deletion_patterns_v2(int n, int s) {
     // Generate all subsets of size 1 to s using Gosper's hack
     for (int d = 1; d <= s; ++d) {
         uint32_t subset = (1u << d) - 1;  // First subset of size d
-        uint32_t limit = 1u << n;
+        uint64_t limit = 1ULL << n;  // Use 64-bit to handle n=32
 
         while (subset < limit) {
             DeletionPattern pat;
@@ -121,9 +121,11 @@ std::vector<DeletionPattern> generate_deletion_patterns_v2(int n, int s) {
             }
             patterns.push_back(pat);
 
-            // Gosper's hack for next subset
+            // Gosper's hack for next subset (with overflow protection)
             uint32_t c = subset & -subset;
             uint32_t r = subset + c;
+            if (r < subset) break;  // Overflow detected
+            if (c == 0) break;      // Safety check
             subset = (((r ^ subset) >> 2) / c) | r;
         }
     }

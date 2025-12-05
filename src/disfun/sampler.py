@@ -826,7 +826,6 @@ class Sampler:
                     prompt_data = data["prompt"]
                     total_registered_programs = data.get("total_registered_programs", 0)
                     flag = data.get("flag", False)
-                    flags.append(flag)
                     prompt = programs_database.Prompt.deserialize(prompt_data)
 
                     if prompt.code is not None:
@@ -837,6 +836,7 @@ class Sampler:
                             "expected_version": prompt.expected_version,
                             "parent_ids": data.get("parent_ids", []),
                         })
+                        flags.append(flag)  # Only append flag when prompt is valid
                     else:
                         logger.warning(f"Skipping prompt with island_id {prompt.island_id}: Prompt is empty.")
 

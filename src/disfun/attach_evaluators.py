@@ -1,6 +1,6 @@
 import asyncio
 import argparse
-import torch.multiprocessing as mp
+import multiprocessing as mp
 import os
 import sys
 from typing import Any
@@ -12,9 +12,8 @@ import json
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Set multiprocessing start method to 'spawn' for CUDA compatibility
-# Must be called before any multiprocessing to avoid CUDA context conflicts
-# Required to prevent fork+threading deadlocks when dynamically scaling
+# Set multiprocessing start method to 'spawn' to avoid fork+threading deadlocks
+# when dynamically scaling. Evaluators don't need CUDA so we use standard multiprocessing.
 try:
     mp.set_start_method('spawn', force=True)
 except RuntimeError:

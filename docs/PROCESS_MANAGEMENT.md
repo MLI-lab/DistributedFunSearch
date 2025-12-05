@@ -58,9 +58,9 @@ ResourceManager periodically:
 - Logs when processes crash unexpectedly
 - Allows scaling system to spawn replacements
 
-### Stale Process Recovery
+### Stale Process Detection
 
-Samplers can get stuck during spawn, alive but not working, blocking a GPU. This is handled automatically in assign_gpu_device. When assigning a GPU, if GPU is idle but bookkeeping says assigned, and process is older than sampler_startup_timeout, kill it and free the GPU. Configure via scaling.sampler_startup_timeout in config, default 600 seconds.
+Samplers can occasionally get stuck, appearing alive but not working and blocking a GPU. When assigning a GPU, if the GPU appears idle but bookkeeping says it is assigned, a warning is logged for manual investigation. Dead processes are automatically cleaned up in the scaling loop.
 
 ## Checkpoints
 

@@ -47,7 +47,7 @@ import sys
 import asyncio
 import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from torch.multiprocessing import Manager # starts its own process on a cpu core
+from multiprocessing import Manager  # For shared state between ProcessPoolExecutor workers
 import gc
 import psutil
 import time

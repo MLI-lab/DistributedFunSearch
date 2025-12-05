@@ -3,7 +3,7 @@ import psutil
 import pynvml
 import logging
 import asyncio
-import torch.multiprocessing as mp
+import multiprocessing as mp
 from logging import FileHandler
 import socket
 import statistics
@@ -142,7 +142,7 @@ class ResourceManager:
                 swap_samples = []
 
                 if not self.cpu_only:
-                    gpu_samples = {}  # Dict of lists: {gpu_index: [sample1 - sample2 - ...]}
+                    gpu_samples = {}  # Dict of lists: {gpu_index: [sample1, sample2, ...]}
 
                 for _ in range(num_samples):
                     # CPU usage
@@ -160,7 +160,7 @@ class ResourceManager:
 
                     # Disk I/O
                     disk_io = await asyncio.to_thread(psutil.disk_io_counters)
-                    if disk_io:  # Can be None on some systems (e.g. - Docker containers)
+                    if disk_io:  # Can be None on some systems (e.g. Docker containers)
                         disk_read_samples.append(disk_io.read_bytes / 1e6)  # Convert to MB
                         disk_write_samples.append(disk_io.write_bytes / 1e6)
                     else:
@@ -385,7 +385,7 @@ class ResourceManager:
                             else:
                                 self._sampler_idle_checks = 0  # Reset on non-empty queue
 
-                    # If nothing was scaled - log that scaling was skipped
+                    # If nothing was scaled, log that scaling was skipped
                     if not evaluator_scaled and not sampler_scaled:
                         self.resource_logger.info("No scaling action taken in this iteration.")
 
@@ -438,7 +438,7 @@ class ResourceManager:
             # No GPUs available at all
             return None
 
-        # See if any GPU is free enough - using config values
+        # See if any GPU is free enough, using config values
         min_memory = self.scaling_config.min_gpu_memory_gib if self.scaling_config else 20
         max_util = self.scaling_config.max_gpu_utilization if self.scaling_config else 50
         assignment = await asyncio.to_thread(
@@ -498,7 +498,7 @@ class ResourceManager:
         if self.database is not None:
             self.database.next_sampler_id = self.next_sampler_id
 
-        if assignment is True:  # CPU-only mode - no GPU assignment
+        if assignment is True:  # CPU-only mode, no GPU assignment
             proc = ctx.Process(
                 target=entry_function,
                 args=(config_path, None, log_dir, log_filename, sampler_id, True),  # use_parent_log=True
@@ -548,10 +548,10 @@ class ResourceManager:
             else:
                 visible_devices = list(range(pynvml.nvmlDeviceGetCount()))
 
-            # Map host GPU index to container-visible index
+            # Map host GPU index to container visible index
             id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
 
-            # Use assigned_gpus passed from the caller - otherwise fallback to existing assignments
+            # Use assigned_gpus passed from the caller, otherwise fallback to existing assignments
             if assigned_gpus is None:
                 assigned_gpus = set(self.process_to_device_map.values())
 
@@ -628,7 +628,7 @@ class ResourceManager:
         if not eligible:
             return None
 
-        # For samplers with GPUs, prefer terminating the one on lowest-utilization GPU
+        # For samplers with GPUs, prefer terminating the one on lowest utilization GPU
         if process_name == "Sampler" and not self.cpu_only:
             best_idx = None
             lowest_util = float('inf')
