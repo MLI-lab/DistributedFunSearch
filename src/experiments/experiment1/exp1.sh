@@ -66,16 +66,16 @@ ssh -p "${SSH_PORT}" -N -f -R "${PORT2}:localhost:${PORT2}" "${SSH_USER}@${SSH_H
 # ===== RabbitMQ monitoring (background process) =====
 RABBITMQ_LOG="/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/logs/rabbitmq_monitor.log"
 (
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - RabbitMQ monitoring started" >> "$RABBITMQ_LOG"
+  echo "$(date '+%Y-%m-%d %H:%M:%S'), RabbitMQ monitoring started" >> "$RABBITMQ_LOG"
   FAIL_COUNT=0
   MAX_FAILS=3
   while true; do
-    # Health check - restart RabbitMQ if unresponsive
+    # Restart RabbitMQ if unresponsive
     if ! curl -s -u guest:guest "http://localhost:${PORT}/api/overview" > /dev/null 2>&1; then
       ((FAIL_COUNT++))
-      echo "$(date '+%Y-%m-%d %H:%M:%S') - RabbitMQ health check failed ($FAIL_COUNT/$MAX_FAILS)" >> "$RABBITMQ_LOG"
+      echo "$(date '+%Y-%m-%d %H:%M:%S'), RabbitMQ health check failed ($FAIL_COUNT/$MAX_FAILS)" >> "$RABBITMQ_LOG"
       if [ $FAIL_COUNT -ge $MAX_FAILS ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Restarting RabbitMQ..." >> "$RABBITMQ_LOG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'), Restarting RabbitMQ..." >> "$RABBITMQ_LOG"
         pkill -f "rabbitmq-server" || true
         sleep 5
         rabbitmq-server &
@@ -86,7 +86,7 @@ RABBITMQ_LOG="/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/logs/rabb
           -d '{"configure":".*","write":".*","read":".*"}' \
           "http://localhost:${PORT}/api/permissions/${RABBITMQ_VHOST}/guest" || true
         FAIL_COUNT=0
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - RabbitMQ restarted" >> "$RABBITMQ_LOG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'), RabbitMQ restarted" >> "$RABBITMQ_LOG"
       fi
     else
       FAIL_COUNT=0

@@ -31,9 +31,12 @@ import dataclasses
 import time
 import logging
 import re
+import os
+import signal
 import numpy as np
 import asyncio
 import random
+import aiohttp
 from typing import Any
 from collections.abc import Mapping, Sequence
 from disfun import code_manipulation
@@ -259,6 +262,7 @@ class ProgramsDatabase:
         no_deduplication=False,
         prompt_limit=400_000,
         optimal_solution_programs=20_000,
+        max_drain_time=600,
         target_signatures=None,
         show_eval_scores=False,
         display_mode="absolute",
@@ -313,6 +317,9 @@ class ProgramsDatabase:
         self.optimal_solution_programs = optimal_solution_programs
         self.prompts_since_optimal = 0
         self.target_signatures=target_signatures
+        self.max_drain_time = max_drain_time
+        self._prompt_limit_reached = False
+        self._drain_start_time = None
 
         self.show_eval_scores = show_eval_scores
         self.display_mode = display_mode
@@ -958,8 +965,11 @@ class ProgramsDatabase:
             logger.info(f"Functions processed since optimal: {self.prompts_since_optimal}")
 
         elif self.total_prompts >= self.prompt_limit:
-            logger.info(f"Reached the limit of {self.prompt_limit} prompts. Stopping further publishing, but continue processing remaining queue messages.")
-            return  # Stop further publishing once the limit is reached
+            if not self._prompt_limit_reached:
+                self._prompt_limit_reached = True
+                self._drain_start_time = time.time()
+                await self._handle_prompt_limit_reached()
+            return
 
         logger.debug(f"len(self._islands) {len(self._islands)}")
         island_id = np.random.randint(len(self._islands))
@@ -1229,3 +1239,69 @@ class ProgramsDatabase:
         # Sample a program based on the probabilities
         sampled_index = np.random.choice(len(programs), p=probabilities)
         return programs[sampled_index]
+
+    def _save_and_shutdown(self, reason: str):
+        """Save checkpoint and trigger graceful shutdown."""
+        logger.info(f"{reason} Saving checkpoint and shutting down...")
+        checkpoint_module.save_checkpoint(self)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    async def _handle_prompt_limit_reached(self):
+        """Handle prompt limit: purge queues and either shutdown or start drain watcher."""
+        if self.max_drain_time == 0:
+            logger.info(f"Reached {self.prompt_limit} prompts (max_drain_time=0). Purging all queues...")
+            try:
+                await self.sampler_queue.purge()
+                await self.evaluator_queue.purge()
+            except Exception as e:
+                logger.error(f"Failed to purge queues: {e}")
+            self._save_and_shutdown("All queues purged.")
+        else:
+            logger.info(f"Reached {self.prompt_limit} prompts. Purging sampler queue, draining evaluators (max_drain_time={self.max_drain_time}s)...")
+            try:
+                await self.sampler_queue.purge()
+            except Exception as e:
+                logger.error(f"Failed to purge sampler queue: {e}")
+            asyncio.create_task(self._watch_for_drain())
+
+    async def _watch_for_drain(self):
+        """Monitor queues and trigger shutdown when drained or timeout expires."""
+        empty_count = 0
+        while True:
+            await asyncio.sleep(10)
+            elapsed = time.time() - self._drain_start_time
+
+            if self.max_drain_time > 0 and elapsed >= self.max_drain_time:
+                self._save_and_shutdown(f"Drain timeout ({self.max_drain_time}s) reached.")
+                return
+
+            try:
+                if await self._check_queues_empty():
+                    empty_count += 1
+                    logger.info(f"All queues empty ({empty_count}/3) after {elapsed:.1f}s")
+                    if empty_count >= 3:
+                        self._save_and_shutdown(f"All queues drained after {elapsed:.1f}s.")
+                        return
+                else:
+                    empty_count = 0
+            except Exception as e:
+                logger.error(f"Drain watcher error: {e}")
+                empty_count = 0
+
+    async def _check_queues_empty(self) -> bool:
+        """Check if all queues are empty via RabbitMQ management API."""
+        try:
+            cfg = self._conn_manager._config.rabbitmq
+            vhost = '%2F' if not cfg.vhost else cfg.vhost
+            timeout = aiohttp.ClientTimeout(total=5)
+
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for queue_name in ['sampler_queue', 'evaluator_queue', 'database_queue']:
+                    url = f"http://{cfg.host}:{cfg.management_port}/api/queues/{vhost}/{queue_name}"
+                    async with session.get(url, auth=aiohttp.BasicAuth(cfg.username, cfg.password)) as resp:
+                        if resp.status == 200 and (await resp.json()).get('messages', 0) > 0:
+                            return False
+            return True
+        except Exception as e:
+            logger.error(f"Error checking queue status: {e}")
+            return False

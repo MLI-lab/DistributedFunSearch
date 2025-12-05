@@ -91,7 +91,7 @@ class SamplerConfig:
     max_retries: Maximum number of retry attempts for failed API calls (default: 3). Only applies to API models.
     inference_timeout: Timeout in seconds for vLLM inference (default: 300). If vLLM hangs beyond this, sampler exits for restart by ResourceManager.
   """
-  prompts_per_batch= 20
+  prompts_per_batch= 30
   samples_per_prompt: int = 2
   temperature_period= None
   temperature: float = 0.9444444444444444
@@ -225,7 +225,7 @@ class PathsConfig:
                        Can be overridden by --backup CLI flag.
     """
     log_dir: str = "./logs"
-    sandbox_base_path: str = "/temp/sandbox"
+    sandbox_base_path: str = "/mnt/disfun/sandbox"
     backup_enabled: bool = False
 
 
@@ -269,12 +269,17 @@ class TerminationConfig:
                      The system will continue processing remaining queue messages.
         optimal_solution_programs: Number of additional programs to generate after finding
                                   the first optimal solution.
+        max_drain_time: Maximum seconds to wait for evaluators to finish after prompt_limit
+                       is reached. When limit is hit, sampler_queue is purged (stopping LLM calls).
+                       Set to 0 for immediate shutdown (also purges evaluator queue).
+                       Set to -1 for unlimited wait (drain all evaluator work).
         target_solutions: Optional dict mapping (n, s_value) tuples to target scores for early termination.
                          Example: {(6,1): 10, (7,1): 16, (8,1): 30}
                          If None or empty dict, early termination based on optimal solutions is disabled.
     """
     prompt_limit: int = 400_000
     optimal_solution_programs: int = 20_000
+    max_drain_time: int = 600  # seconds to wait for evaluators (0 = unlimited)
     target_solutions: dict = dataclasses.field(default_factory=lambda: {
         (6, 1, 2): 10,
         (7, 1, 2): 16,
@@ -315,7 +320,7 @@ class Config:
   num_samplers: int = 4
   num_evaluators: int = 40
   num_pdb: int = 1
-  random_seed: int = 613  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
+  random_seed: int = 42  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
 
 
 
