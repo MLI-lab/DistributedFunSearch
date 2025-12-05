@@ -68,6 +68,27 @@ class ResourceManager:
             device = self.process_to_device_map.pop(pid)
             self.resource_logger.info(f"Freed device {device} from dead process (PID: {pid})")
 
+    def _kill_stale_process_for_device(self, device):
+        """Kill process holding a device if it's stale (old + GPU idle). Returns True if killed."""
+        startup_timeout = self.scaling_config.sampler_startup_timeout if self.scaling_config else 600
+        pid = next((p for p, d in self.process_to_device_map.items() if d == device), None)
+        if not pid:
+            return False
+        start_time = self.process_start_times.get(pid)
+        if not start_time or (time.time() - start_time) < startup_timeout:
+            return False
+        # Process is old enough - kill it (GPU is already confirmed idle by caller)
+        self.resource_logger.warning(f"Killing stale process PID {pid} holding {device}")
+        try:
+            os.kill(pid, 9)  # SIGKILL
+        except ProcessLookupError:
+            pass  # Already dead
+        except PermissionError:
+            self.resource_logger.warning(f"Cannot kill PID {pid} - not owned by us")
+            return False
+        self._free_device(pid)
+        return True
+
     async def has_enough_system_memory(self, min_free_gib=None):
         """Check if system has enough free memory.
 
@@ -534,13 +555,18 @@ class ResourceManager:
             for host_gpu in visible_devices:
                 container_device = f"cuda:{id_to_container_index[host_gpu]}"
 
-                if container_device in assigned_gpus:
-                    continue  # Skip GPUs that are already assigned in this loop
-
                 handle = pynvml.nvmlDeviceGetHandleByIndex(host_gpu)
                 util = pynvml.nvmlDeviceGetUtilizationRates(handle)
                 memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 free_memory_gib = memory_info.free / (1024 ** 3)
+
+                # If GPU looks free but bookkeeping says it's assigned, check for stale process
+                if util.gpu < max_utilization and container_device in assigned_gpus:
+                    if self._kill_stale_process_for_device(container_device):
+                        assigned_gpus.discard(container_device)  # Now available
+
+                if container_device in assigned_gpus:
+                    continue  # Skip GPUs that are already assigned
 
                 if util.gpu < max_utilization and free_memory_gib >= min_free_memory_gib:
                     container_index = id_to_container_index[host_gpu]

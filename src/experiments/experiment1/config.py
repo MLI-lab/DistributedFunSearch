@@ -207,7 +207,7 @@ class WandbConfig:
     project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
-    run_name_tag: str = "graph_seed_613"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
+    run_name_tag: str = "graph_seed_42"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list) # e.g. ["gpt4o", "reasoning", "deduplication"]
     checkpoints_base_path: str = "/mnt/disfun/checkpoints" 
@@ -246,10 +246,11 @@ class ScalingConfig:
         min_system_memory_gib: Minimum free system RAM in GiB required for scaling.
         cpu_usage_threshold: Maximum average CPU usage percentage to allow evaluator scale-up.
         normalized_load_threshold: Maximum normalized system load (load/cores) to allow evaluator scale-up.
+        sampler_startup_timeout: Seconds to wait before killing a stuck sampler (alive but GPU idle).
     """
     enabled: bool = True
     check_interval: int = 60
-    max_samplers: int = 10 
+    max_samplers: int = 10
     max_evaluators: int = 10000
     sampler_scale_up_threshold: int = 50
     evaluator_scale_up_threshold: int = 10
@@ -258,6 +259,7 @@ class ScalingConfig:
     min_system_memory_gib: int = 30
     cpu_usage_threshold: int = 99
     normalized_load_threshold: float = 0.99
+    sampler_startup_timeout: int = 600  # 10 minutes
 
 
 @dataclasses.dataclass(frozen=True)

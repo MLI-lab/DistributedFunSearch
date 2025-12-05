@@ -20,7 +20,7 @@ and gpt.py (Azure OpenAI) with a single unified implemeOntation using LiteLLM.
 
 Key features:
 * Supports 100+ LLM providers through LiteLLM (OpenAI, Anthropic, Together AI, local vLLM, etc.)
-* Dynamic batching based on message load (10ms window - up to 10 prompts per batch)
+* Dynamic batching based on message load (10ms window, batch size from config.prompts_per_batch)
 * Dynamic temperature adjustment based on stored program count
 * Token tracking for both input and output
 * Time tracking (GPU time for local models - API latency for cloud models)
@@ -664,8 +664,10 @@ class Sampler:
 
         async def _consume_loop():
             """Inner consume loop - processes messages from the queue."""
-            logger.info(f"Sampler ({self._config.model}): Setting QoS prefetch_count=10...")
-            await self.channel.set_qos(prefetch_count=10)
+            # Set prefetch to match batch size so RabbitMQ delivers enough messages for full batches
+            prefetch = self.samples_per_batch
+            logger.info(f"Sampler ({self._config.model}): Setting QoS prefetch_count={prefetch}...")
+            await self.channel.set_qos(prefetch_count=prefetch)
 
             logger.info(f"Sampler ({self._config.model}): Starting iterator to consume messages...")
             async with self.sampler_queue.iterator() as stream:

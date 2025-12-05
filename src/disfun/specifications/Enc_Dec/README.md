@@ -114,18 +114,78 @@ The paper notes that patterns deleting only zeros have Av=0 but are distinguisha
 
 VT codes pass for s=1 (0 dangerous collisions), fail for s≥2.
 
+## Brute-Force Decoder Validation (NEW)
+
+The `bruteforce_decoder.py` module provides a complete codeword-based validation:
+
+1. **Enumerate all codewords** satisfying encoder constraints
+2. **Generate all deletion patterns** (|D| ≤ s)
+3. **Compute signatures** Φ(x,D) = (received_word, syndrome_difference)
+4. **Detect collisions** between different codewords
+
+### Building the C++ Extension (Recommended for n > 16)
+
+```bash
+cd evaluation/_cpp
+pip install pybind11
+CC=gcc CXX=g++ python setup.py build_ext --inplace
+```
+
+### Usage
+
+```python
+from evaluation.bruteforce_decoder import (
+    validate_decoder_bruteforce,
+    vt_code_params,
+    helberg_ferreira_params
+)
+
+# VT code test (should PASS for s=1, FAIL for s=2)
+n, s = 16, 1
+wf, mod, targets = vt_code_params(n)
+result = validate_decoder_bruteforce(n, s, wf, mod, targets)
+print(f"Valid: {result['valid']}")
+print(f"Codebook size: {result['codebook_size']}")
+print(f"Score: {result['score']:.4f}")
+
+# With collision details
+result = validate_decoder_bruteforce(n, 2, wf, mod, targets, return_collisions=True)
+if result['collisions']:
+    coll = result['collisions'][0]
+    print(f"Collision: cw1={bin(coll['codeword1'])}, pat1={coll['pattern1']}")
+```
+
+### Performance (C++ Extension)
+
+| n  | s | Signatures | Time |
+|----|---|------------|------|
+| 16 | 1 | 65K | 0.05s |
+| 18 | 1 | 262K | 0.06s |
+| 20 | 1 | 1M | 0.34s |
+| 22 | 1 | 4.2M | 1.96s |
+| 24 | 1 | 16.8M | 8.1s |
+| 22 | 2 | 46M | 10.6s |
+| 24 | 2 | 202M | 52.5s |
+
+C++ provides **30-130x speedup** over pure Python.
+
 ## File Structure
 
 ```
 Enc_Dec/
 ├── evaluation/
-│   └── encoder_decoder.py   # Core evaluation functions
+│   ├── encoder_decoder.py     # Pattern-based validation (original)
+│   ├── bruteforce_decoder.py  # Codeword-based validation (NEW)
+│   └── _cpp/                  # C++ extension for large n
+│       ├── bruteforce.cpp
+│       └── setup.py
 ├── tests/
-│   └── test_vt_codes.py     # VT code verification
+│   └── test_vt_codes.py       # VT code verification
 └── README.md
 ```
 
 ## Complexity
 
 - Encoder check: O(2^|P|)
-- Decoder check: O(C(n,s) · 2^s) = O(n^s · 2^s)
+- Decoder check (pattern-based): O(C(n,s) · 2^s) = O(n^s · 2^s)
+- Decoder check (brute-force): O(2^n + |C| · Σ_{d=0}^s C(n,d))
