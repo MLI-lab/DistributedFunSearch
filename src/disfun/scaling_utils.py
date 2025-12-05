@@ -12,9 +12,6 @@ import time
 import traceback
 
 
-
-
-
 class ResourceManager:
     def __init__(self, log_dir=None, resource_logger=None, cpu_only=False, scaling_config=None):
         """Initialize the ResourceManager asynchronously.
@@ -31,7 +28,6 @@ class ResourceManager:
         self.process_start_times = {}    # pid -> start time (for minimum lifetime check)
         self.scaling_config = scaling_config
         self.next_sampler_id = 0  # Monotonically increasing counter for unique sampler IDs (never reused)
-        self.next_evaluator_id = 0  # Monotonically increasing counter for unique evaluator IDs
         self.database = None  # Reference to ProgramsDatabase for syncing next_sampler_id to checkpoint
         # Counter for detecting disconnected samplers (consecutive checks with 0 consumers)
         self.sampler_zero_consumer_count = 0
@@ -68,26 +64,30 @@ class ResourceManager:
             device = self.process_to_device_map.pop(pid)
             self.resource_logger.info(f"Freed device {device} from dead process (PID: {pid})")
 
-    def _kill_stale_process_for_device(self, device):
-        """Kill process holding a device if it's stale (old + GPU idle). Returns True if killed."""
-        startup_timeout = self.scaling_config.sampler_startup_timeout if self.scaling_config else 600
-        pid = next((p for p, d in self.process_to_device_map.items() if d == device), None)
-        if not pid:
+    def _all_samplers_busy(self, utilization_threshold=50):
+        """Check if all assigned sampler GPUs have high utilization.
+
+        Returns True if all samplers are actively using their GPUs,
+        meaning we should not scale down even if queue is empty.
+        """
+        if self.cpu_only or not self.process_to_device_map:
             return False
-        start_time = self.process_start_times.get(pid)
-        if not start_time or (time.time() - start_time) < startup_timeout:
-            return False
-        # Process is old enough - kill it (GPU is already confirmed idle by caller)
-        self.resource_logger.warning(f"Killing stale process PID {pid} holding {device}")
+
         try:
-            os.kill(pid, 9)  # SIGKILL
-        except ProcessLookupError:
-            pass  # Already dead
-        except PermissionError:
-            self.resource_logger.warning(f"Cannot kill PID {pid} - not owned by us")
+            for pid, device in self.process_to_device_map.items():
+                if device is None or not device.startswith("cuda:"):
+                    continue
+                gpu_idx = int(device.split(":")[1])
+                handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                if util < utilization_threshold:
+                    # At least one sampler has low GPU utilization
+                    return False
+            # All samplers have high utilization
+            return True
+        except Exception as e:
+            self.resource_logger.warning(f"Error checking sampler GPU utilization: {e}")
             return False
-        self._free_device(pid)
-        return True
 
     async def has_enough_system_memory(self, min_free_gib=None):
         """Check if system has enough free memory.
@@ -315,7 +315,7 @@ class ResourceManager:
                     if sampler_queue and max_samplers > 0:
                         assignment = await self.can_scale_up_samplers()
                         if self.cpu_only:
-                             assignment = await self.can_scale_evaluator() # if we are in cpu only mode also check cpu load for samplers
+                            assignment = await self.can_scale_evaluator()  # if we are in cpu only mode also check cpu load for samplers
                         self.resource_logger.info(f"Assignment is {assignment}")
                         sampler_threshold = self.scaling_config.sampler_scale_up_threshold if self.scaling_config else 50
                         current_time = time.time()
@@ -372,10 +372,16 @@ class ResourceManager:
                                 # Require 2 consecutive idle checks before scaling down
                                 self._sampler_idle_checks += 1
                                 if self._sampler_idle_checks >= 2:
-                                    self.resource_logger.info(f"Sampler queue empty for {self._sampler_idle_checks} checks, terminating sampler")
-                                    await self.terminate_process(sampler_processes, "Sampler")
-                                    sampler_scaled = True
-                                    self._sampler_idle_checks = 0
+                                    # Skip scale down if all samplers are actively using GPUs
+                                    all_busy = await asyncio.to_thread(self._all_samplers_busy)
+                                    if all_busy:
+                                        self.resource_logger.info("Queue empty but all samplers have high GPU utilization. Skipping scale down.")
+                                        self._sampler_idle_checks = 0
+                                    else:
+                                        self.resource_logger.info(f"Sampler queue empty for {self._sampler_idle_checks} checks, terminating sampler")
+                                        await self.terminate_process(sampler_processes, "Sampler")
+                                        sampler_scaled = True
+                                        self._sampler_idle_checks = 0
                             else:
                                 self._sampler_idle_checks = 0  # Reset on non-empty queue
 
@@ -435,7 +441,9 @@ class ResourceManager:
         # See if any GPU is free enough - using config values
         min_memory = self.scaling_config.min_gpu_memory_gib if self.scaling_config else 20
         max_util = self.scaling_config.max_gpu_utilization if self.scaling_config else 50
-        assignment = self.assign_gpu_device(min_free_memory_gib=min_memory, max_utilization=max_util)
+        assignment = await asyncio.to_thread(
+            self.assign_gpu_device, min_free_memory_gib=min_memory, max_utilization=max_util
+        )
         return assignment
 
     async def can_scale_evaluator(self, cpu_usage_threshold=None, normalized_load_threshold=None, duration=10, interval=1):
@@ -464,7 +472,7 @@ class ResourceManager:
         # Get the 1-minute load average and normalize by available cores.
         load_avg = await asyncio.to_thread(os.getloadavg)
         load_avg_1 = load_avg[0]
-        available_cores = len(os.sched_getaffinity(0))
+        available_cores = len(await asyncio.to_thread(os.sched_getaffinity, 0))
         normalized_load = load_avg_1 / available_cores if available_cores > 0 else load_avg_1
 
         self.resource_logger.info(
@@ -540,11 +548,8 @@ class ResourceManager:
             else:
                 visible_devices = list(range(pynvml.nvmlDeviceGetCount()))
 
-
             # Map host GPU index to container-visible index
-            #id_to_container_index = {host_id: container_id for container_id, host_id in enumerate(visible_devices)}
             id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
-
 
             # Use assigned_gpus passed from the caller - otherwise fallback to existing assignments
             if assigned_gpus is None:
@@ -560,10 +565,12 @@ class ResourceManager:
                 memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 free_memory_gib = memory_info.free / (1024 ** 3)
 
-                # If GPU looks free but bookkeeping says it's assigned, check for stale process
+                # If GPU looks free but bookkeeping says it's assigned, log a warning
                 if util.gpu < max_utilization and container_device in assigned_gpus:
-                    if self._kill_stale_process_for_device(container_device):
-                        assigned_gpus.discard(container_device)  # Now available
+                    pid = next((p for p, d in self.process_to_device_map.items() if d == container_device), None)
+                    self.resource_logger.warning(
+                        f"GPU {container_device} appears idle (util {util.gpu}%) but assigned to PID {pid}. May need manual check."
+                    )
 
                 if container_device in assigned_gpus:
                     continue  # Skip GPUs that are already assigned
@@ -585,7 +592,6 @@ class ResourceManager:
 
             # Reserve GPU in assigned_gpus before returning
             assigned_gpus.add(container_device)
-
 
             self.resource_logger.info(
                 f"Assigning GPU {host_gpu} (container {container_device}): Free {best_gpu[2]:.2f} GiB - Utilization {best_gpu[3]}%"
@@ -664,7 +670,7 @@ class ResourceManager:
             return
 
         # Select best process to terminate (respects min lifetime, prefers low GPU util)
-        idx = self._select_process_to_terminate(processes, process_name)
+        idx = await asyncio.to_thread(self._select_process_to_terminate, processes, process_name)
         if idx is None:
             self.resource_logger.info(f"No {process_name} eligible for termination (all too young)")
             return
@@ -675,7 +681,9 @@ class ResourceManager:
         # Get child PIDs before terminating (vLLM may spawn subprocesses)
         child_pids = []
         try:
-            child_pids = [c.pid for c in psutil.Process(pid).children(recursive=True)]
+            child_pids = await asyncio.to_thread(
+                lambda: [c.pid for c in psutil.Process(pid).children(recursive=True)]
+            )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
@@ -694,7 +702,7 @@ class ResourceManager:
         # Kill orphaned children (may hold GPU memory)
         for child_pid in child_pids:
             try:
-                psutil.Process(child_pid).kill()
+                await asyncio.to_thread(psutil.Process(child_pid).kill)
                 self.resource_logger.info(f"Killed orphaned child {child_pid}")
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
@@ -915,5 +923,3 @@ class ResourceManager:
         except Exception as e:
             self.resource_logger.warning(f"Cannot measure RabbitMQ latency: {e}")
             return None
-
-
