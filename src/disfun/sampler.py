@@ -16,21 +16,23 @@
 """Unified LiteLLM-based Sampler with vLLM support.
 
 This sampler replaces both the original sampler.py (HuggingFace transformers)
-and gpt.py (Azure OpenAI) with a single unified implemeOntation using LiteLLM.
+and gpt.py (Azure OpenAI) with a single unified implementation using LiteLLM.
 
 Key features:
-* Supports 100+ LLM providers through LiteLLM (OpenAI, Anthropic, Together AI, local vLLM, etc.)
-* Dynamic batching based on message load (10ms window, batch size from config.prompts_per_batch)
+* Supports 100+ LLM providers through LiteLLM (OpenAI - Anthropic - Together AI - local vLLM - etc.)
+* Dynamic batching based on message load (10ms window - up to 10 prompts per batch)
 * Dynamic temperature adjustment based on stored program count
 * Token tracking for both input and output
 * Time tracking (GPU time for local models - API latency for cloud models)
 * vLLM backend support for 10-20x faster local inference vs HuggingFace transformers
 """
 
+import random
 import os
 import json
 import logging
 import asyncio
+from typing import List, Dict, Any, Optional
 import time
 
 import litellm
@@ -38,6 +40,7 @@ import aio_pika
 from dotenv import load_dotenv
 
 from disfun import programs_database
+from disfun.profiling import async_time_execution
 
 logger = logging.getLogger('main_logger')
 
@@ -60,24 +63,6 @@ try:
 except ImportError:
     VLLM_AVAILABLE = False
     logger.warning("vLLM not available. Only API-based models will work.")
-
-
-class VLLMTimeoutError(Exception):
-    """Raised when vLLM inference times out.
-
-    This exception signals that the sampler process should exit
-    so ResourceManager can respawn it with a fresh vLLM instance.
-    """
-    pass
-
-
-class VLLMRepeatedFailureError(Exception):
-    """Raised when vLLM fails repeatedly.
-
-    This exception signals that vLLM is in a bad state and the sampler
-    process should exit so ResourceManager can respawn it.
-    """
-    pass
 
 
 def is_local_model(model: str) -> bool:
@@ -106,14 +91,13 @@ class LLM_model:
             repetition_penalty: float,
             max_new_tokens: int,
             model: str,
-            api_base: str | None = None,
-            api_key: str | None = None,
-            device: int | None = None,  # GPU device for local models
-            reasoning_effort: str | None = None,  # For GPT-5/o3 models
-            system_message: str | None = None,  # System message for API models
+            api_base: Optional[str] = None,
+            api_key: Optional[str] = None,
+            device: Optional[int] = None,  # GPU device for local models
+            reasoning_effort: Optional[str] = None,  # For GPT-5/o3 models
+            system_message: Optional[str] = None,  # System message for API models
             max_retries: int = 3,  # Maximum retry attempts for API calls
-            random_seed: int | None = None,  # Random seed for reproducible generation
-            inference_timeout: int = 300  # Timeout in seconds for vLLM inference
+            random_seed: Optional[int] = None  # Random seed for reproducible generation
     ) -> None:
         self.inference_time = 0.0
         self._samples_per_prompt = samples_per_prompt
@@ -129,7 +113,6 @@ class LLM_model:
         self.system_message = system_message
         self.max_retries = max_retries
         self.random_seed = random_seed
-        self.inference_timeout = inference_timeout
         self.generation_counter = 0  # Counter to increment seed for each generation call
         self.previous_total_registered_programs = 0
 
@@ -138,10 +121,6 @@ class LLM_model:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.request_count = 0
-
-        # Consecutive failure tracking for vLLM health monitoring
-        self.consecutive_failures = 0
-        self.max_consecutive_failures = 5  # Exit process after this many consecutive failures
 
         # Logging flag for first prompt/output
         self._logged_first_prompt = False
@@ -161,17 +140,24 @@ class LLM_model:
 
             # Note: CUDA_VISIBLE_DEVICES must be set BEFORE importing vLLM (done in process_entry.py)
             # Initialize vLLM engine (loads model on GPU)
-            # enforce_eager=True disables CUDA graphs, which helps with memory cleanup (vllm#3874)
+            # enforce_eager=False enables CUDA graphs for faster inference
             try:
                 self.vllm_engine = vLLM_Engine(
                     model=model,
                     tensor_parallel_size=1,  # Single GPU per sampler
                     dtype="float16",
-                    gpu_memory_utilization=0.90,
+                    gpu_memory_utilization=0.85,  # Leave headroom for CUDA graphs
                     trust_remote_code=True,
-                    enforce_eager=True,  # Helps with GPU memory release on cleanup
+                    enforce_eager=False,  # Enable CUDA graphs for faster inference
                 )
                 logger.info(f"vLLM engine initialized successfully on GPU {device}")
+
+                # Warmup: Run a dummy generation to compile CUDA graphs before real inference
+                # This prevents "Forward context is not set" errors during early batches
+                logger.info(f"vLLM: Running warmup generation to compile CUDA graphs...")
+                warmup_params = SamplingParams(temperature=0.1, max_tokens=16, n=1)
+                _ = self.vllm_engine.generate(["def hello():\n    "], warmup_params)
+                logger.info(f"vLLM: Warmup complete, CUDA graphs compiled")
             except Exception as e:
                 logger.error(f"Failed to initialize vLLM engine: {e}")
                 raise
@@ -265,10 +251,10 @@ class LLM_model:
 
     async def draw_batch_samples(
             self,
-            prompts: list[str],
+            prompts: List[str],
             total_registered_programs: int = 0,
             temperature_period: int = 10000
-    ) -> tuple[list[list[str]], list[int], list[list[int]]]:
+    ) -> tuple[List[List[str]], List[int], List[List[int]]]:
         """Generate samples for a batch of prompts.
 
         For API models - all prompts in the batch are processed in parallel using
@@ -293,7 +279,7 @@ class LLM_model:
         else:
             return await self._draw_batch_api(prompts)
 
-    async def _draw_batch_vllm(self, prompts: list[str]) -> tuple[list[list[str]], list[int], list[list[int]]]:
+    async def _draw_batch_vllm(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
         """Generate samples using local vLLM engine.
 
         The vLLM generate() call is run in a thread pool to avoid blocking
@@ -322,19 +308,9 @@ class LLM_model:
 
             # vLLM batch generation - run in thread pool to avoid blocking event loop
             # This allows RabbitMQ heartbeats to be processed during long inference
-            # Wrap with timeout to detect hung vLLM instances
-            try:
-                outputs = await asyncio.wait_for(
-                    asyncio.to_thread(self.vllm_engine.generate, prompts, self.sampling_params),
-                    timeout=self.inference_timeout
-                )
-            except TimeoutError as e:
-                logger.error(
-                    f"vLLM inference timed out after {self.inference_timeout}s for {len(prompts)} prompts."
-                )
-                raise VLLMTimeoutError(
-                    f"vLLM inference exceeded {self.inference_timeout}s timeout"
-                ) from e
+            outputs = await asyncio.to_thread(
+                self.vllm_engine.generate, prompts, self.sampling_params
+            )
 
             all_samples = []
             input_token_counts = []
@@ -364,36 +340,30 @@ class LLM_model:
             self.inference_time = end_time - start_time
             logger.debug(f"vLLM inference time: {self.inference_time:.2f} sec")
 
-            # Reset consecutive failure counter on success
-            self.consecutive_failures = 0
-
             return all_samples, input_token_counts, all_output_token_counts
 
-        except VLLMTimeoutError:
-            # Re-raise timeout errors to be handled by consume_and_process
-            raise
-
         except Exception as e:
-            # Log full traceback to understand what's actually failing
-            logger.error(
-                f"Error during vLLM batch generation (failure {self.consecutive_failures + 1}/"
-                f"{self.max_consecutive_failures}): {type(e).__name__}: {e}",
-                exc_info=True
-            )
-
-            self.consecutive_failures += 1
-
-            if self.consecutive_failures >= self.max_consecutive_failures:
-                logger.error(
-                    f"vLLM has failed {self.consecutive_failures} times consecutively."
-                )
-                raise VLLMRepeatedFailureError(
-                    f"vLLM failed {self.consecutive_failures} times consecutively"
-                ) from e
-
+            error_str = str(e).lower()
+            error_type = type(e).__name__
+            # CUDA errors corrupt the GPU context - cannot recover in same process
+            if "cuda" in error_str or "illegal memory" in error_str or "cublas" in error_str:
+                logger.error(f"CUDA error detected: {error_type}: {e}")
+                logger.error("CUDA context is corrupted and unrecoverable. Exiting for clean restart...")
+                # Best effort cleanup to free GPU memory before exit
+                try:
+                    self.cleanup()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass  # Cleanup may fail if CUDA is corrupted, that's ok
+                import sys
+                sys.exit(1)
+            else:
+                # Log full exception details - some vLLM exceptions have empty str()
+                logger.error(f"Error during vLLM batch generation: {error_type}: {e!r}", exc_info=True)
             return [], [], []
 
-    async def _draw_batch_api(self, prompts: list[str]) -> tuple[list[list[str]], list[int], list[list[int]]]:
+    async def _draw_batch_api(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
         """Generate samples using LiteLLM API client with parallel async calls."""
         try:
             start_time = time.time()
@@ -559,28 +529,16 @@ class Sampler:
     """Node that samples program continuations and sends them for evaluation."""
 
     def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, device=None, log_dir=None, system_message=None, random_seed=None, rabbitmq_config=None):
+        self.connection = connection
+        self.channel = channel
+        self.sampler_queue = sampler_queue
+        self.evaluator_queue = evaluator_queue
         self._config = config
+        self._rabbitmq_config = rabbitmq_config  # Store for reconnection
         self._shutdown_requested = False
         self._reconnect_delay = 5.0  # Initial reconnect delay in seconds
         self._max_reconnect_delay = 60.0  # Maximum reconnect delay
         self.device = device
-
-        # Use shared connection manager for RabbitMQ
-        from disfun import process_utils
-        self._conn_manager = process_utils.RabbitMQConnectionManager(
-            config=rabbitmq_config,
-            component_name=f"Sampler ({config.model})",
-            queue_names=["sampler_queue", "evaluator_queue"],
-            logger=logger,
-            timeout=300
-        )
-        # Initialize with passed-in connection (may be None for deferred connection)
-        self._conn_manager.connection = connection
-        self._conn_manager.channel = channel
-        if sampler_queue:
-            self._conn_manager.queues["sampler_queue"] = sampler_queue
-        if evaluator_queue:
-            self._conn_manager.queues["evaluator_queue"] = evaluator_queue
         self.temperature_period = self._config.temperature_period
         self.samples_per_prompt = self._config.samples_per_prompt
         self.samples_per_batch = self._config.prompts_per_batch
@@ -603,7 +561,6 @@ class Sampler:
                 system_message=self.system_message,
                 max_retries=self._config.max_retries,
                 random_seed=random_seed,
-                inference_timeout=getattr(self._config, 'inference_timeout', 300),
             )
             mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")
@@ -611,46 +568,70 @@ class Sampler:
             logger.error(f"Error initializing model: {e}")
             raise
 
-    # Properties for backward compatibility - delegate to connection manager
-    @property
-    def connection(self):
-        return self._conn_manager.connection
-
-    @connection.setter
-    def connection(self, value):
-        self._conn_manager.connection = value
-
-    @property
-    def channel(self):
-        return self._conn_manager.channel
-
-    @channel.setter
-    def channel(self, value):
-        self._conn_manager.channel = value
-
-    @property
-    def sampler_queue(self):
-        return self._conn_manager.get_queue("sampler_queue")
-
-    @sampler_queue.setter
-    def sampler_queue(self, value):
-        self._conn_manager.queues["sampler_queue"] = value
-
-    @property
-    def evaluator_queue(self):
-        return self._conn_manager.get_queue("evaluator_queue")
-
-    @evaluator_queue.setter
-    def evaluator_queue(self, value):
-        self._conn_manager.queues["evaluator_queue"] = value
-
     async def _ensure_connection(self):
-        """Delegate to shared connection manager."""
-        return await self._conn_manager.ensure_connection()
+        """Create or verify RabbitMQ connection is alive.
+
+        If the connection is closed or None, creates a fresh connection,
+        channel, and queue objects. This enables automatic recovery from
+        network interruptions.
+        """
+        from disfun import process_utils
+
+        if self._rabbitmq_config is None:
+            logger.warning("Sampler: No RabbitMQ config stored, cannot reconnect")
+            return False
+
+        # Check if connection needs to be recreated
+        needs_reconnect = (
+            self.connection is None or
+            self.connection.is_closed or
+            self.channel is None or
+            self.channel.is_closed
+        )
+
+        if needs_reconnect:
+            logger.info(f"Sampler ({self._config.model}): Establishing new RabbitMQ connection...")
+            try:
+                # Close any stale connections first
+                await self._close_connection()
+
+                # Create fresh connection
+                self.connection = await process_utils.create_rabbitmq_connection(
+                    self._rabbitmq_config, timeout=300
+                )
+                self.channel = await self.connection.channel()
+                self.sampler_queue = await process_utils.declare_standard_queue(
+                    self.channel, "sampler_queue"
+                )
+                # Also declare evaluator queue for publishing
+                await process_utils.declare_standard_queue(self.channel, "evaluator_queue")
+
+                logger.info(f"Sampler ({self._config.model}): RabbitMQ connection re-established successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Sampler ({self._config.model}): Failed to reconnect: {e}")
+                return False
+        return True
 
     async def _close_connection(self):
-        """Delegate to shared connection manager."""
-        await self._conn_manager.close()
+        """Safely close existing RabbitMQ connection and channel."""
+        try:
+            if self.channel is not None:
+                try:
+                    if not self.channel.is_closed:
+                        await self.channel.close()
+                except Exception as e:
+                    logger.debug(f"Sampler: Error closing channel: {e}")
+            if self.connection is not None:
+                try:
+                    if not self.connection.is_closed:
+                        await self.connection.close()
+                except Exception as e:
+                    logger.debug(f"Sampler: Error closing connection: {e}")
+        finally:
+            self.connection = None
+            self.channel = None
+            self.sampler_queue = None
 
     async def consume_and_process(self) -> None:
         """Main consume loop with automatic connection recovery.
@@ -664,7 +645,7 @@ class Sampler:
 
         async def _consume_loop():
             """Inner consume loop - processes messages from the queue."""
-            # Set prefetch to match batch size so RabbitMQ delivers enough messages for full batches
+            # Set prefetch to match batch size so RabbitMQ delivers enough messages
             prefetch = self.samples_per_batch
             logger.info(f"Sampler ({self._config.model}): Setting QoS prefetch_count={prefetch}...")
             await self.channel.set_qos(prefetch_count=prefetch)
@@ -674,54 +655,51 @@ class Sampler:
                 batch = []
                 batch_timeout = 0.01  # 10ms window
                 timeout_task = None
+                inference_in_progress = False  # Track if LLM is running
+
+                async def run_inference():
+                    """Process current batch. Sets inference_in_progress flag to prevent concurrent calls."""
+                    nonlocal batch, inference_in_progress
+                    if not batch or inference_in_progress:
+                        return
+                    batch_to_process = batch.copy()
+                    batch.clear()
+                    inference_in_progress = True
+                    try:
+                        await self.process_batch_s(batch_to_process)
+                    finally:
+                        inference_in_progress = False
 
                 async def process_batch_with_timeout():
                     """Process batch after timeout expires."""
-                    nonlocal batch, timeout_task
-                    await asyncio.sleep(batch_timeout)
-                    logger.debug(f"Sampler: Timeout fired, batch size = {len(batch)}")
-                    if batch:
-                        # Copy batch to avoid race condition where main loop modifies it
-                        batch_to_process = batch.copy()
-                        batch.clear()
-                        logger.debug(f"Sampler: Timeout task processing {len(batch_to_process)} messages")
-                        await self.process_batch_s(batch_to_process)
-                        logger.debug("Sampler: Timeout task finished processing")
+                    nonlocal timeout_task
+                    try:
+                        await asyncio.sleep(batch_timeout)
+                    except asyncio.CancelledError:
+                        timeout_task = None
+                        return
 
-                    # Clear timeout_task reference
+                    await run_inference()
                     timeout_task = None
 
                     # If messages arrived during processing - create new timeout task
-                    if batch:
-                        logger.debug(f"Sampler: Messages arrived during processing ({len(batch)}), creating new timeout task")
+                    if batch and not inference_in_progress:
                         timeout_task = asyncio.create_task(process_batch_with_timeout())
-                    else:
-                        logger.debug("Sampler: Timeout task completed, no pending messages")
 
                 logger.info(f"Sampler ({self._config.model}): Consumer registered, now listening for messages...")
                 async for message in stream:
-                    logger.debug(f"Sampler: Received message, current batch size = {len(batch)}, timeout_task = {timeout_task}")
                     batch.append(message)
 
-                    # If we don't have a timeout task running - start one
-                    if timeout_task is None:
-                        logger.debug(f"Sampler: Creating new timeout task for batch size {len(batch)}")
+                    # Start timeout task if not running
+                    if timeout_task is None and not inference_in_progress:
                         timeout_task = asyncio.create_task(process_batch_with_timeout())
 
                     # If batch is full - cancel timeout and process immediately
-                    if len(batch) >= self.samples_per_batch:
-                        logger.debug(f"Sampler: Batch full ({len(batch)} messages), cancelling timeout and processing immediately")
+                    if len(batch) >= self.samples_per_batch and not inference_in_progress:
                         if timeout_task:
                             timeout_task.cancel()
-                            try:
-                                await timeout_task  # Wait for cancellation to complete
-                            except asyncio.CancelledError:
-                                pass
                             timeout_task = None
-                        batch_to_process = batch.copy()
-                        batch.clear()
-                        await self.process_batch_s(batch_to_process)
-                        logger.debug("Sampler: Batch processing completed")
+                        await run_inference()
 
         # Main reconnection loop
         reconnect_delay = self._reconnect_delay
@@ -734,7 +712,7 @@ class Sampler:
 
             try:
                 # Ensure connection is alive (reconnect if needed)
-                if self._conn_manager.config is not None:
+                if self._rabbitmq_config is not None:
                     connected = await self._ensure_connection()
                     if not connected:
                         if self._shutdown_requested:
@@ -757,25 +735,6 @@ class Sampler:
                 # Shutdown requested - exit cleanly without reconnection
                 logger.info(f"Sampler ({self._config.model}): Cancelled, exiting...")
                 break
-
-            except (VLLMTimeoutError, VLLMRepeatedFailureError) as e:
-                # vLLM is dead - exit immediately for clean restart
-                # Don't try reinit: it rarely helps and a fresh process is more reliable
-                logger.error(
-                    f"Sampler ({self._config.model}): {e}. "
-                    f"Force-exiting process for clean restart by ResourceManager..."
-                )
-                # Try to close connection with timeout - don't block forever
-                try:
-                    await asyncio.wait_for(self._close_connection(), timeout=5.0)
-                except (asyncio.TimeoutError, Exception) as close_err:
-                    logger.warning(f"Connection close failed/timed out: {close_err}")
-
-                # Use os._exit() to force immediate termination
-                # sys.exit() can hang waiting for the stuck vLLM thread to finish
-                import os
-                logger.error("Calling os._exit(1) to force process termination...")
-                os._exit(1)
 
             except (aio_pika.exceptions.AMQPConnectionError,
                     aio_pika.exceptions.ChannelClosed,
@@ -814,7 +773,7 @@ class Sampler:
                 reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
                 continue
 
-    async def process_batch_s(self, batch: list[aio_pika.IncomingMessage]):
+    async def process_batch_s(self, batch: List[aio_pika.IncomingMessage]):
         prompts = []
         metadata = []
         flags = []
@@ -826,7 +785,8 @@ class Sampler:
                     prompt_data = data["prompt"]
                     total_registered_programs = data.get("total_registered_programs", 0)
                     flag = data.get("flag", False)
-                    prompt = programs_database.Prompt.deserialize(prompt_data)
+                    flags.append(flag)
+                    prompt = programs_database.Prompt.from_dict(prompt_data)
 
                     if prompt.code is not None:
                         prompts.append(prompt.code)
@@ -836,7 +796,6 @@ class Sampler:
                             "expected_version": prompt.expected_version,
                             "parent_ids": data.get("parent_ids", []),
                         })
-                        flags.append(flag)  # Only append flag when prompt is valid
                     else:
                         logger.warning(f"Skipping prompt with island_id {prompt.island_id}: Prompt is empty.")
 
@@ -855,11 +814,7 @@ class Sampler:
                 prompts, total_registered_programs, self.temperature_period
             )
             inference_time = self._llm.inference_time
-        except (VLLMTimeoutError, VLLMRepeatedFailureError):
-            # Fatal errors - vLLM engine is dead, need process restart
-            raise
         except Exception as e:
-            # Transient errors - skip this batch, continue with next
             logger.error(f"LLM sampling failed: {e}")
             return
 
@@ -868,8 +823,9 @@ class Sampler:
         time_per_sample = inference_time / total_samples if total_samples > 0 else 0.0
         logger.debug(f"Batch inference time: {inference_time:.2f}s for {total_samples} samples = {time_per_sample:.4f}s per sample")
 
-        # Publish results to the evaluator queue
-        for prompt_idx, (samples, meta, flag) in enumerate(zip(samples_list, metadata, flags, strict=True)):
+        # Collect all messages for batch publishing
+        messages_to_publish = []
+        for prompt_idx, (samples, meta, flag) in enumerate(zip(samples_list, metadata, flags)):
             # Log duplicated-prompt runs for manual inspection
             if flag:
                 try:
@@ -881,28 +837,29 @@ class Sampler:
                 except Exception as e:
                     logger.error(f"Error logging duplicate data: {e}")
 
-            # Send every sample to the evaluator queue
             for sample_idx, sample in enumerate(samples):
                 message_data = {
                     "sample": sample,
                     "island_id": meta["island_id"],
                     "version_generated": meta["version_generated"],
                     "expected_version": meta["expected_version"],
-                    "gpu_time": time_per_sample,  # For API models this is API latency, for vLLM it's GPU time
-                    "input_tokens": input_token_counts[prompt_idx] if sample_idx == 0 else 0,  # Input processed once per prompt
+                    "gpu_time": time_per_sample,
+                    "input_tokens": input_token_counts[prompt_idx] if sample_idx == 0 else 0,
                     "output_tokens": output_token_counts[prompt_idx][sample_idx],
                     "parent_ids": meta.get("parent_ids", []),
                 }
-                serialized_message = json.dumps(message_data)
+                messages_to_publish.append(aio_pika.Message(body=json.dumps(message_data).encode()))
 
-                try:
-                    await self.channel.default_exchange.publish(
-                        aio_pika.Message(body=serialized_message.encode()),
-                        routing_key="evaluator_queue",
-                    )
-                    logger.debug("Published sample to evaluator_queue.")
-                except Exception as e:
-                    logger.error(f"Error publishing sample: {e}")
+        # Batch publish all messages concurrently
+        if messages_to_publish:
+            try:
+                await asyncio.gather(*[
+                    self.channel.default_exchange.publish(msg, routing_key="evaluator_queue")
+                    for msg in messages_to_publish
+                ])
+                logger.debug(f"Batch published {len(messages_to_publish)} samples to evaluator_queue.")
+            except Exception as e:
+                logger.error(f"Error batch publishing samples: {e}")
 
     def request_shutdown(self):
         """Signal that shutdown is requested - stops reconnection attempts."""

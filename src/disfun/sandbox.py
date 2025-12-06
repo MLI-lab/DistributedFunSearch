@@ -55,6 +55,10 @@ class DummySandbox:
     """Base class for Sandboxes that execute generated code contained in a string,
     and call a function defined in that code with specific input.
     """
+    # Cache for compiled base namespace (spec without priority) - per-process
+    _cached_namespace = None
+    _cached_base_hash = None
+
     def __init__(self, **kwargs):
         pass
 
@@ -72,21 +76,44 @@ class DummySandbox:
 
     @staticmethod
     def compile_code(program: str):
-        namespace = {}
-        parsed_code = ast.parse(program)
-        compiled_code = compile(parsed_code, filename="<ast>", mode="exec")
-        exec(compiled_code, namespace)
-        return namespace
+        """Compile program with caching - only recompiles priority function."""
+        tree = ast.parse(program)
+
+        # Separate priority from rest of program
+        priority_node = None
+        base_nodes = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == 'priority':
+                priority_node = node
+            else:
+                base_nodes.append(node)
+
+        # Check if base changed (first call or different spec)
+        base_tree = ast.Module(body=base_nodes, type_ignores=[])
+        base_hash = hash(ast.dump(base_tree))
+
+        if DummySandbox._cached_base_hash != base_hash:
+            DummySandbox._cached_namespace = {}
+            exec(compile(base_tree, '<ast>', 'exec'), DummySandbox._cached_namespace)
+            DummySandbox._cached_base_hash = base_hash
+
+        # Always compile and inject new priority into cached namespace
+        if priority_node:
+            priority_tree = ast.Module(body=[priority_node], type_ignores=[])
+            exec(compile(priority_tree, '<ast>', 'exec'), DummySandbox._cached_namespace)
+
+        return DummySandbox._cached_namespace
 
 class ExternalProcessSandbox(DummySandbox):
     """Sandbox that executes the code in a separate Python process on the same host."""
-    def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", local_id=None, graph_dir=None):
+    def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", local_id=None, graph_dir=None, memory_limit_gb: float = 1.0):
         super().__init__()
         self.local_id = local_id
         self.output_path = ensure_dir_exists(pathlib.Path(base_path) / f"sandbox{self.local_id}")
         self.timeout_secs = timeout_secs
         self.python_path = python_path
         self.graph_dir = graph_dir  # Store graph_dir to pass to subprocess
+        self.memory_limit_gb = memory_limit_gb  # Memory limit per sandbox process
         self.input_path = ensure_dir_exists(self.output_path / "inputs")
 
     def _exec(self, call_data_path: pathlib.Path, input_path: pathlib.Path, error_file_path: pathlib.Path) -> bool:
@@ -120,6 +147,7 @@ class ExternalProcessSandbox(DummySandbox):
             env = os.environ.copy()
             if self.graph_dir:
                 env['GRAPH_DIR'] = str(self.graph_dir)
+            env['SANDBOX_MEMORY_LIMIT_GB'] = str(self.memory_limit_gb)
 
             # Use Popen with start_new_session=True to create a new process group
             # This allows us to kill the entire process tree if needed

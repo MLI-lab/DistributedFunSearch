@@ -26,6 +26,7 @@ Differences from the original DeepMind FunSearch version
 * Implements different evaluation scoring (last - average - weighted - relative difference to a traget solution)
 """
 
+import ast
 import copy
 import dataclasses
 import time
@@ -101,7 +102,7 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
         # Convert string keys to tuples and extract (n - s) from full problem instance tuples
         parsed_scores = {}
         for k, v in scores_per_test.items():
-            key = eval(k) if isinstance(k, str) else k
+            key = ast.literal_eval(k) if isinstance(k, str) else k
             # Extract (n - s) from full tuple: take first two elements
             ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
             parsed_scores[ns_key] = v
@@ -202,19 +203,18 @@ class Prompt:
     island_id: int
     expected_version: int = None
 
-    def serialize(self):
-        """Serializes the object to a JSON string."""
-        return json.dumps({
+    def to_dict(self):
+        """Returns prompt as dict (for JSON serialization)."""
+        return {
             "code": self.code,
             "version_generated": self.version_generated,
             "island_id": self.island_id,
             "expected_version": self.expected_version,
-        })
+        }
 
     @staticmethod
-    def deserialize(serialized_str: str):
-        """Deserializes the JSON string back to a Prompt object."""
-        data = json.loads(serialized_str)
+    def from_dict(data):
+        """Creates Prompt from dict."""
         return Prompt(**data)
 
 
@@ -354,6 +354,7 @@ class ProgramsDatabase:
         self.next_program_id = 1  # Counter for assigning unique program IDs
         self.lineage_log = [] if self.save_lineage else None  # Only initialize if enabled
         self._prompt_to_parents = {} if self.save_lineage else None
+        self._program_id_to_generation = {}  # O(1) lookup for parent generation calculation
 
         # Lazy initialization of locks (will be created on first access)
         self._island_locks = None
@@ -375,6 +376,7 @@ class ProgramsDatabase:
             island['clusters'] = {}
             island['version'] = 0
             island['num_programs'] = 0
+            island['hash_set'] = set()  # O(1) deduplication lookup
             self._islands.append(island)
 
         # Store W&B config for later initialization (defer to avoid blocking)
@@ -780,7 +782,7 @@ class ProgramsDatabase:
             # Proceed with program registration logic
             island = self._islands[island_id]
 
-            if not self.no_deduplication and self.function_body_exists(island['clusters'], hash_value):
+            if not self.no_deduplication and self.function_body_exists(island, hash_value):
                 self.duplicates_discarded += 1
                 logger.debug("Program with identical body already exists in island. Skipping registration.")
                 return
@@ -834,16 +836,17 @@ class ProgramsDatabase:
 
         # Calculate generation: max of parent generations + 1 - or 0 if no parents
         if parent_ids:
-            # Find maximum generation among parents
-            max_parent_generation = 0
-            for cluster in clusters.values():
-                for p in cluster.get('programs', []):
-                    if p.program_id in parent_ids and p.generation is not None:
-                        max_parent_generation = max(max_parent_generation, p.generation)
+            # O(1) lookup instead of scanning all programs
+            max_parent_generation = max(
+                (self._program_id_to_generation.get(pid, 0) for pid in parent_ids),
+                default=0
+            )
             program.generation = max_parent_generation + 1
         else:
             program.generation = 0
 
+        # Update generation lookup dict
+        self._program_id_to_generation[program.program_id] = program.generation
         program.timestamp = time.time()
 
         try:
@@ -860,6 +863,8 @@ class ProgramsDatabase:
                 cluster_data['programs'].append(program)
 
             island['num_programs'] += 1
+            if hash_value is not None:
+                island['hash_set'].add(hash_value)
 
             # Log lineage information for this program (only if enabled)
             if self.save_lineage:
@@ -937,6 +942,7 @@ class ProgramsDatabase:
                 async with self._island_locks[island_id]:
                     island = self._islands[island_id]
                     island['clusters'].clear()
+                    island['hash_set'].clear()
                     island['version'] += 1
                     island['num_programs'] = 0
 
@@ -991,7 +997,7 @@ class ProgramsDatabase:
 
         prompt = Prompt(code, version_generated, island_id, expected_version)
         message_data = {
-            "prompt": prompt.serialize(),
+            "prompt": prompt.to_dict(),
             "total_registered_programs": island['num_programs'],
             "flag":flag_duplicate,
             "parent_ids": parent_ids  # Include parent IDs for lineage tracking
@@ -1190,8 +1196,7 @@ class ProgramsDatabase:
         prompt = re.sub(r'"""\s*"""', '', prompt)
 
         # Clean up multiple consecutive blank lines from empty placeholders
-        while "\n\n\n" in prompt:
-            prompt = prompt.replace("\n\n\n", "\n\n")
+        prompt = re.sub(r'\n{3,}', '\n\n', prompt)
 
         # Check for duplicates
         duplicate_prompt = False
@@ -1202,19 +1207,14 @@ class ProgramsDatabase:
         logger.debug(f"Template prompt constructed: {len(prompt)} characters")
         return prompt.rstrip('\n'), duplicate_prompt
 
-    def function_body_exists(self, clusters, hash_value: int) -> bool:
+    def function_body_exists(self, island, hash_value: int) -> bool:
+        """O(1) check if a program with this hash exists in the island."""
         assert hash_value is not None, "Error: No hash value computed! Check that hash value condition in the specification script is set to match start_n."
-
-        for cluster in clusters.values():
-            programs = cluster['programs']
-            for program in programs:
-                if program.hash_value == hash_value:
-                    return True
-        return False
+        return hash_value in island['hash_set']
 
     def _get_signature(self, scores_per_test):
         if all(isinstance(k, str) for k in scores_per_test.keys()):
-            scores_per_test = {eval(k): v for k, v in scores_per_test.items()}
+            scores_per_test = {ast.literal_eval(k): v for k, v in scores_per_test.items()}
 
         def ensure_hashable(val):
             if isinstance(val, list):

@@ -1,5 +1,6 @@
 """Checkpoint save/load functionality for ProgramsDatabase."""
 
+import ast
 import os
 import pickle
 import datetime
@@ -78,31 +79,46 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
     database._last_reset_time = checkpoint_data["last_reset_time"]
     database._total_resets = checkpoint_data.get("total_resets", 0)
 
-    # Restore islands
+    # Restore islands and rebuild generation dict
+    database._program_id_to_generation = {}
     for island_id, island_state in enumerate(checkpoint_data["islands_state"]):
         logger.debug(f"Loading state for island id {island_id}")
         island = database._islands[island_id]
-        _load_island_state(island, island_state)
+        _load_island_state(island, island_state, database._program_id_to_generation)
 
-    logger.info("Checkpoint loaded successfully.")
+    logger.info(f"Checkpoint loaded successfully. Rebuilt generation lookup for {len(database._program_id_to_generation)} programs.")
 
 
-def _load_island_state(island, island_state):
-    """Load the state of a single island."""
+def _load_island_state(island, island_state, generation_dict=None):
+    """Load the state of a single island.
+
+    Args:
+        island: Island dict to load into
+        island_state: Serialized island state
+        generation_dict: Optional dict to populate with program_id -> generation mappings
+    """
     island['clusters'].clear()
+    island['hash_set'] = set()  # Rebuild hash set from loaded programs
     for signature_str, cluster_state in island_state["clusters"].items():
-        signature = eval(signature_str)
+        signature = ast.literal_eval(signature_str)
         if isinstance(signature, list):
             signature = tuple(signature)
+        programs = [
+            code_manipulation.Function.from_dict(prog_dict)
+            for prog_dict in cluster_state['programs']
+        ]
         cluster_data = {
             'score': cluster_state['score'],
             'scores_per_test': cluster_state.get('scores_per_test', {}),
-            'programs': [
-                code_manipulation.Function.from_dict(prog_dict)
-                for prog_dict in cluster_state['programs']
-            ]
+            'programs': programs
         }
         island['clusters'][signature] = cluster_data
+        # Rebuild hash set and generation dict
+        for prog in programs:
+            if prog.hash_value is not None:
+                island['hash_set'].add(prog.hash_value)
+            if generation_dict is not None and prog.program_id is not None:
+                generation_dict[prog.program_id] = prog.generation if prog.generation is not None else 0
 
     island['version'] = island_state['version']
     island['num_programs'] = island_state['num_programs']

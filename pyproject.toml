@@ -31,7 +31,7 @@ dependencies = [
   "networkx",
   "aiohttp",
   "litellm",
-  "vllm",
+  "vllm>=0.7.0,<0.8.0",  # Pin to 0.7.x - stable V0 engine, 0.8+ uses V1 which has multiprocess issues
   "python-dotenv",
   "requests",
   "ujson"

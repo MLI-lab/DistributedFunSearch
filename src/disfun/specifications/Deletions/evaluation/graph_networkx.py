@@ -37,6 +37,11 @@ def str2int(s): return int(s, 2)
 def int2str(n, length): return format(n, f'0{length}b')
 def hamming_distance(s1, s2): return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
+# Aliases for common LLM naming variations
+HammingDistance = hamming_distance
+Hamming_Distance = hamming_distance
+hammingDistance = hamming_distance
+
 # Global graph cache
 _GRAPH_CACHE = {}
 
@@ -116,28 +121,30 @@ def solve(n, s, q, graph_dir):
             else:
                 print(f"Graph too large to cache ({estimated_size_gb:.2f} GB > {cache_limit_gb} GB limit)", file=sys.stderr)
 
-    # Make a copy for priority computation
-    G_for_priority = G.copy()
+    # Freeze graph to protect against LLM modifications (instant, no copy needed)
+    # If LLM tries to modify G, it raises NetworkXError and evaluation fails
+    nx.freeze(G)
 
-    # Compute priorities
+    # Compute priorities (G is frozen - read-only)
     priorities = {
-        node: priority(node, G_for_priority, n, s)
+        node: priority(node, G, n, s)
         for node in G.nodes
     }
 
     # Sort nodes by priority (descending), Lexicographic tie-breaking (the second element x is the node string)
     nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))
 
-    # Greedy independent set construction
+    # Greedy independent set construction (don't modify G - preserves cache)
     independent_set = set()
+    removed = set()
     for node in nodes_sorted:
-        if node not in G:  # Already removed
+        if node in removed:
             continue
 
         independent_set.add(node)
-        neighbors = list(G.neighbors(node))
-        G.remove_node(node)
-        G.remove_nodes_from(neighbors)
+        removed.add(node)
+        for neighbor in G.neighbors(node):
+            removed.add(neighbor)
 
     # Compute hash for deduplication (only for smallest n)
     hash_value = None

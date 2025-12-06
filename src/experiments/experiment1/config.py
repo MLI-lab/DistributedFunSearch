@@ -67,7 +67,7 @@ class ProgramsDatabaseConfig:
   prompts_per_batch= 10
   no_deduplication: bool = False
   save_lineage: bool = False
-  initial_program_copies: int = 30
+  initial_program_copies: int = 100
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,7 +91,7 @@ class SamplerConfig:
     max_retries: Maximum number of retry attempts for failed API calls (default: 3). Only applies to API models.
     inference_timeout: Timeout in seconds for vLLM inference (default: 300). If vLLM hangs beyond this, sampler exits for restart by ResourceManager.
   """
-  prompts_per_batch= 30
+  prompts_per_batch= 50
   samples_per_prompt: int = 2
   temperature_period= None
   temperature: float = 0.9444444444444444
@@ -124,6 +124,8 @@ class EvaluatorConfig:
         graph_dir: Directory where graph files (.lmdb) are stored. Default is "src/graphs" relative to project root.
         cache_graphs: Enable in-memory graph caching to avoid reloading graphs for every evaluation (default: False). Each evaluator will have its own cache, so this increases RAM usage.
         cache_size_limit_gb: Only cache graphs smaller than this size in GiB (default: 2.0). Set to float('inf') to cache all graphs regardless of size.
+        prefetch_count: Number of messages to buffer from RabbitMQ (default: 5). Higher values improve pipeline parallelism.
+        sandbox_memory_limit_gb: Memory limit per sandbox process in GiB (default: 10). Prevents runaway generated code from consuming all RAM.
     """
     evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/graph_networkx.py"  # Options: no_graph.py, graph_networkx.py, graph_gt.py
     initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/initial_functions/graph_networkx"  # Use "no_graph" for on-the-fly evaluation, "graph" for graph variants
@@ -131,12 +133,14 @@ class EvaluatorConfig:
     start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Hash is computed for n==start_n[0] (automatically substituted in specification)
     end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Match available graphs (s1_n6 through s1_n11)
     mode: str = "last"
-    timeout: int = 60  
-    max_workers: int = 2  
-    q: int = 2  
-    graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"  
-    cache_graphs: bool = False  # Enable in-memory graph caching (reduces I/O, increases RAM)
+    timeout: int = 30
+    max_workers: int = 2
+    q: int = 2
+    graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
+    cache_graphs: bool = True  # Enable in-memory graph caching (reduces I/O, increases RAM)
     cache_size_limit_gb: float = 2.0  # Only cache graphs smaller than this (GiB)
+    prefetch_count: int = 5  # Messages to buffer from RabbitMQ for pipeline parallelism
+    sandbox_memory_limit_gb: float = 1.0  # Memory limit per sandbox process (GiB)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -249,8 +253,8 @@ class ScalingConfig:
     """
     enabled: bool = True
     check_interval: int = 60
-    max_samplers: int = 50
-    max_evaluators: int = 10
+    max_samplers: int = 1000
+    max_evaluators: int = 200
     sampler_scale_up_threshold: int = 50
     evaluator_scale_up_threshold: int = 10
     min_gpu_memory_gib: int = 35

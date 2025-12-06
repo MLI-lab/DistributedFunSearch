@@ -3,13 +3,17 @@ import psutil
 import pynvml
 import logging
 import asyncio
-import multiprocessing as mp
+import multiprocessing
+import torch.multiprocessing as torch_mp
 from logging import FileHandler
 import socket
 import statistics
 import aiohttp
 import time
 import traceback
+
+
+
 
 
 class ResourceManager:
@@ -28,13 +32,8 @@ class ResourceManager:
         self.process_start_times = {}    # pid -> start time (for minimum lifetime check)
         self.scaling_config = scaling_config
         self.next_sampler_id = 0  # Monotonically increasing counter for unique sampler IDs (never reused)
+        self.next_evaluator_id = 0  # Monotonically increasing counter for unique evaluator IDs
         self.database = None  # Reference to ProgramsDatabase for syncing next_sampler_id to checkpoint
-        # Counter for detecting disconnected samplers (consecutive checks with 0 consumers)
-        self.sampler_zero_consumer_count = 0
-        # Flag to skip zero-consumer check during initial startup (model loading takes 5-10 min)
-        self.samplers_ever_connected = False
-        # Time-based tracking for faster disconnection detection
-        self.last_sampler_activity_time = None
         # Scale-down idle tracking
         self._evaluator_idle_checks = 0
         self._sampler_idle_checks = 0
@@ -63,31 +62,6 @@ class ResourceManager:
         if pid in self.process_to_device_map:
             device = self.process_to_device_map.pop(pid)
             self.resource_logger.info(f"Freed device {device} from dead process (PID: {pid})")
-
-    def _all_samplers_busy(self, utilization_threshold=50):
-        """Check if all assigned sampler GPUs have high utilization.
-
-        Returns True if all samplers are actively using their GPUs,
-        meaning we should not scale down even if queue is empty.
-        """
-        if self.cpu_only or not self.process_to_device_map:
-            return False
-
-        try:
-            for pid, device in self.process_to_device_map.items():
-                if device is None or not device.startswith("cuda:"):
-                    continue
-                gpu_idx = int(device.split(":")[1])
-                handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
-                util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-                if util < utilization_threshold:
-                    # At least one sampler has low GPU utilization
-                    return False
-            # All samplers have high utilization
-            return True
-        except Exception as e:
-            self.resource_logger.warning(f"Error checking sampler GPU utilization: {e}")
-            return False
 
     async def has_enough_system_memory(self, min_free_gib=None):
         """Check if system has enough free memory.
@@ -129,7 +103,7 @@ class ResourceManager:
         while True:
             try:
                 num_samples = max(1, sample_duration // sample_interval)
-
+                
                 # Collect samples
                 cpu_samples = []
                 io_wait_samples = []
@@ -142,7 +116,7 @@ class ResourceManager:
                 swap_samples = []
 
                 if not self.cpu_only:
-                    gpu_samples = {}  # Dict of lists: {gpu_index: [sample1, sample2, ...]}
+                    gpu_samples = {}  # Dict of lists: {gpu_index: [sample1 - sample2 - ...]}
 
                 for _ in range(num_samples):
                     # CPU usage
@@ -160,7 +134,7 @@ class ResourceManager:
 
                     # Disk I/O
                     disk_io = await asyncio.to_thread(psutil.disk_io_counters)
-                    if disk_io:  # Can be None on some systems (e.g. Docker containers)
+                    if disk_io:  # Can be None on some systems (e.g. - Docker containers)
                         disk_read_samples.append(disk_io.read_bytes / 1e6)  # Convert to MB
                         disk_write_samples.append(disk_io.write_bytes / 1e6)
                     else:
@@ -315,77 +289,30 @@ class ResourceManager:
                     if sampler_queue and max_samplers > 0:
                         assignment = await self.can_scale_up_samplers()
                         if self.cpu_only:
-                            assignment = await self.can_scale_evaluator()  # if we are in cpu only mode also check cpu load for samplers
+                             assignment = await self.can_scale_evaluator() # if we are in cpu only mode also check cpu load for samplers
                         self.resource_logger.info(f"Assignment is {assignment}")
                         sampler_threshold = self.scaling_config.sampler_scale_up_threshold if self.scaling_config else 50
-                        current_time = time.time()
-
-                        # Track if samplers have ever connected (to distinguish startup from disconnection)
-                        if sampler_consumer_count > 0:
-                            self.samplers_ever_connected = True
-                            self.sampler_zero_consumer_count = 0
-                            self.last_sampler_activity_time = current_time
-
-                        # CRITICAL: Detect disconnected samplers and spawn replacements
-                        # Triggers on EITHER:
-                        # 1. 2+ consecutive checks with 0 consumers, OR
-                        # 2. Messages waiting for >2 minutes with 0 consumers (time-based)
-                        if self.samplers_ever_connected and sampler_consumer_count == 0 and sampler_message_count > 0:
-                            self.sampler_zero_consumer_count += 1
-                            time_since_activity = (current_time - self.last_sampler_activity_time
-                                                   if self.last_sampler_activity_time else float('inf'))
-
-                            should_spawn = (
-                                self.sampler_zero_consumer_count >= 2 or
-                                time_since_activity > 120  # 2 minutes timeout
-                            )
-
-                            if should_spawn:
-                                self.resource_logger.warning(
-                                    f"ALERT: sampler_queue has {sampler_message_count} messages but 0 consumers "
-                                    f"({self.sampler_zero_consumer_count} checks, {time_since_activity:.0f}s since activity). "
-                                    f"Spawning replacement sampler..."
-                                )
-                                if assignment and await self.has_enough_system_memory():
-                                    started = self.start_sampler_process(
-                                        sampler_entry_function, config_path, log_dir, sampler_processes,
-                                        "Sampler", assignment=assignment, log_filename=log_filename
-                                    )
-                                    if started:
-                                        self.resource_logger.info("Successfully spawned replacement sampler.")
-                                        sampler_scaled = True
-                                    else:
-                                        self.resource_logger.warning("Failed to spawn replacement sampler (no GPU available).")
-                                else:
-                                    self.resource_logger.warning("Cannot spawn replacement sampler (resources unavailable).")
 
                         # Normal scaling logic
-                        if not sampler_scaled:  # Only if we didn't already spawn a replacement
-                            if sampler_message_count > sampler_threshold and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
-                                self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
-                                started = self.start_sampler_process(sampler_entry_function, config_path, log_dir, sampler_processes, "Sampler", assignment=assignment, log_filename=log_filename)
-                                if not started:
-                                    self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
+                        if sampler_message_count > sampler_threshold and len(sampler_processes) < max_samplers and assignment and await self.has_enough_system_memory():
+                            self.resource_logger.info(f"Can scale samplers with messages in queue  {sampler_message_count}")
+                            started = self.start_sampler_process(sampler_entry_function, config_path, log_dir, sampler_processes, "Sampler", assignment=assignment, log_filename=log_filename)
+                            if not started:
+                                self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
+                            sampler_scaled = True
+                            self._sampler_idle_checks = 0
+                        elif sampler_message_count == 0 and len(sampler_processes) > min_samplers:
+                            # Require 2 consecutive idle checks before scaling down
+                            self._sampler_idle_checks += 1
+                            if self._sampler_idle_checks >= 2:
+                                self.resource_logger.info(f"Sampler queue empty for {self._sampler_idle_checks} checks, terminating sampler")
+                                await self.terminate_process(sampler_processes, "Sampler")
                                 sampler_scaled = True
                                 self._sampler_idle_checks = 0
-                            elif sampler_message_count == 0 and len(sampler_processes) > min_samplers:
-                                # Require 2 consecutive idle checks before scaling down
-                                self._sampler_idle_checks += 1
-                                if self._sampler_idle_checks >= 2:
-                                    # Skip scale down if all samplers are actively using GPUs
-                                    all_busy = await asyncio.to_thread(self._all_samplers_busy)
-                                    if all_busy:
-                                        self.resource_logger.info("Queue empty but all samplers have high GPU utilization. Skipping scale down.")
-                                        self._sampler_idle_checks = 0
-                                    else:
-                                        self.resource_logger.info(f"Sampler queue empty for {self._sampler_idle_checks} checks, terminating sampler")
-                                        await self.terminate_process(sampler_processes, "Sampler")
-                                        sampler_scaled = True
-                                        self._sampler_idle_checks = 0
-                            else:
-                                self._sampler_idle_checks = 0  # Reset on non-empty queue
+                        else:
+                            self._sampler_idle_checks = 0  # Reset on non-empty queue
 
-                    # If nothing was scaled, log that scaling was skipped
+                    # If nothing was scaled - log that scaling was skipped
                     if not evaluator_scaled and not sampler_scaled:
                         self.resource_logger.info("No scaling action taken in this iteration.")
 
@@ -399,12 +326,12 @@ class ResourceManager:
             raise  # Re-raise to properly propagate cancellation
 
     def start_evaluator_process(self, entry_function, config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, processes, process_name, log_filename):
-        """Starts a new evaluator process using 'fork' multiprocessing context.
+        """Starts a new evaluator process using 'spawn' multiprocessing context.
 
-        Uses fork because evaluators don't load ML models and only execute functions
-        in sandboxed subprocesses. Fork is faster than spawn for CPU-bound workloads.
+        Uses spawn to avoid fork+threading deadlocks. Evaluators don't use CUDA,
+        so we use regular multiprocessing (not torch.multiprocessing).
         """
-        ctx = mp.get_context('fork')
+        ctx = multiprocessing.get_context('spawn')
         proc = ctx.Process(
             target=entry_function,
             args=(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename, True),  # use_parent_log=True
@@ -438,13 +365,11 @@ class ResourceManager:
             # No GPUs available at all
             return None
 
-        # See if any GPU is free enough, using config values
+        # See if any GPU is free enough - using config values
         min_memory = self.scaling_config.min_gpu_memory_gib if self.scaling_config else 20
         max_util = self.scaling_config.max_gpu_utilization if self.scaling_config else 50
-        assignment = await asyncio.to_thread(
-            self.assign_gpu_device, min_free_memory_gib=min_memory, max_utilization=max_util
-        )
-        return assignment
+        assignment = self.assign_gpu_device(min_free_memory_gib=min_memory, max_utilization=max_util)
+        return assignment  
 
     async def can_scale_evaluator(self, cpu_usage_threshold=None, normalized_load_threshold=None, duration=10, interval=1):
         """
@@ -472,7 +397,7 @@ class ResourceManager:
         # Get the 1-minute load average and normalize by available cores.
         load_avg = await asyncio.to_thread(os.getloadavg)
         load_avg_1 = load_avg[0]
-        available_cores = len(await asyncio.to_thread(os.sched_getaffinity, 0))
+        available_cores = len(os.sched_getaffinity(0))
         normalized_load = load_avg_1 / available_cores if available_cores > 0 else load_avg_1
 
         self.resource_logger.info(
@@ -487,10 +412,10 @@ class ResourceManager:
     def start_sampler_process(self, entry_function, config_path, log_dir, processes, process_name, assignment, log_filename=None):
         """Starts a new sampler process using 'spawn' multiprocessing context.
 
-        Uses spawn to avoid fork+threading deadlocks when loading ML models (StarCoder2/GPT).
+        Uses torch.multiprocessing for proper CUDA memory cleanup when processes die.
         Spawn creates a clean process without inheriting thread state from parent.
         """
-        ctx = mp.get_context('spawn')
+        ctx = torch_mp.get_context('spawn')
         # Use monotonically increasing counter for unique sampler IDs (never reused, even after termination)
         sampler_id = self.next_sampler_id
         self.next_sampler_id += 1
@@ -498,7 +423,7 @@ class ResourceManager:
         if self.database is not None:
             self.database.next_sampler_id = self.next_sampler_id
 
-        if assignment is True:  # CPU-only mode, no GPU assignment
+        if assignment == True:  # CPU-only mode - no GPU assignment
             proc = ctx.Process(
                 target=entry_function,
                 args=(config_path, None, log_dir, log_filename, sampler_id, True),  # use_parent_log=True
@@ -547,11 +472,14 @@ class ResourceManager:
                     return None
             else:
                 visible_devices = list(range(pynvml.nvmlDeviceGetCount()))
+            
 
-            # Map host GPU index to container visible index
+            # Map host GPU index to container-visible index
+            #id_to_container_index = {host_id: container_id for container_id, host_id in enumerate(visible_devices)}
             id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
 
-            # Use assigned_gpus passed from the caller, otherwise fallback to existing assignments
+
+            # Use assigned_gpus passed from the caller - otherwise fallback to existing assignments
             if assigned_gpus is None:
                 assigned_gpus = set(self.process_to_device_map.values())
 
@@ -559,21 +487,14 @@ class ResourceManager:
 
             for host_gpu in visible_devices:
                 container_device = f"cuda:{id_to_container_index[host_gpu]}"
+            
+                if container_device in assigned_gpus:
+                    continue  # Skip GPUs that are already assigned in this loop
 
                 handle = pynvml.nvmlDeviceGetHandleByIndex(host_gpu)
                 util = pynvml.nvmlDeviceGetUtilizationRates(handle)
                 memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 free_memory_gib = memory_info.free / (1024 ** 3)
-
-                # If GPU looks free but bookkeeping says it's assigned, log a warning
-                if util.gpu < max_utilization and container_device in assigned_gpus:
-                    pid = next((p for p, d in self.process_to_device_map.items() if d == container_device), None)
-                    self.resource_logger.warning(
-                        f"GPU {container_device} appears idle (util {util.gpu}%) but assigned to PID {pid}. May need manual check."
-                    )
-
-                if container_device in assigned_gpus:
-                    continue  # Skip GPUs that are already assigned
 
                 if util.gpu < max_utilization and free_memory_gib >= min_free_memory_gib:
                     container_index = id_to_container_index[host_gpu]
@@ -592,6 +513,7 @@ class ResourceManager:
 
             # Reserve GPU in assigned_gpus before returning
             assigned_gpus.add(container_device)
+
 
             self.resource_logger.info(
                 f"Assigning GPU {host_gpu} (container {container_device}): Free {best_gpu[2]:.2f} GiB - Utilization {best_gpu[3]}%"
@@ -628,7 +550,7 @@ class ResourceManager:
         if not eligible:
             return None
 
-        # For samplers with GPUs, prefer terminating the one on lowest utilization GPU
+        # For samplers with GPUs, prefer terminating the one on lowest-utilization GPU
         if process_name == "Sampler" and not self.cpu_only:
             best_idx = None
             lowest_util = float('inf')
@@ -650,6 +572,7 @@ class ResourceManager:
                 return best_idx
 
         # Fallback: return oldest eligible process
+
         return eligible[0][0]
 
     def cleanup(self):
@@ -670,7 +593,7 @@ class ResourceManager:
             return
 
         # Select best process to terminate (respects min lifetime, prefers low GPU util)
-        idx = await asyncio.to_thread(self._select_process_to_terminate, processes, process_name)
+        idx = self._select_process_to_terminate(processes, process_name)
         if idx is None:
             self.resource_logger.info(f"No {process_name} eligible for termination (all too young)")
             return
@@ -681,9 +604,7 @@ class ResourceManager:
         # Get child PIDs before terminating (vLLM may spawn subprocesses)
         child_pids = []
         try:
-            child_pids = await asyncio.to_thread(
-                lambda: [c.pid for c in psutil.Process(pid).children(recursive=True)]
-            )
+            child_pids = [c.pid for c in psutil.Process(pid).children(recursive=True)]
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
@@ -702,7 +623,7 @@ class ResourceManager:
         # Kill orphaned children (may hold GPU memory)
         for child_pid in child_pids:
             try:
-                await asyncio.to_thread(psutil.Process(child_pid).kill)
+                psutil.Process(child_pid).kill()
                 self.resource_logger.info(f"Killed orphaned child {child_pid}")
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
@@ -735,8 +656,7 @@ class ResourceManager:
 
             url = f"http://{rabbitmq_host}:{rabbitmq_port}/api/queues/{rabbitmq_vhost}/{queue.name}"
 
-            timeout = aiohttp.ClientTimeout(total=10)  # 10 second timeout for cluster networks
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with aiohttp.ClientSession() as session:
                 async with session.get(url, auth=aiohttp.BasicAuth(rabbitmq_user, rabbitmq_pass)) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -747,7 +667,7 @@ class ResourceManager:
                     else:
                         self.resource_logger.error(f"Failed to get queue stats from management API: {response.status}")
                         return 0, 0
-        except Exception:
+        except Exception as e:
             self.resource_logger.error(
                 f"Error getting message count for queue '{queue.name}':\n{traceback.format_exc()}"
             )
@@ -825,7 +745,7 @@ class ResourceManager:
 
         except aiohttp.ClientConnectorError:
             stats['error'] = "Cannot connect to RabbitMQ management API (is it enabled?)"
-        except TimeoutError:
+        except asyncio.TimeoutError:
             stats['error'] = "Timeout connecting to RabbitMQ management API"
         except Exception as e:
             stats['error'] = f"Error fetching RabbitMQ stats: {e}"
@@ -923,3 +843,5 @@ class ResourceManager:
         except Exception as e:
             self.resource_logger.warning(f"Cannot measure RabbitMQ latency: {e}")
             return None
+
+

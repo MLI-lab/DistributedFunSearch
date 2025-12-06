@@ -36,6 +36,11 @@ def str2int(s): return int(s, 2)
 def int2str(n, length): return format(n, f'0{length}b')
 def hamming_distance(s1, s2): return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
+# Aliases for common LLM naming variations
+HammingDistance = hamming_distance
+Hamming_Distance = hamming_distance
+hammingDistance = hamming_distance
+
 # Global graph cache
 _GRAPH_CACHE = {}
 

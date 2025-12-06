@@ -356,7 +356,7 @@ class Evaluator:
     (e.g. - sandbox/sandbox<PID>/stderr_N.log). The stderr files are automatically cleaned up
     after evaluation completes.
     """
-    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2, graph_dir=None, cache_graphs=False, cache_size_limit_gb=2.0, rabbitmq_config=None):
+    def __init__(self, connection, channel, evaluator_queue, database_queue, template, function_to_evolve, function_to_run, inputs, sandbox_base_path, timeout_seconds, local_id, target_signatures, max_workers=2, graph_dir=None, cache_graphs=False, cache_size_limit_gb=2.0, prefetch_count=5, rabbitmq_config=None, sandbox_memory_limit_gb=10.0):
         self.template = template
         self.function_to_evolve = function_to_evolve
         self.function_to_run = function_to_run
@@ -366,6 +366,7 @@ class Evaluator:
         self.graph_dir = graph_dir  # Store graph_dir for passing to sandbox
         self.cache_graphs = cache_graphs  # Enable graph caching in specifications
         self.cache_size_limit_gb = cache_size_limit_gb  # Size limit for cached graphs
+        self.prefetch_count = prefetch_count  # Messages to buffer from RabbitMQ
         self._shutdown_requested = False  # Flag to stop reconnection on shutdown
 
         # Use shared connection manager for RabbitMQ
@@ -388,7 +389,7 @@ class Evaluator:
         self.call_count = self.manager.Value('i', 0)
         self.call_count_lock = self.manager.Lock()
         self.sandbox = sandbox.ExternalProcessSandbox(
-            base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id, graph_dir=graph_dir)
+            base_path=sandbox_base_path, timeout_secs=timeout_seconds, python_path=sys.executable, local_id=self.local_id, graph_dir=graph_dir, memory_limit_gb=sandbox_memory_limit_gb)
         self.executor = ProcessPoolExecutor(max_workers=max_workers)
         self.cumulative_cpu_time = 0.0  # Track total CPU time
         self.cpu_time_lock = self.manager.Lock()  # Lock to protect updates to cumulative CPU time
@@ -449,15 +450,15 @@ class Evaluator:
             if self.executor:
                 logger.info(f"Evaluator {self.local_id}: Shutting down executor.")
                 try:
-                    # Shutdown executor with timeout to avoid hanging
+                    # Shutdown executor with cancel_futures=True to kill running tasks (Python 3.9+)
                     await asyncio.wait_for(
-                        asyncio.to_thread(self.executor.shutdown, wait=True),
+                        asyncio.to_thread(self.executor.shutdown, wait=True, cancel_futures=True),
                         timeout=5
                     )
                 except TimeoutError:
                     logger.warning(f"Evaluator {self.local_id}: Executor shutdown timed out after 5s, forcing termination...")
-                    # Force shutdown if timeout
-                    self.executor.shutdown(wait=False)
+                    # Force shutdown - cancel_futures=True kills pending/running workers
+                    self.executor.shutdown(wait=False, cancel_futures=True)
                 self.executor = None  # Set to None to avoid future attempts to use it
             else:
                 logger.info(f"Evaluator {self.local_id}: Executor already shut down or not initialized.")
@@ -576,7 +577,7 @@ class Evaluator:
     async def _consume_loop(self):
         """Inner consume loop - processes messages from queue."""
         async with self.channel:
-            await self.channel.set_qos(prefetch_count=1)
+            await self.channel.set_qos(prefetch_count=self.prefetch_count)
 
             async with self.evaluator_queue.iterator() as stream:
                 message_count = 0
@@ -594,14 +595,6 @@ class Evaluator:
                             logger.warning("Processing message timed out.")
                         except Exception as e:
                             logger.error(f"Evaluator: Error while processing message: {e}")
-
-                    # Periodically clean up orphaned sandbox processes
-                    message_count += 1
-                    if message_count % 10 == 0:
-                        killed = sandbox.cleanup_orphaned_sandbox_processes(logger)
-                        if killed > 0:
-                            logger.info(f"Cleaned up {killed} orphaned sandbox processes")
-
 
     #async_time_execution
     #@async_track_memory

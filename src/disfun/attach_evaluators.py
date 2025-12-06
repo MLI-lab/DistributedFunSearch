@@ -99,7 +99,7 @@ class TaskManager:
 
     def start_initial_processes(self, template, function_to_evolve):
         # Start initial evaluator processes
-        ctx = mp.get_context('fork')  # Use fork for evaluators
+        ctx = mp.get_context('spawn')  # Use spawn for safety (avoids fork+threading deadlocks)
         for i in range(self.config.num_evaluators):
             proc = ctx.Process(
                 target=evaluator_process_entry,

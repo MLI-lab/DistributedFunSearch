@@ -1,9 +1,27 @@
+# Limit threading libraries BEFORE any imports that use them
+# This prevents OpenBLAS/MKL/OpenMP from spawning threads per-process
+# Without this, each container spawns ~50 threads, causing massive CPU contention
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")       # OpenMP (graph-tool, some NumPy)
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")  # OpenBLAS (NumPy default)
+os.environ.setdefault("MKL_NUM_THREADS", "1")       # Intel MKL (alternative NumPy)
+os.environ.setdefault("NUMEXPR_MAX_THREADS", "1")   # NumExpr
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")  # macOS Accelerate
+
 import pickle
 import sys
 import traceback
 import time
-import os
+import resource
 
+# Set memory limit to prevent runaway generated code from consuming all RAM
+# Default: 1GB per sandbox process (configurable via SANDBOX_MEMORY_LIMIT_GB env var)
+MEMORY_LIMIT_GB = float(os.environ.get('SANDBOX_MEMORY_LIMIT_GB', '1'))
+MEMORY_LIMIT_BYTES = int(MEMORY_LIMIT_GB * 1024 * 1024 * 1024)
+try:
+    resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
+except (ValueError, resource.error):
+    pass  # System limit may be lower than requested - proceed without limit
 
 # Use the current working directory
 CWD = os.path.abspath(os.getcwd())

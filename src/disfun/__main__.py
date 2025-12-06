@@ -41,6 +41,7 @@ from collections.abc import Sequence
 import torch.multiprocessing as mp
 import aio_pika
 import psutil
+import atexit
 
 from disfun import (
     programs_database,
@@ -53,6 +54,24 @@ from disfun.process_entry import sampler_process_entry, evaluator_process_entry
 # Disable multi-threaded tokenization.
 # Our prompts are short and we run many parallel processes so single-threaded tokenization is faster
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+def _cleanup_sandbox_processes():
+    """Atexit handler to kill any remaining sandbox processes."""
+    try:
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline')
+                if cmdline and 'container_main.py' in ' '.join(cmdline):
+                    proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception:
+        pass  # Best effort cleanup
+
+
+atexit.register(_cleanup_sandbox_processes)
+
 
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
 # Must be called before any multiprocessing to avoid CUDA context conflicts
@@ -527,7 +546,7 @@ class TaskManager:
         self.logger.info(f"Initialized next_sampler_id to {self.resource_manager.next_sampler_id} for dynamic scaling")
 
         # Start initial evaluator processes
-        ctx = mp.get_context('fork')  # Use fork for evaluators (no model loading - no deadlock risk)
+        ctx = mp.get_context('spawn')  # Use spawn for safety (avoids fork+threading deadlocks)
         for i in range(self.config.num_evaluators):
             proc = ctx.Process(
                 target=evaluator_process_entry,
@@ -771,7 +790,18 @@ if __name__ == "__main__":
                     main.task_manager.sampler_processes +
                     main.task_manager.database_processes)
 
-        print(f"Shutting down {len(children)} child processes...")
+        # CRITICAL: Capture ALL descendants BEFORE terminating parents
+        # (Once parent exits, orphaned children won't be found via parent.children())
+        all_descendants = []
+        for p in children:
+            if p.is_alive():
+                try:
+                    parent = psutil.Process(p.pid)
+                    all_descendants.extend(parent.children(recursive=True))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+        print(f"Shutting down {len(children)} child processes (+ {len(all_descendants)} descendants)...")
         for p in children:
             if p.is_alive():
                 print(f"Sending SIGTERM to process {p.pid} ({p.name})")
@@ -790,24 +820,23 @@ if __name__ == "__main__":
 
         # Phase 2: Hard cleanup - immediately force kill everything including descendants
         still_alive = [p for p in children if p.is_alive()]
-        if still_alive:
-            print(f"\nPhase 2: Hard cleanup, Force killing {len(still_alive)} remaining processes immediately")
+        # Also check which pre-captured descendants are still alive
+        still_alive_descendants = [d for d in all_descendants if d.is_running()]
 
-            # First - recursively find and kill all descendants
+        if still_alive or still_alive_descendants:
+            print(f"\nPhase 2: Hard cleanup - {len(still_alive)} parents + {len(still_alive_descendants)} descendants still alive")
+
+            # Kill pre-captured descendants first (they may be orphaned now)
+            for child in still_alive_descendants:
+                try:
+                    print(f"SIGKILL descendant process {child.pid}")
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            # Then kill any still-alive parent processes
             for p in still_alive:
                 try:
-                    parent = psutil.Process(p.pid)
-                    descendants = parent.children(recursive=True)
-
-                    # Kill descendants first (bottom-up)
-                    for child in descendants:
-                        try:
-                            print(f"SIGKILL child process {child.pid}")
-                            child.kill()
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-
-                    # Then kill the parent
                     print(f"SIGKILL process {p.pid} ({p.name})")
                     p.kill()
                 except (psutil.NoSuchProcess, Exception) as e:
@@ -833,6 +862,25 @@ if __name__ == "__main__":
                     p.join(timeout=0.1)  # Reap any remaining zombies
                 except Exception:
                     pass
+
+        # Kill any orphaned sandbox processes (container_main.py)
+        # These may have been started with start_new_session=True and survived parent death
+        print("Cleaning up orphaned sandbox processes...")
+        try:
+            killed_count = 0
+            for proc in psutil.process_iter(['pid', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline')
+                    if cmdline and 'container_main.py' in ' '.join(cmdline):
+                        print(f"  Killing orphaned sandbox PID {proc.info['pid']}")
+                        proc.kill()
+                        killed_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            if killed_count > 0:
+                print(f"  Killed {killed_count} orphaned sandbox processes")
+        except Exception as e:
+            print(f"Error cleaning up sandbox processes: {e}")
 
         # Close connections gracefully
         try:

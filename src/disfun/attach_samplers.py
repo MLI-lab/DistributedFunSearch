@@ -2,8 +2,9 @@ import asyncio
 import argparse
 import torch.multiprocessing as mp
 import os
+import sys
 from disfun.scaling_utils import ResourceManager
-from disfun import process_utils
+from disfun import sampler, process_utils
 from disfun.process_entry import sampler_process_entry
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -132,6 +133,13 @@ class TaskManager:
                     self.logger.info(f"Started Sampler Process {i} with PID: {proc.pid} on GPU {device}")
                     self.sampler_processes.append(proc)
                     self.process_to_device_map[proc.pid] = device
+
+                    # Stagger startup to avoid all samplers loading models into CPU RAM simultaneously
+                    # Each StarCoder2-15B load uses ~30GB CPU RAM temporarily
+                    if i < self.config.num_samplers - 1:
+                        import time
+                        self.logger.info(f"Waiting 30s before starting next sampler to stagger model loading...")
+                        time.sleep(30)
                 except Exception as e:
                     self.logger.error(f"Failed to start sampler {i}: {e}")
                     continue
@@ -187,7 +195,7 @@ if __name__ == "__main__":
         default="logs",
         help="Directory where logs will be stored (default: logs)."
     )
-
+    
     parser.add_argument(
         "--config-path",
         type=str,

@@ -203,7 +203,9 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
                 graph_dir=config.evaluator.graph_dir,
                 cache_graphs=config.evaluator.cache_graphs,
                 cache_size_limit_gb=config.evaluator.cache_size_limit_gb,
-                rabbitmq_config=config  # Pass config for reconnection
+                prefetch_count=config.evaluator.prefetch_count,
+                rabbitmq_config=config,  # Pass config for reconnection
+                sandbox_memory_limit_gb=config.evaluator.sandbox_memory_limit_gb
             )
 
             evaluator_task = asyncio.create_task(evaluator_instance.consume_and_process())
