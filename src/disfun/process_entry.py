@@ -83,8 +83,8 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
             # Calculate unique seed for this sampler
             sampler_seed = None
             if config.random_seed is not None:
-                sampler_seed = config.random_seed + sampler_id * 1_000_000
-                logger.info(f"Sampler {local_id}: Using base seed {sampler_seed} (config.random_seed={config.random_seed} + sampler_id={sampler_id} * 1M)")
+                sampler_seed = hash((config.random_seed, sampler_id)) % (2**31)
+                logger.info(f"Sampler {local_id}: Using seed {sampler_seed} (hash of base_seed={config.random_seed}, sampler_id={sampler_id})")
 
             # Create sampler with model but without RabbitMQ connection yet
             # Pass None for connection/channel - they'll be set via _ensure_connection()

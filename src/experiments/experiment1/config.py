@@ -91,7 +91,7 @@ class SamplerConfig:
     max_retries: Maximum number of retry attempts for failed API calls (default: 3). Only applies to API models.
     inference_timeout: Timeout in seconds for vLLM inference (default: 300). If vLLM hangs beyond this, sampler exits for restart by ResourceManager.
   """
-  prompts_per_batch= 50
+  prompts_per_batch= 70
   samples_per_prompt: int = 2
   temperature_period= None
   temperature: float = 0.9444444444444444
@@ -211,7 +211,7 @@ class WandbConfig:
     project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
-    run_name_tag: str = "graph_seed_42"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
+    run_name_tag: str = "graph_seed_23"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list) # e.g. ["gpt4o", "reasoning", "deduplication"]
     checkpoints_base_path: str = "/mnt/disfun/checkpoints" 
@@ -322,9 +322,9 @@ class Config:
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
   num_samplers: int = 4
-  num_evaluators: int = 20
+  num_evaluators: int = 40
   num_pdb: int = 1
-  random_seed: int = 42  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
+  random_seed: int = 23  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
 
 
 

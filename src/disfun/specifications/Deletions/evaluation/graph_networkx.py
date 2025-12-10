@@ -42,6 +42,58 @@ HammingDistance = hamming_distance
 Hamming_Distance = hamming_distance
 hammingDistance = hamming_distance
 
+# Graph helper aliases (LLMs often expect these)
+Graph = nx.Graph
+DiGraph = nx.DiGraph
+
+def degree(node, G):
+    """Get degree of a node."""
+    return G.degree(node)
+
+def neighbors(node, G):
+    """Get list of neighbors for a node."""
+    return list(G.neighbors(node))
+
+def edge_weight(G, u, v, default=1):
+    """Get edge weight with fallback (graph has no weights by default)."""
+    return G[u][v].get('weight', default) if G.has_edge(u, v) else default
+
+def num_nodes(G):
+    """Get number of nodes in graph."""
+    return G.number_of_nodes()
+
+def num_edges(G):
+    """Get number of edges in graph."""
+    return G.number_of_edges()
+
+# Common variable aliases LLMs might reference
+inf = float('inf')
+INF = float('inf')
+pi = math.pi
+PI = math.pi
+e = math.e
+E = math.e
+
+# Statistics helpers (LLMs often use these without importing)
+def mean(x):
+    """Calculate mean of a sequence."""
+    lst = list(x)
+    return sum(lst) / len(lst) if lst else 0.0
+
+def std(x):
+    """Calculate standard deviation of a sequence."""
+    lst = list(x)
+    if len(lst) < 2:
+        return 0.0
+    m = sum(lst) / len(lst)
+    variance = sum((xi - m) ** 2 for xi in lst) / len(lst)
+    return sqrt(variance)
+
+# Safe division helper
+def safe_div(a, b, default=0.0):
+    """Safe division that returns default on zero division."""
+    return a / b if b != 0 else default
+
 # Global graph cache
 _GRAPH_CACHE = {}
 
@@ -126,10 +178,18 @@ def solve(n, s, q, graph_dir):
     nx.freeze(G)
 
     # Compute priorities (G is frozen - read-only)
-    priorities = {
-        node: priority(node, G, n, s)
-        for node in G.nodes
-    }
+    # Handle None/non-numeric returns gracefully by defaulting to 0.0
+    priorities = {}
+    for node in G.nodes:
+        try:
+            p = priority(node, G, n, s)
+            # Convert to float, default to 0.0 if None or non-numeric
+            if p is None:
+                priorities[node] = 0.0
+            else:
+                priorities[node] = float(p)
+        except (TypeError, ValueError):
+            priorities[node] = 0.0
 
     # Sort nodes by priority (descending), Lexicographic tie-breaking (the second element x is the node string)
     nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))
