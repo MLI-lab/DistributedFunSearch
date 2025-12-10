@@ -753,7 +753,28 @@ if __name__ == "__main__":
         # Generate evaluation input tuples
         inputs = create_evaluation_inputs(config)
 
-        # Initialize the task manager
+        # Check if throughput measurement mode is enabled
+        if hasattr(config, 'throughput') and config.throughput.enabled:
+            from disfun.throughput import run_throughput
+            print("\n" + "=" * 60)
+            print("THROUGHPUT MEASUREMENT MODE")
+            print("=" * 60)
+            print(f"Samplers: {config.num_samplers}, Evaluators: {config.num_evaluators}")
+            print(f"Duration: {config.throughput.warmup_minutes} min warmup + {config.throughput.run_duration_minutes} min measurement")
+            print("=" * 60 + "\n")
+
+            await run_throughput(
+                config=config,
+                config_path=args.config_path,
+                log_dir=log_dir,
+                sandbox_base_path=sandbox_base_path,
+                specification=specification,
+                inputs=inputs,
+                target_signatures=target_signatures,
+            )
+            return
+
+        # Initialize the task manager for normal experiment mode
         task_manager = TaskManager(
             specification=specification,
             inputs=inputs,
@@ -775,6 +796,12 @@ if __name__ == "__main__":
     # helper for graceful-shutdown
     async def _shutdown(loop, signame):
         print(f"\nReceived {signame}. Shutting down gracefully…")
+
+        # Check if task_manager exists (may not be set in benchmark mode)
+        if not hasattr(main, 'task_manager') or main.task_manager is None:
+            print("No task manager to clean up (benchmark mode or early exit)")
+            loop.stop()
+            return
 
         # Cancel all async tasks first to stop scaling loop and other background tasks
         print("Cancelling all async tasks (database, scaling, etc.)...")

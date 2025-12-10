@@ -294,6 +294,27 @@ class TerminationConfig:
     })
 
 
+@dataclasses.dataclass(frozen=True)
+class ThroughputConfig:
+    """Configuration for throughput measurement mode.
+
+    When enabled, runs for a fixed duration and reports iterations/hour with mean ± std
+    computed across measurement windows. Uses num_samplers and num_evaluators from main config.
+
+    Attributes:
+        enabled: Enable throughput mode (default: False).
+        run_duration_minutes: Total measurement period (default: 60).
+        window_duration_minutes: Duration of each measurement window (default: 20).
+        warmup_minutes: Warm-up period before measurements start (default: 5).
+        output_file: Path to JSON file for results.
+    """
+    enabled: bool = False
+    run_duration_minutes: int = 60
+    window_duration_minutes: int = 20
+    warmup_minutes: int = 5
+    output_file: str = "throughput_results.json"
+
+
 @dataclasses.dataclass
 class Config:
   """Configuration of a FunSearch experiment.
@@ -308,6 +329,7 @@ class Config:
     scaling: Configuration for dynamic scaling of samplers and evaluators.
     paths: Configuration for file system paths (log_dir, sandbox_base_path, backup).
     termination: Configuration for experiment termination conditions.
+    throughput: Configuration for throughput measurement mode.
     num_samplers: Number of independent Samplers in the experiment.
     num_evaluators: Number of independent program Evaluators in the experiment.
     num_pdb: Number of independent program databases. Currently supports only one, but this does not create a bottleneck.
@@ -321,6 +343,7 @@ class Config:
   scaling: ScalingConfig = dataclasses.field(default_factory=ScalingConfig)
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
+  throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
   num_samplers: int = 4
   num_evaluators: int = 40
   num_pdb: int = 1
