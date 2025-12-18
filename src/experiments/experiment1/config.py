@@ -54,7 +54,6 @@ class ProgramsDatabaseConfig:
     reset_programs: The number of stored programs after which the weakest islands are reset.
     cluster_sampling_temperature_init: Initial temperature for softmax sampling of clusters within an island.
     cluster_sampling_temperature_period: Period of linear decay of the cluster sampling temperature.
-    prompts_per_batch: Batch size for processing prompts received from the database_queue.
     no_deduplication: Disable deduplication (default: False, set True to disable).
     save_lineage: Track parent-child relationships between programs. When enabled, logs lineage to W&B and saves HTML visualizations showing evolutionary trees.
     initial_program_copies: Number of copies of each initial seed function to publish at startup.
@@ -64,7 +63,6 @@ class ProgramsDatabaseConfig:
   reset_programs: int= 1200
   cluster_sampling_temperature_init: float = 0.1
   cluster_sampling_temperature_period: int = 30_000
-  prompts_per_batch= 10
   no_deduplication: bool = False
   save_lineage: bool = False
   initial_program_copies: int = 100
@@ -90,22 +88,25 @@ class SamplerConfig:
     reasoning_effort: Controls internal chain-of-thought reasoning depth. Only works with GPT-5/o3 models.
     max_retries: Maximum number of retry attempts for failed API calls (default: 3). Only applies to API models.
     inference_timeout: Timeout in seconds for vLLM inference (default: 300). If vLLM hangs beyond this, sampler exits for restart by ResourceManager.
+    gpu_memory_utilization: Fraction of GPU memory to use for vLLM (default: 0.95). Lower values leave more headroom for CUDA graphs. Try 0.90 if you get OOM during cudagraph capture.
   """
-  prompts_per_batch= 70
+  prompts_per_batch= 30  # Reduced from 50 to prevent OOM on 45GB GPUs
   samples_per_prompt: int = 2
   temperature_period= None
   temperature: float = 0.9444444444444444
-  max_new_tokens: int = 246  # for reasoing set larger 
+  max_new_tokens: int = 246  # for reasoing set larger
   top_p: float =  0.7777777777777778
   repetition_penalty: float = 1.222222
   reasoning_effort: str = "None"  # Set to "minimal", "low", "medium", "high", or None.
   max_retries: int = 3  #
-  inference_timeout: int = 300  
+  inference_timeout: int = 300
   model: str = "bigcode/starcoder2-15b" #"bigcode/starcoder2-15b"  # Local model (each sampler loads on GPU) or API model
   model_params_billions: float = 15.0  # StarCoder2-15B has 15B params. Set to None to disable FLOP logging.
   api_base: str = None  #  Only set for custom endpoints (vLLM server, Azure, etc.)
   api_key: str = None   # Leave as None, automatically loads OPENAI_API_KEY from /workspace/DistributedFunSearch/.env
-  cache_dir: str = "/mnt/models"  
+  cache_dir: str = "/mnt/models"
+  gpu_memory_utilization: float = 0.95  # Fraction of GPU memory for vLLM. Lower (0.90) if OOM during cudagraph capture.
+  prefetch_multiplier: int = 2  # Sampler prefetch = prompts_per_batch * prefetch_multiplier. Higher values hide network latency by buffering next batch while GPU processes current batch.
 
 @dataclasses.dataclass(frozen=True)
 class EvaluatorConfig:
@@ -134,12 +135,12 @@ class EvaluatorConfig:
     end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Match available graphs (s1_n6 through s1_n11)
     mode: str = "last"
     timeout: int = 30
-    max_workers: int = 2
+    max_workers: int = 1
     q: int = 2
     graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
     cache_graphs: bool = True  # Enable in-memory graph caching (reduces I/O, increases RAM)
     cache_size_limit_gb: float = 2.0  # Only cache graphs smaller than this (GiB)
-    prefetch_count: int = 5  # Messages to buffer from RabbitMQ for pipeline parallelism
+    prefetch_count: int = 20  # Messages to buffer from RabbitMQ for pipeline parallelism
     sandbox_memory_limit_gb: float = 1.0  # Memory limit per sandbox process (GiB)
 
 
@@ -211,7 +212,7 @@ class WandbConfig:
     project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
-    run_name_tag: str = "graph_seed_23"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
+    run_name_tag: str = "graph_seed_31415"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list) # e.g. ["gpt4o", "reasoning", "deduplication"]
     checkpoints_base_path: str = "/mnt/disfun/checkpoints" 
@@ -251,7 +252,7 @@ class ScalingConfig:
         cpu_usage_threshold: Maximum average CPU usage percentage to allow evaluator scale-up.
         normalized_load_threshold: Maximum normalized system load (load/cores) to allow evaluator scale-up.
     """
-    enabled: bool = True
+    enabled: bool = False
     check_interval: int = 60
     max_samplers: int = 1000
     max_evaluators: int = 200
@@ -345,9 +346,9 @@ class Config:
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
   throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
   num_samplers: int = 4
-  num_evaluators: int = 40
+  num_evaluators: int = 60
   num_pdb: int = 1
-  random_seed: int = 23  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
+  random_seed: int = 31415  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
 
 
 

@@ -1,0 +1,29 @@
+<thought>
+Generalized VT with cumulative power sums.
+Uses m^(e)_i = sum_{j=1}^{i+1} j^e (cumulative e-th power).
+Multiple constraints with different exponents for s-deletion correction.
+Parity bits at the END (largest weights) for systematic encoding.
+</thought>
+
+<code>
+def priority(n: int, s: int) -> Tuple[List[Callable], List[int], List[int]]:
+    """Generalized VT with cumulative power sums. a{score}"""
+    # Use exponents 0, 1, ..., 2s for 2s+1 constraints
+    r = 2 * s + 1
+    weight_funcs = []
+    moduli = []
+
+    for e in range(r):
+        def make_cumsum(exp):
+            return lambda i: sum(j ** exp for j in range(1, i + 2))
+        weight_funcs.append(make_cumsum(e))
+        # Modulus is the max cumsum value + 1
+        max_cumsum = sum(j ** e for j in range(1, n + 1))
+        moduli.append(max_cumsum + 1)
+
+    # Redundancy: s * ceil(log2(n))
+    # Parity positions at the END (largest weights) for systematic encoding
+    num_parity = s * ceil(log2(n)) if n > 1 else s
+    parity_positions = list(range(n - num_parity, n))
+    return weight_funcs, moduli, parity_positions
+</code>

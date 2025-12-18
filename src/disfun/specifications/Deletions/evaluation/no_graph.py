@@ -36,7 +36,35 @@ HammingDistance = hamming_distance
 Hamming_Distance = hamming_distance
 hammingDistance = hamming_distance
 
+# Common variable aliases LLMs might reference
+inf = float('inf')
+INF = float('inf')
+pi = math.pi
+PI = math.pi
+e = math.e
+E = math.e
 
+# Statistics helpers (LLMs often use these without importing)
+def mean(x):
+    """Calculate mean of a sequence."""
+    lst = list(x)
+    return sum(lst) / len(lst) if lst else 0.0
+
+def std(x):
+    """Calculate standard deviation of a sequence."""
+    lst = list(x)
+    if len(lst) < 2:
+        return 0.0
+    m = sum(lst) / len(lst)
+    variance = sum((xi - m) ** 2 for xi in lst) / len(lst)
+    return sqrt(variance)
+
+# Safe division helper
+def safe_div(a, b, default=0.0):
+    """Safe division that returns default on zero division."""
+    return a / b if b != 0 else default
+
+#Actual Eval starts here####
 def lcs_length(s1, s2):
     """Compute longest common subsequence length using dynamic programming."""
     m, n = len(s1), len(s2)

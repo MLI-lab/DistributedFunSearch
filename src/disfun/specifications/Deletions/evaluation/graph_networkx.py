@@ -94,14 +94,13 @@ def safe_div(a, b, default=0.0):
     """Safe division that returns default on zero division."""
     return a / b if b != 0 else default
 
+
 # Global graph cache
 _GRAPH_CACHE = {}
 
-
+############EVAL starts here############
 def load_graph(graph_db_path):
     """Load graph from LMDB database into NetworkX Graph."""
-
-
     graph_env = lmdb.open(graph_db_path, readonly=True, lock=False,
                           readahead=True, max_readers=126)
 
@@ -178,18 +177,7 @@ def solve(n, s, q, graph_dir):
     nx.freeze(G)
 
     # Compute priorities (G is frozen - read-only)
-    # Handle None/non-numeric returns gracefully by defaulting to 0.0
-    priorities = {}
-    for node in G.nodes:
-        try:
-            p = priority(node, G, n, s)
-            # Convert to float, default to 0.0 if None or non-numeric
-            if p is None:
-                priorities[node] = 0.0
-            else:
-                priorities[node] = float(p)
-        except (TypeError, ValueError):
-            priorities[node] = 0.0
+    priorities = {node: priority(node, G, n, s) for node in G.nodes}
 
     # Sort nodes by priority (descending), Lexicographic tie-breaking (the second element x is the node string)
     nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))

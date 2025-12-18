@@ -147,11 +147,8 @@ def validate_decoder_bruteforce_python(
             'collisions': [] if return_collisions else None
         }
 
-    # Step 2: Generate all deletion patterns (|D| <= s)
-    deletion_patterns = []
-    for d in range(s + 1):
-        for positions in combinations(range(n), d):
-            deletion_patterns.append(positions)
+    # Step 2: Generate all deletion patterns (exactly s deletions)
+    deletion_patterns = list(combinations(range(n), s))
 
     num_patterns = len(deletion_patterns)
 
@@ -207,6 +204,7 @@ def validate_decoder_bruteforce_python(
 
     return {
         'valid': valid,
+        'codebook': codeword_ints,  # List of codeword integers for hashing
         'codebook_size': codebook_size,
         'total_signatures': total_signatures,
         'unique_signatures': unique_signatures,

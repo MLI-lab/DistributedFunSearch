@@ -60,6 +60,20 @@ Adjust `min_gpu_memory_gib` based on your LLM's memory requirements (e.g., 30 Gi
 **Scale down when:**
 - `evaluator_queue` empty for 2 consecutive checks
 
+**Tuning `max_workers`:**
+- **Graph-based (precomputed)**: I/O bound (graph loading). Use `max_workers=1` + `cache_graphs=True`.
+- **No-graph (LCS)**: CPU bound (100% per eval). Use `max_workers=2+`, scale with available cores.
+
+**Tuning `prefetch_count`:**
+
+Controls how many messages each evaluator buffers from RabbitMQ (default: 5). Keep `prefetch_count >= max_workers`.
+
+| Queue | CPU | Bottleneck | Solution |
+|-------|-----|------------|----------|
+| Piling up | High | Eval speed | Add more evaluators |
+| Piling up | Low | Network/prefetch | Increase prefetch |
+| Empty | - | Balanced | - |
+
 ### Disconnected Sampler Detection
 
 If samplers disconnect but messages are waiting, ResourceManager detects this and spawns replacements:

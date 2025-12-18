@@ -157,6 +157,7 @@ class TaskManager:
         self.resource_manager = ResourceManager(log_dir=log_dir, scaling_config=self.config.scaling)
         self.process_to_device_map = {}
         self.target_signatures = target_signatures
+        self.shutting_down = False  # Flag to prevent respawning during shutdown
 
     async def publish_initial_program_with_retry(self, initial_program_data, max_retries=5, delay=5):
         attempt = 0
@@ -213,6 +214,68 @@ class TaskManager:
                     for frame in stack:
                         self.logger.debug(f"Pending Task Frame: {frame}")
             await asyncio.sleep(60)
+
+    async def monitor_sampler_health(self, check_interval=60):
+        """Monitor sampler processes and respawn any that have crashed.
+
+        This runs even when dynamic scaling is disabled, ensuring crashed
+        samplers are restarted to maintain throughput.
+        """
+        from disfun.sampler import is_local_model
+
+        while not self.shutting_down:
+            await asyncio.sleep(check_interval)
+
+            if self.shutting_down:
+                break
+
+            # Check each sampler process
+            dead_samplers = []
+            for i, proc in enumerate(self.sampler_processes):
+                if not proc.is_alive():
+                    device = self.process_to_device_map.get(proc.pid)
+                    dead_samplers.append((i, proc, device))
+
+            if not dead_samplers:
+                continue
+
+            self.logger.warning(f"Detected {len(dead_samplers)} dead sampler(s), respawning...")
+
+            use_local = is_local_model(self.config.sampler.model)
+            ctx = mp.get_context('spawn')
+
+            for i, old_proc, device in dead_samplers:
+                if self.shutting_down:
+                    break
+
+                # Get next sampler ID from resource manager
+                sampler_id = self.resource_manager.next_sampler_id
+                self.resource_manager.next_sampler_id += 1
+
+                try:
+                    proc = ctx.Process(
+                        target=sampler_process_entry,
+                        args=(self.config_path, device, self.log_dir, self.log_filename, sampler_id),
+                        name=f"Sampler-{sampler_id}"
+                    )
+                    proc.start()
+
+                    # Update tracking
+                    self.sampler_processes[i] = proc
+                    if device:
+                        self.process_to_device_map[proc.pid] = device
+                    # Clean up old mapping
+                    if old_proc.pid in self.process_to_device_map:
+                        del self.process_to_device_map[old_proc.pid]
+
+                    self.logger.info(f"Respawned sampler (ID={sampler_id}) with PID={proc.pid} on device {device}")
+
+                    # Stagger restarts to avoid simultaneous model loading
+                    if use_local and len(dead_samplers) > 1:
+                        await asyncio.sleep(10)
+
+                except Exception as e:
+                    self.logger.error(f"Failed to respawn sampler: {e}")
 
     async def main_task(self, enable_scaling=True, checkpoint_file=None):
         # Determine run name: prefer checkpoint > config > auto-generate
@@ -415,7 +478,10 @@ class TaskManager:
             # Start resource logging
             resource_logging_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
 
-            self.tasks = [database_task, checkpoint_task, wandb_logging_task, resource_logging_task]
+            # Start sampler health monitor (runs even when scaling is disabled)
+            health_monitor_task = asyncio.create_task(self.monitor_sampler_health(check_interval=60))
+
+            self.tasks = [database_task, checkpoint_task, wandb_logging_task, resource_logging_task, health_monitor_task]
 
             if enable_scaling:
                 try:
@@ -802,6 +868,9 @@ if __name__ == "__main__":
             print("No task manager to clean up (benchmark mode or early exit)")
             loop.stop()
             return
+
+        # Set shutdown flag to prevent health monitor from respawning processes
+        main.task_manager.shutting_down = True
 
         # Cancel all async tasks first to stop scaling loop and other background tasks
         print("Cancelling all async tasks (database, scaling, etc.)...")

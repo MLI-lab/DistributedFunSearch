@@ -12,7 +12,8 @@
 
 # ===== Experiment config =====
 EXPERIMENT_NAME="experiment1"
-CONFIG_NAME="config.py"
+CONFIG_NAME="config.py"              # Config for main node (ProgramsDatabase)
+WORKER_CONFIG_NAME="config.py"       # Config for worker nodes (attach_evaluators/attach_samplers)
 RABBITMQ_CONF="rabbitmq.conf"
 RABBITMQ_VHOST="${EXPERIMENT_NAME}"
 
@@ -171,7 +172,16 @@ MONITOR_PID=$!
 echo "RabbitMQ monitor started with PID $MONITOR_PID"
 
 cd /DistributedFunSearch
-python3 -m pip install .
+
+echo "=== Installing disfun package ==="
+python3 -m pip install . 2>&1 | tee "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/logs/pip_install.log"
+
+echo "=== Checking vLLM installation ==="
+python3 -c "import vllm; print('vLLM version:', vllm.__version__)" 2>&1 || {
+  echo "vLLM not found, installing separately..."
+  python3 -m pip install "vllm>=0.7.0,<0.8.0" 2>&1 | tee -a "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/logs/pip_install.log"
+  python3 -c "import vllm; print('vLLM version:', vllm.__version__)" 2>&1 || echo "ERROR: vLLM installation failed"
+}
 
 cd "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}"
 
@@ -192,7 +202,7 @@ if ((${#REMAINING[@]} > 0)); then
     srun -N1 -n1 --nodelist="$node" \
       --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
       --container-mounts="$PWD/DistributedFunSearch:/DistributedFunSearch,$PWD/.ssh:/DistributedFunSearch/.ssh,/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/decosearch:/mnt" \
-      --export=ALL,EXPERIMENT_NAME="$EXPERIMENT_NAME",CONFIG_NAME="$CONFIG_NAME",RABBITMQ_HOSTNAME="$RABBITMQ_HOSTNAME",scaling_time_s="$scaling_time_s",scaling_time_e="$scaling_time_e" \
+      --export=ALL,EXPERIMENT_NAME="$EXPERIMENT_NAME",CONFIG_NAME="$CONFIG_NAME",WORKER_CONFIG_NAME="$WORKER_CONFIG_NAME",RABBITMQ_HOSTNAME="$RABBITMQ_HOSTNAME",scaling_time_s="$scaling_time_s",scaling_time_e="$scaling_time_e" \
       bash -s <<'REMOTE2' &
 
 # Install disfun on worker node
@@ -204,12 +214,12 @@ echo "Worker $(hostname): pip install complete"
 sleep 120
 
 python3 /DistributedFunSearch/src/disfun/update_config_file.py \
-  "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/${CONFIG_NAME}" "${RABBITMQ_HOSTNAME}"
+  "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/${WORKER_CONFIG_NAME}" "${RABBITMQ_HOSTNAME}"
 
 cd "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}"
 
-python3 -u -m disfun.attach_evaluators --check_interval="${scaling_time_e}" --sandbox_base_path "/tmp/sandbox_${EXPERIMENT_NAME}" &
-python3 -u -m disfun.attach_samplers   --check_interval="${scaling_time_s}" &
+python3 -u -m disfun.attach_evaluators --config-path "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/${WORKER_CONFIG_NAME}" --check_interval="${scaling_time_e}" --sandbox_base_path "/tmp/sandbox_${EXPERIMENT_NAME}" &
+python3 -u -m disfun.attach_samplers   --config-path "/DistributedFunSearch/src/experiments/${EXPERIMENT_NAME}/${WORKER_CONFIG_NAME}" --check_interval="${scaling_time_s}" &
 wait
 REMOTE2
   done

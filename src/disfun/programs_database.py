@@ -299,7 +299,6 @@ class ProgramsDatabase:
         if evaluator_queue:
             self._conn_manager.queues["evaluator_queue"] = evaluator_queue
 
-        self.samples_per_batch = config.prompts_per_batch
         self._function_to_evolve = function_to_evolve
         self._best_score_per_island = [-float('inf')] * config.num_islands
         self._best_program_per_island = [None] * config.num_islands
@@ -397,7 +396,6 @@ class ProgramsDatabase:
             "reset_programs": config.reset_programs,
             "cluster_sampling_temperature_init": config.cluster_sampling_temperature_init,
             "cluster_sampling_temperature_period": config.cluster_sampling_temperature_period,
-            "prompts_per_batch_database": config.prompts_per_batch,
             "no_deduplication": config.no_deduplication,
             # Evaluator config
             "mode": mode,
@@ -420,6 +418,15 @@ class ProgramsDatabase:
                 "timeout": evaluator_config.timeout,
                 "max_workers": evaluator_config.max_workers,
             })
+            # Log evaluation script content (helpers available to LLM-generated code)
+            eval_script_path = getattr(evaluator_config, 'evaluation_script_path', None)
+            if eval_script_path:
+                try:
+                    with open(eval_script_path, 'r') as f:
+                        self.wandb_init_config["evaluation_script"] = f.read()
+                    self.wandb_init_config["evaluation_script_path"] = eval_script_path
+                except Exception as e:
+                    logger.warning(f"Failed to read evaluation script for W&B logging: {e}")
 
         # Add sampler config if provided
         if sampler_config:

@@ -97,7 +97,8 @@ class LLM_model:
             reasoning_effort: Optional[str] = None,  # For GPT-5/o3 models
             system_message: Optional[str] = None,  # System message for API models
             max_retries: int = 3,  # Maximum retry attempts for API calls
-            random_seed: Optional[int] = None  # Random seed for reproducible generation
+            random_seed: Optional[int] = None,  # Random seed for reproducible generation
+            gpu_memory_utilization: float = 0.95,  # Fraction of GPU memory for vLLM
     ) -> None:
         self.inference_time = 0.0
         self._samples_per_prompt = samples_per_prompt
@@ -146,7 +147,7 @@ class LLM_model:
                     model=model,
                     tensor_parallel_size=1,  # Single GPU per sampler
                     dtype="float16",
-                    gpu_memory_utilization=0.85,  # Leave headroom for CUDA graphs
+                    gpu_memory_utilization=gpu_memory_utilization,
                     trust_remote_code=True,
                     enforce_eager=False,  # Enable CUDA graphs for faster inference
                 )
@@ -561,6 +562,7 @@ class Sampler:
                 system_message=self.system_message,
                 max_retries=self._config.max_retries,
                 random_seed=random_seed,
+                gpu_memory_utilization=getattr(self._config, 'gpu_memory_utilization', 0.95),
             )
             mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")
@@ -645,9 +647,11 @@ class Sampler:
 
         async def _consume_loop():
             """Inner consume loop - processes messages from the queue."""
-            # Set prefetch to match batch size so RabbitMQ delivers enough messages
-            prefetch = self.samples_per_batch
-            logger.info(f"Sampler ({self._config.model}): Setting QoS prefetch_count={prefetch}...")
+            # Set prefetch as multiple of batch size to hide network latency
+            # While GPU processes batch N, network prefetches batch N+1
+            prefetch_multiplier = getattr(self._config, 'prefetch_multiplier', 1)
+            prefetch = self.samples_per_batch * prefetch_multiplier
+            logger.info(f"Sampler ({self._config.model}): Setting QoS prefetch_count={prefetch} (batch_size={self.samples_per_batch} x {prefetch_multiplier})...")
             await self.channel.set_qos(prefetch_count=prefetch)
 
             logger.info(f"Sampler ({self._config.model}): Starting iterator to consume messages...")

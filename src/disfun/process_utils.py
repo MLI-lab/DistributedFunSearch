@@ -16,12 +16,36 @@ import aio_pika
 from collections.abc import Callable
 
 
-def load_config(config_path):
+def convert_tuple_keys(obj):
     """
-    Dynamically load a configuration module from a given file path.
+    Recursively convert tuple keys to strings for JSON serialization.
+
+    Useful when passing dataclass configs to wandb.init(), since JSON
+    doesn't support tuple keys (e.g., {(7, 2): 5} -> {"(7, 2)": 5}).
 
     Args:
-        config_path: Path to the configuration file
+        obj: Dict, list, or other object to process
+
+    Returns:
+        Object with tuple keys converted to strings
+    """
+    if isinstance(obj, dict):
+        return {str(k) if isinstance(k, tuple) else k: convert_tuple_keys(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_tuple_keys(item) for item in obj]
+    return obj
+
+
+def load_config(config_path):
+    """
+    Dynamically load a configuration from a given file path.
+
+    Supports:
+        - .py files: Dynamically loaded as Python modules (must define Config class)
+        - .pkl files: Loaded via cloudpickle (for sweep configs with modified params)
+
+    Args:
+        config_path: Path to the configuration file (.py or .pkl)
 
     Returns:
         Config object instance
@@ -29,6 +53,13 @@ def load_config(config_path):
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Configuration file not found at {config_path}")
 
+    # Handle pickle files (used by throughput_sweep.py)
+    if config_path.endswith('.pkl'):
+        import cloudpickle
+        with open(config_path, 'rb') as f:
+            return cloudpickle.load(f)
+
+    # Handle Python files (original behavior)
     spec = importlib.util.spec_from_file_location("config", config_path)
     config_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config_module)
@@ -46,7 +77,7 @@ def initialize_logger(log_dir, log_filename, process_type=None, use_custom_log_f
     Args:
         log_dir: Directory containing the log file
         log_filename: Name of the log file to write to
-        process_type: Type of process ("Sampler", "Evaluator", or None for main)
+        process_type: Type of process ("Sampler", "Evaluator", "Throughput", or None for main)
         use_custom_log_file: If True, use log_filename even for Sampler/Evaluator process types
 
     Returns:
@@ -56,8 +87,8 @@ def initialize_logger(log_dir, log_filename, process_type=None, use_custom_log_f
     logger.setLevel(logging.DEBUG)
     os.makedirs(log_dir, exist_ok=True)
 
-    # For child processes (Sampler/Evaluator) - clear any inherited handlers from parent
-    if process_type in ("Sampler", "Evaluator"):
+    # For child processes or new throughput runs - clear any inherited handlers
+    if process_type in ("Sampler", "Evaluator", "Throughput"):
         logger.handlers.clear()
 
     # Only add handler if logger doesn't have any yet
@@ -72,23 +103,21 @@ def initialize_logger(log_dir, log_filename, process_type=None, use_custom_log_f
             logger.addHandler(handler)
 
         # Samplers: all log to shared samplers.log file
+        # Use regular FileHandler to avoid rotation race conditions with multiple processes
         elif process_type == "Sampler":
-            sampler_handler = RotatingFileHandler(
+            sampler_handler = logging.FileHandler(
                 os.path.join(log_dir, 'samplers.log'),
                 mode='a',
-                maxBytes=50*1024*1024,
-                backupCount=5
             )
             sampler_handler.setFormatter(formatter)
             logger.addHandler(sampler_handler)
 
         # Evaluators: all log to shared evaluators.log file
+        # Use regular FileHandler to avoid rotation race conditions with multiple processes
         elif process_type == "Evaluator":
-            evaluator_handler = RotatingFileHandler(
+            evaluator_handler = logging.FileHandler(
                 os.path.join(log_dir, 'evaluators.log'),
                 mode='a',
-                maxBytes=50*1024*1024,
-                backupCount=5
             )
             evaluator_handler.setFormatter(formatter)
             logger.addHandler(evaluator_handler)

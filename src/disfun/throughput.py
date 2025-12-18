@@ -12,9 +12,11 @@ from pathlib import Path
 import numpy as np
 import psutil
 import aio_pika
+import wandb
 import torch.multiprocessing as mp
 
 from disfun import code_manipulation, process_utils, programs_database
+from disfun.process_utils import convert_tuple_keys
 from disfun.scaling_utils import ResourceManager
 from disfun.process_entry import sampler_process_entry, evaluator_process_entry
 
@@ -22,7 +24,7 @@ from disfun.process_entry import sampler_process_entry, evaluator_process_entry
 class ThroughputRunner:
     """Measures throughput (iterations/hour) for a single configuration."""
 
-    def __init__(self, config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures):
+    def __init__(self, config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path=None):
         self.config = config
         self.throughput_config = config.throughput
         self.config_path = config_path
@@ -31,6 +33,7 @@ class ThroughputRunner:
         self.inputs = inputs
         self.target_signatures = target_signatures
         self.template = code_manipulation.text_to_program(specification)
+        self.checkpoint_path = checkpoint_path
 
         self.log_filename = f"throughput_pid{os.getpid()}.log"
         self.logger = process_utils.initialize_logger(log_dir, self.log_filename, process_type="Throughput")
@@ -40,36 +43,118 @@ class ThroughputRunner:
         self.connections = []
         self.database = None
 
+    async def get_queue_depths(self):
+        """Get current message counts for all queues."""
+        depths = {"sampler_queue": 0, "evaluator_queue": 0, "database_queue": 0}
+        try:
+            conn = await process_utils.create_rabbitmq_connection(self.config, timeout=5)
+            ch = await conn.channel()
+            for q_name in depths.keys():
+                try:
+                    queue = await ch.declare_queue(q_name, durable=False, auto_delete=False, passive=True)
+                    depths[q_name] = queue.declaration_result.message_count
+                except Exception:
+                    pass  # Queue might not exist yet
+            await ch.close()
+            await conn.close()
+        except Exception:
+            pass  # Connection failed, return zeros
+        return depths
+
+    async def check_queue_state(self):
+        """Check and log state of all queues before starting. Returns True if clean, False if dirty."""
+        self.logger.info("Checking queue state before starting...")
+        is_clean = True
+        try:
+            conn = await process_utils.create_rabbitmq_connection(self.config, timeout=10)
+            ch = await conn.channel()
+            for q_name in ["evaluator_queue", "sampler_queue", "database_queue"]:
+                try:
+                    queue = await ch.declare_queue(q_name, durable=False, auto_delete=False, passive=True)
+                    msg_count = queue.declaration_result.message_count
+                    consumer_count = queue.declaration_result.consumer_count
+                    if msg_count > 0 or consumer_count > 0:
+                        self.logger.warning(f"Queue '{q_name}' not empty: {msg_count} messages, {consumer_count} consumers")
+                        is_clean = False
+                    else:
+                        self.logger.info(f"Queue '{q_name}' exists (0 messages, 0 consumers)")
+                except Exception as e:
+                    err_str = str(e)
+                    if "NOT_FOUND" in err_str or "timeout" in err_str.lower() or "closed" in err_str.lower():
+                        self.logger.info(f"Queue '{q_name}' does not exist (clean)")
+                    else:
+                        self.logger.warning(f"Error checking queue '{q_name}': {e}")
+            await ch.close()
+            await conn.close()
+        except Exception as e:
+            self.logger.warning(f"Could not check queue state: {e}")
+
+        if is_clean:
+            self.logger.info("All queues clean")
+        else:
+            self.logger.warning("Queues not empty, previous cleanup may have failed")
+        return is_clean
+
     async def run(self):
         """Run throughput measurement."""
         start = datetime.now()
         tc = self.throughput_config
+        wc = self.config.wandb
 
-        self.logger.info(f"Throughput measurement: {self.config.num_samplers} samplers, {self.config.num_evaluators} evaluators")
-        self.logger.info(f"Duration: {tc.warmup_minutes} min warmup + {tc.run_duration_minutes} min measurement")
+        self.logger.info(f"Throughput: {self.config.num_samplers} samplers, {self.config.num_evaluators} evaluators")
+        self.logger.info(f"Duration: {tc.warmup_minutes}min warmup + {tc.run_duration_minutes}min measurement")
+
+        # Check queue state before starting - clean up if dirty
+        await self.check_queue_state()
+
+        # Init W&B
+        run_name = wc.run_name or f"throughput_{wc.run_name_tag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        if wc.enabled:
+            # Serialize entire config to W&B
+            wandb_config = dataclasses.asdict(self.config)
+            # Convert tuple keys to strings (JSON doesn't support tuple keys)
+            wandb_config = convert_tuple_keys(wandb_config)
+            # Add evaluation script content (helpers available to LLM-generated code)
+            eval_script_path = getattr(self.config.evaluator, 'evaluation_script_path', None)
+            if eval_script_path:
+                try:
+                    with open(eval_script_path, 'r') as f:
+                        wandb_config["evaluation_script"] = f.read()
+                except Exception as e:
+                    self.logger.warning(f"Failed to read evaluation script for W&B logging: {e}")
+            wandb.init(
+                project=wc.project, entity=wc.entity, name=run_name,
+                tags=["throughput"] + list(wc.tags),
+                config=wandb_config,
+            )
 
         # Disable scaling for measurement
-        modified_config = dataclasses.replace(
-            self.config,
-            scaling=dataclasses.replace(self.config.scaling, enabled=False),
-        )
+        modified_config = dataclasses.replace(self.config, scaling=dataclasses.replace(self.config.scaling, enabled=False))
+
+        # Create ResourceManager for resource tracking
+        self.resource_manager = ResourceManager(log_dir=self.log_dir, scaling_config=modified_config.scaling)
 
         # Set up RabbitMQ
-        conn1 = await process_utils.create_rabbitmq_connection(modified_config, timeout=300)
-        conn2 = await process_utils.create_rabbitmq_connection(modified_config, timeout=300)
-        self.connections = [conn1, conn2]
+        self.logger.info(f"Connecting to RabbitMQ at {modified_config.rabbitmq.host}:{modified_config.rabbitmq.port} vhost={modified_config.rabbitmq.vhost}")
+        try:
+            conn1 = await process_utils.create_rabbitmq_connection(modified_config, timeout=300)
+            conn2 = await process_utils.create_rabbitmq_connection(modified_config, timeout=300)
+            self.connections = [conn1, conn2]
+            self.logger.info("RabbitMQ connections established successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to connect to RabbitMQ: {e}")
+            raise
 
         ch1, ch2 = await conn1.channel(), await conn2.channel()
         eval_q = await process_utils.declare_standard_queue(ch1, "evaluator_queue")
         sampler_q = await process_utils.declare_standard_queue(ch1, "sampler_queue")
         db_q = await process_utils.declare_standard_queue(ch2, "database_queue")
 
-        # Create database with W&B disabled
-        run_name = f"throughput_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Create database (W&B disabled here - we handle it ourselves)
         self.database = programs_database.ProgramsDatabase(
             conn2, ch2, db_q, sampler_q, eval_q,
-            modified_config.programs_database, "priority", None,
-            os.path.join(modified_config.wandb.checkpoints_base_path, f"checkpoint_{run_name}"),
+            modified_config.programs_database, "priority", self.checkpoint_path,
+            os.path.join(wc.checkpoints_base_path, f"checkpoint_{run_name}"),
             mode=modified_config.evaluator.mode,
             start_n=modified_config.evaluator.start_n, end_n=modified_config.evaluator.end_n,
             s_values=modified_config.evaluator.s_values,
@@ -82,7 +167,7 @@ class ThroughputRunner:
             absolute_label=modified_config.prompt.absolute_label,
             relative_label=modified_config.prompt.relative_label,
             q=modified_config.evaluator.q,
-            wandb_config=dataclasses.replace(modified_config.wandb, enabled=False),
+            wandb_config=dataclasses.replace(wc, enabled=False),
             sampler_config=modified_config.sampler,
             evaluator_config=modified_config.evaluator,
             prompt_config=modified_config.prompt,
@@ -92,17 +177,29 @@ class ThroughputRunner:
         db_task = asyncio.create_task(self.database.consume_and_process())
         self._start_processes(modified_config)
 
+        # Start resource monitoring task
+        resource_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
+
         # Wait for sampler connection
         self.logger.info("Waiting for samplers to connect...")
         while (await sampler_q.declare()).consumer_count < 1:
             await asyncio.sleep(5)
 
-        # Publish initial programs
-        initial_progs = self._load_initial_programs(modified_config)
-        if initial_progs:
-            copies = getattr(modified_config.programs_database, "initial_program_copies", 1)
-            for prog in initial_progs * copies:
-                await ch1.default_exchange.publish(aio_pika.Message(body=prog.encode()), routing_key="evaluator_queue")
+        # Publish initial programs or sample from checkpoint
+        copies = getattr(modified_config.programs_database, "initial_program_copies", 1)
+        if self.checkpoint_path and self.database.total_stored_programs > 0:
+            # Checkpoint loaded - sample prompts from database to prime the pipeline
+            self.logger.info(f"Checkpoint loaded with {self.database.total_stored_programs} programs. Sampling {copies} prompts to prime pipeline.")
+            for _ in range(copies):
+                # Trigger prompt generation from the loaded database
+                await self.database.get_prompt()
+        else:
+            # No checkpoint - use initial programs
+            initial_progs = self._load_initial_programs(modified_config)
+            if initial_progs:
+                self.logger.info(f"Publishing {len(initial_progs) * copies} initial programs to evaluator queue.")
+                for prog in initial_progs * copies:
+                    await ch1.default_exchange.publish(aio_pika.Message(body=prog.encode()), routing_key="evaluator_queue")
 
         # Warm-up
         self.logger.info(f"Warm-up: {tc.warmup_minutes} min")
@@ -110,16 +207,86 @@ class ThroughputRunner:
 
         # Collect window metrics
         window_iters = []
+        window_gpu_utils = []
+        window_cpu_utils = []
+        window_sampler_q_depths = []
+        window_evaluator_q_depths = []
+        window_database_q_depths = []
         num_windows = tc.run_duration_minutes // tc.window_duration_minutes
 
-        self.logger.info(f"Starting measurement: {num_windows} windows of {tc.window_duration_minutes} min")
+        self.logger.info(f"Measurement: {num_windows} windows of {tc.window_duration_minutes} min")
         for w in range(num_windows):
             start_prompts = self.database.total_prompts
-            await asyncio.sleep(tc.window_duration_minutes * 60)
-            window_iters.append(self.database.total_prompts - start_prompts)
-            self.logger.info(f"Window {w+1}/{num_windows}: {window_iters[-1]} iterations")
 
+            # Collect resource samples during this window
+            gpu_samples = []
+            cpu_samples = []
+            sampler_q_samples = []
+            evaluator_q_samples = []
+            database_q_samples = []
+            window_seconds = tc.window_duration_minutes * 60
+            sample_interval = 10  # Sample every 10 seconds
+            num_samples = window_seconds // sample_interval
+
+            for _ in range(num_samples):
+                # Collect GPU utilization
+                gpu_utils = await self.resource_manager.async_get_gpu_usage()
+                if gpu_utils:
+                    mean_gpu = sum(gpu_utils.values()) / len(gpu_utils)
+                    gpu_samples.append(mean_gpu)
+
+                # Collect CPU utilization
+                cpu_util = await self.resource_manager.async_get_cpu_usage()
+                cpu_samples.append(cpu_util)
+
+                # Collect queue depths
+                depths = await self.get_queue_depths()
+                sampler_q_samples.append(depths["sampler_queue"])
+                evaluator_q_samples.append(depths["evaluator_queue"])
+                database_q_samples.append(depths["database_queue"])
+
+                await asyncio.sleep(sample_interval)
+
+            window_iters.append(self.database.total_prompts - start_prompts)
+
+            # Calculate mean utilization for this window
+            mean_gpu_util = sum(gpu_samples) / len(gpu_samples) if gpu_samples else 0
+            mean_cpu_util = sum(cpu_samples) / len(cpu_samples) if cpu_samples else 0
+            mean_sampler_q = sum(sampler_q_samples) / len(sampler_q_samples) if sampler_q_samples else 0
+            mean_evaluator_q = sum(evaluator_q_samples) / len(evaluator_q_samples) if evaluator_q_samples else 0
+            mean_database_q = sum(database_q_samples) / len(database_q_samples) if database_q_samples else 0
+            window_gpu_utils.append(mean_gpu_util)
+            window_cpu_utils.append(mean_cpu_util)
+            window_sampler_q_depths.append(mean_sampler_q)
+            window_evaluator_q_depths.append(mean_evaluator_q)
+            window_database_q_depths.append(mean_database_q)
+
+            # Calculate per-hour rate for this window
+            factor = 60 / tc.window_duration_minutes
+            window_per_hour = window_iters[-1] * factor
+
+            self.logger.info(f"Window {w+1}/{num_windows}: {window_iters[-1]} iterations ({window_per_hour:.0f}/hr), GPU: {mean_gpu_util:.1f}%, CPU: {mean_cpu_util:.1f}%, Queues: S={mean_sampler_q:.0f} E={mean_evaluator_q:.0f} D={mean_database_q:.0f}")
+
+            # Log to W&B per window
+            if wc.enabled:
+                wandb.log({
+                    "window": w + 1,
+                    "window_iterations": window_iters[-1],
+                    "window_iterations_per_hour": window_per_hour,
+                    "window_gpu_utilization": mean_gpu_util,
+                    "window_cpu_utilization": mean_cpu_util,
+                    "window_sampler_queue_depth": mean_sampler_q,
+                    "window_evaluator_queue_depth": mean_evaluator_q,
+                    "window_database_queue_depth": mean_database_q,
+                })
+
+        # Cancel background tasks
+        resource_task.cancel()
         db_task.cancel()
+        try:
+            await resource_task
+        except asyncio.CancelledError:
+            pass
         try:
             await db_task
         except asyncio.CancelledError:
@@ -129,21 +296,45 @@ class ThroughputRunner:
         factor = 60 / tc.window_duration_minutes
         per_hour = [w * factor for w in window_iters]
 
-        return {
-            "num_samplers": self.config.num_samplers,
-            "num_evaluators": self.config.num_evaluators,
-            "model": self.config.sampler.model,
-            "window_iterations_raw": window_iters,
-            "window_iterations_per_hour": per_hour,
-            "iterations_per_hour_mean": float(np.mean(per_hour)),
-            "iterations_per_hour_std": float(np.std(per_hour)),
-            "total_iterations": sum(window_iters),
-            "warmup_minutes": tc.warmup_minutes,
-            "run_duration_minutes": tc.run_duration_minutes,
-            "window_duration_minutes": tc.window_duration_minutes,
-            "timestamp": start.isoformat(),
+        results = {
+            "num_samplers": self.config.num_samplers, "num_evaluators": self.config.num_evaluators,
+            "model": self.config.sampler.model, "window_iterations_raw": window_iters,
+            "window_iterations_per_hour": per_hour, "iterations_per_hour_mean": float(np.mean(per_hour)),
+            "iterations_per_hour_std": float(np.std(per_hour)), "total_iterations": sum(window_iters),
+            "warmup_minutes": tc.warmup_minutes, "run_duration_minutes": tc.run_duration_minutes,
+            "window_duration_minutes": tc.window_duration_minutes, "timestamp": start.isoformat(),
             "total_duration_seconds": (datetime.now() - start).total_seconds(),
+            "checkpoint_path": self.checkpoint_path,
+            "checkpoint_programs": self.database.total_stored_programs if self.checkpoint_path else 0,
+            "gpu_utilization_mean": float(np.mean(window_gpu_utils)) if window_gpu_utils else 0,
+            "gpu_utilization_std": float(np.std(window_gpu_utils)) if window_gpu_utils else 0,
+            "cpu_utilization_mean": float(np.mean(window_cpu_utils)) if window_cpu_utils else 0,
+            "cpu_utilization_std": float(np.std(window_cpu_utils)) if window_cpu_utils else 0,
+            # Queue depth stats per window
+            "window_sampler_queue_depths": window_sampler_q_depths,
+            "window_evaluator_queue_depths": window_evaluator_q_depths,
+            "window_database_queue_depths": window_database_q_depths,
+            "sampler_queue_depth_mean": float(np.mean(window_sampler_q_depths)) if window_sampler_q_depths else 0,
+            "evaluator_queue_depth_mean": float(np.mean(window_evaluator_q_depths)) if window_evaluator_q_depths else 0,
+            "database_queue_depth_mean": float(np.mean(window_database_q_depths)) if window_database_q_depths else 0,
         }
+
+        # Log summary to W&B
+        if wc.enabled:
+            wandb.summary.update({
+                "iterations_per_hour_mean": results["iterations_per_hour_mean"],
+                "iterations_per_hour_std": results["iterations_per_hour_std"],
+                "total_iterations": results["total_iterations"],
+                "gpu_utilization_mean": results["gpu_utilization_mean"],
+                "gpu_utilization_std": results["gpu_utilization_std"],
+                "cpu_utilization_mean": results["cpu_utilization_mean"],
+                "cpu_utilization_std": results["cpu_utilization_std"],
+                "sampler_queue_depth_mean": results["sampler_queue_depth_mean"],
+                "evaluator_queue_depth_mean": results["evaluator_queue_depth_mean"],
+                "database_queue_depth_mean": results["database_queue_depth_mean"],
+            })
+
+        return results
 
     def _start_processes(self, config):
         """Start sampler and evaluator processes."""
@@ -153,7 +344,6 @@ class ThroughputRunner:
         use_local = is_local_model(config.sampler.model)
         rm = ResourceManager(log_dir=self.log_dir, scaling_config=config.scaling)
 
-        # Start samplers
         assigned_gpus = set()
         for i in range(config.num_samplers):
             device = None
@@ -171,7 +361,6 @@ class ThroughputRunner:
             if use_local and i < config.num_samplers - 1:
                 time.sleep(10)
 
-        # Start evaluators
         for i in range(config.num_evaluators):
             proc = ctx.Process(target=evaluator_process_entry,
                 args=(self.config_path, self.template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path, self.log_filename))
@@ -198,8 +387,13 @@ class ThroughputRunner:
 
     async def cleanup(self):
         """Clean up processes and queues."""
+        self.logger.info("Starting cleanup...")
         all_procs = self.sampler_processes + self.evaluator_processes
 
+        # Terminate processes
+        alive_count = sum(1 for p in all_procs if p.is_alive())
+        if alive_count:
+            self.logger.info(f"Terminating {alive_count} processes...")
         for p in all_procs:
             if p.is_alive():
                 p.terminate()
@@ -208,14 +402,20 @@ class ThroughputRunner:
         while any(p.is_alive() for p in all_procs) and time.time() < deadline:
             await asyncio.sleep(0.5)
 
-        for p in all_procs:
-            if p.is_alive():
+        # Force kill remaining
+        still_alive = [p for p in all_procs if p.is_alive()]
+        if still_alive:
+            self.logger.warning(f"Force killing {len(still_alive)} processes")
+            for p in still_alive:
                 p.kill()
+
+        for p in all_procs:
             try:
                 p.join(timeout=1)
             except Exception:
                 pass
 
+        # Close connections
         for conn in self.connections:
             try:
                 await conn.close()
@@ -229,14 +429,18 @@ class ThroughputRunner:
             for q in ["evaluator_queue", "sampler_queue", "database_queue"]:
                 try:
                     queue = await ch.declare_queue(q, durable=False, auto_delete=False, passive=True)
+                    msg_count = queue.declaration_result.message_count
+                    consumer_count = queue.declaration_result.consumer_count
+                    self.logger.info(f"Deleting queue {q} ({msg_count} msgs, {consumer_count} consumers)")
                     await queue.purge()
                     await queue.delete(if_unused=False, if_empty=False)
-                except Exception:
-                    pass
+                except Exception as e:
+                    if "NOT_FOUND" not in str(e):
+                        self.logger.warning(f"Error cleaning queue {q}: {e}")
             await ch.close()
             await conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.warning(f"Queue cleanup failed: {e}")
 
         # Kill orphaned sandbox processes
         for proc in psutil.process_iter(["cmdline"]):
@@ -246,32 +450,49 @@ class ThroughputRunner:
             except Exception:
                 pass
 
+        if self.config.wandb.enabled:
+            wandb.finish()
+
+        self.logger.info("Cleanup complete")
+
     def save_results(self, results):
         """Save results and print summary."""
         path = os.path.join(self.log_dir, self.throughput_config.output_file)
         with open(path, "w") as f:
             json.dump(results, f, indent=2)
 
-        print(f"\n{'='*60}")
-        print(f"THROUGHPUT RESULTS")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}\nTHROUGHPUT RESULTS\n{'='*60}")
         print(f"Samplers: {results['num_samplers']}, Evaluators: {results['num_evaluators']}")
         print(f"Model: {results['model']}")
-        print(f"Duration: {results['warmup_minutes']} min warmup + {results['run_duration_minutes']} min measurement")
-        print(f"Windows: {len(results['window_iterations_raw'])} x {results['window_duration_minutes']} min")
+        print(f"Duration: {results['warmup_minutes']}min warmup + {results['run_duration_minutes']}min measurement")
+        print(f"Windows: {len(results['window_iterations_raw'])} x {results['window_duration_minutes']}min")
         print(f"-" * 60)
-        print(f"Iterations per hour: {results['iterations_per_hour_mean']:.0f} ± {results['iterations_per_hour_std']:.0f}")
+        print(f"Iterations/hour: {results['iterations_per_hour_mean']:.0f} ± {results['iterations_per_hour_std']:.0f}")
         print(f"Total iterations: {results['total_iterations']}")
-        print(f"{'='*60}")
-        print(f"Saved: {path}")
+        print(f"GPU utilization: {results['gpu_utilization_mean']:.1f}% ± {results['gpu_utilization_std']:.1f}%")
+        print(f"CPU utilization: {results['cpu_utilization_mean']:.1f}% ± {results['cpu_utilization_std']:.1f}%")
+        print(f"-" * 60)
+        print(f"Queue depths (mean): Sampler={results['sampler_queue_depth_mean']:.0f}, Evaluator={results['evaluator_queue_depth_mean']:.0f}, Database={results['database_queue_depth_mean']:.0f}")
+        print(f"Queue depths per window:")
+        for i, (s, e, d) in enumerate(zip(results['window_sampler_queue_depths'], results['window_evaluator_queue_depths'], results['window_database_queue_depths'])):
+            print(f"  Window {i+1}: S={s:.0f}, E={e:.0f}, D={d:.0f}")
+        print(f"{'='*60}\nSaved: {path}")
 
 
-async def run_throughput(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures):
+async def run_throughput(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path=None):
     """Main entry point for throughput measurement."""
-    runner = ThroughputRunner(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures)
+    runner = ThroughputRunner(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path)
     try:
         results = await runner.run()
         runner.save_results(results)
         return results
+    except Exception as e:
+        # Log the full exception with traceback
+        import traceback
+        runner.logger.error(f"Throughput measurement failed: {e}")
+        runner.logger.error(traceback.format_exc())
+        print(f"\n*** THROUGHPUT ERROR: {e} ***", flush=True)
+        print(traceback.format_exc(), flush=True)
+        raise
     finally:
         await runner.cleanup()
