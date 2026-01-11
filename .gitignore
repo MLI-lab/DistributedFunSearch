@@ -98,3 +98,11 @@ REEVO_PLAN.md
 # Private docs
 docs/EVALUATION_ARCHITECTURE.md
 docs/DAYTONA_EVALUATION.md
+
+analysis/config_overlap_heatmap.png
+analysis/graph_ablation_analysis.py
+analysis/throughput_sweep_analysis.ipynb
+docs/ZIH_SETUP.md
+
+src/experiments/experiment1/attach_evaluators_zih.sh
+src/experiments/experiment1/exp1_alpha_zih.sh
