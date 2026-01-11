@@ -1220,6 +1220,14 @@ class ProgramsDatabase:
         return hash_value in island['hash_set']
 
     def _get_signature(self, scores_per_test):
+        """Get signature for tie-breaking when aggregate scores are equal.
+
+        Returns tuple of scores sorted by keys in DESCENDING order (largest n first).
+        This prioritizes harder test cases (larger n) in tie-breaking.
+
+        Example: For keys (6,1,2), (7,1,2), ..., (11,1,2)
+        Returns: (score_n11, score_n10, score_n9, score_n8, score_n7, score_n6)
+        """
         if all(isinstance(k, str) for k in scores_per_test.keys()):
             scores_per_test = {ast.literal_eval(k): v for k, v in scores_per_test.items()}
 
@@ -1228,7 +1236,8 @@ class ProgramsDatabase:
                 return tuple(val)
             return val
 
-        return tuple(ensure_hashable(scores_per_test[k]) for k in sorted(scores_per_test.keys()))
+        # Reverse order: larger n compared first (harder cases prioritized)
+        return tuple(ensure_hashable(scores_per_test[k]) for k in sorted(scores_per_test.keys(), reverse=True))
 
     def sample_program(self, cluster_data, temperature=1.0):
         """Samples a program from the cluster - favoring shorter programs."""

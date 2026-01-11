@@ -13,86 +13,89 @@ import hashlib
 import networkx as nx
 import ujson as json
 import lmdb
-import numpy as np
 import math
-import re
-import random
-import time
-import binascii
-import collections
-import pandas as pd
-from itertools import groupby, combinations, permutations, product
-from functools import reduce, lru_cache
-from typing import Dict, List, Set, Tuple, Optional
-from collections import Counter, defaultdict
-from binascii import hexlify
-from math import log, log2, sqrt, exp, ceil, floor, factorial, gcd
-from numpy import zeros, ones, array
+
+
+#import numpy as np
+#import math
+#import re
+#import random
+#import time
+#import binascii
+#import collections
+#import pandas as pd
+#from itertools import groupby, combinations, permutations, product
+#from functools import reduce, lru_cache
+#from typing import Dict, List, Set, Tuple, Optional
+#from collections import Counter, defaultdict
+#from binascii import hexlify
+#from math import log, log2, sqrt, exp, ceil, floor, factorial, gcd
+#from numpy import zeros, ones, array
 
 # Python 2 compatibility
-xrange = range
+# xrange = range
 
 # Binary string helpers
-def str2int(s): return int(s, 2)
-def int2str(n, length): return format(n, f'0{length}b')
-def hamming_distance(s1, s2): return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+#def str2int(s): return int(s, 2)
+#def int2str(n, length): return format(n, f'0{length}b')
+#def hamming_distance(s1, s2): return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
 # Aliases for common LLM naming variations
-HammingDistance = hamming_distance
-Hamming_Distance = hamming_distance
-hammingDistance = hamming_distance
+#HammingDistance = hamming_distance
+#Hamming_Distance = hamming_distance
+#hammingDistance = hamming_distance
 
 # Graph helper aliases (LLMs often expect these)
-Graph = nx.Graph
-DiGraph = nx.DiGraph
+#Graph = nx.Graph
+#DiGraph = nx.DiGraph
 
-def degree(node, G):
-    """Get degree of a node."""
-    return G.degree(node)
+#def degree(node, G):
+#    """Get degree of a node."""
+#    return G.degree(node)
 
-def neighbors(node, G):
-    """Get list of neighbors for a node."""
-    return list(G.neighbors(node))
+#def neighbors(node, G):
+#    """Get list of neighbors for a node."""
+#    return list(G.neighbors(node))
 
-def edge_weight(G, u, v, default=1):
-    """Get edge weight with fallback (graph has no weights by default)."""
-    return G[u][v].get('weight', default) if G.has_edge(u, v) else default
+#def edge_weight(G, u, v, default=1):
+#    """Get edge weight with fallback (graph has no weights by default)."""
+#    return G[u][v].get('weight', default) if G.has_edge(u, v) else default
 
-def num_nodes(G):
-    """Get number of nodes in graph."""
-    return G.number_of_nodes()
+#def num_nodes(G):
+#    """Get number of nodes in graph."""
+#    return G.number_of_nodes()
 
-def num_edges(G):
-    """Get number of edges in graph."""
-    return G.number_of_edges()
+#def num_edges(G):
+#    """Get number of edges in graph."""
+#    return G.number_of_edges()
 
 # Common variable aliases LLMs might reference
-inf = float('inf')
-INF = float('inf')
-pi = math.pi
-PI = math.pi
-e = math.e
-E = math.e
+#inf = float('inf')
+#INF = float('inf')
+#pi = math.pi
+#PI = math.pi
+#e = math.e
+#E = math.e
 
 # Statistics helpers (LLMs often use these without importing)
-def mean(x):
-    """Calculate mean of a sequence."""
-    lst = list(x)
-    return sum(lst) / len(lst) if lst else 0.0
+#def mean(x):
+#    """Calculate mean of a sequence."""
+#    lst = list(x)
+#    return sum(lst) / len(lst) if lst else 0.0
 
-def std(x):
-    """Calculate standard deviation of a sequence."""
-    lst = list(x)
-    if len(lst) < 2:
-        return 0.0
-    m = sum(lst) / len(lst)
-    variance = sum((xi - m) ** 2 for xi in lst) / len(lst)
-    return sqrt(variance)
+#def std(x):
+#    """Calculate standard deviation of a sequence."""
+#    lst = list(x)
+#    if len(lst) < 2:
+#        return 0.0
+#    m = sum(lst) / len(lst)
+#    variance = sum((xi - m) ** 2 for xi in lst) / len(lst)
+#    return sqrt(variance)
 
 # Safe division helper
-def safe_div(a, b, default=0.0):
-    """Safe division that returns default on zero division."""
-    return a / b if b != 0 else default
+#def safe_div(a, b, default=0.0):
+#    """Safe division that returns default on zero division."""
+#    return a / b if b != 0 else default
 
 
 # Global graph cache
