@@ -106,3 +106,4 @@ docs/ZIH_SETUP.md
 
 src/experiments/experiment1/attach_evaluators_zih.sh
 src/experiments/experiment1/exp1_alpha_zih.sh
+src/experiments/experiment1/config.py 
