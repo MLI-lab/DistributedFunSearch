@@ -90,7 +90,7 @@ class SamplerConfig:
     inference_timeout: Timeout in seconds for vLLM inference (default: 300). If vLLM hangs beyond this, sampler exits for restart by ResourceManager.
     gpu_memory_utilization: Fraction of GPU memory to use for vLLM (default: 0.95). Lower values leave more headroom for CUDA graphs. Try 0.90 if you get OOM during cudagraph capture.
   """
-  prompts_per_batch= 40  # Reduced from 50 to prevent OOM on 45GB GPUs
+  prompts_per_batch= 50  # Reduced from 50 to prevent OOM on 45GB GPUs
   samples_per_prompt: int = 2
   temperature_period= None
   temperature: float = 0.9444444444444444
@@ -98,15 +98,15 @@ class SamplerConfig:
   top_p: float =  0.7777777777777778
   repetition_penalty: float = 1.222222
   reasoning_effort: str = "None"  # Set to "minimal", "low", "medium", "high", or None.
-  max_retries: int = 3  #
+  max_retries: int = 3  
   inference_timeout: int = 300
   model: str = "bigcode/starcoder2-15b" #"bigcode/starcoder2-15b"  # Local model (each sampler loads on GPU) or API model
   model_params_billions: float = 15.0  # StarCoder2-15B has 15B params. Set to None to disable FLOP logging.
   api_base: str = None  #  Only set for custom endpoints (vLLM server, Azure, etc.)
   api_key: str = None   # Leave as None, automatically loads OPENAI_API_KEY from /workspace/DistributedFunSearch/.env
   cache_dir: str = "/mnt/models"
-  gpu_memory_utilization: float = 0.9  # Fraction of GPU memory for vLLM. Lower (0.90) if OOM during cudagraph capture.
-  prefetch_multiplier: int = 1  # Sampler prefetch = prompts_per_batch * prefetch_multiplier. Higher values hide network latency by buffering next batch while GPU processes current batch.
+  gpu_memory_utilization: float = 0.85  # Fraction of GPU memory for vLLM. Lower (0.90) if OOM during cudagraph capture.
+  prefetch_multiplier: int = 2  # Sampler prefetch = prompts_per_batch * prefetch_multiplier. Higher values hide network latency by buffering next batch while GPU processes current batch.
 
 @dataclasses.dataclass(frozen=True)
 class EvaluatorConfig:
@@ -118,7 +118,7 @@ class EvaluatorConfig:
         s_values: List of error correction parameters.
         start_n: List of shortest code length for each s.
         end_n: List of longest code lengths for each s.
-        mode: Mode for score reduction. Available options: 'last', 'average', 'weighted'.
+        mode: Mode for score reduction. Available options: 'last', 'average', 'weighted', 'relative_difference' (to PromptConfig.best_known_solutions)
         timeout: Timeout in seconds for the sandbox.
         max_workers: Number of parallel CPU processes per evaluator for evaluating functions on different inputs (default: 2).
         q: Alphabet size for the codes (default: 2 for binary). Set to 4 for DNA data storage.
@@ -133,14 +133,14 @@ class EvaluatorConfig:
     s_values: List[int] = dataclasses.field(default_factory=lambda: [1])
     start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Hash is computed for n==start_n[0] (automatically substituted in specification)
     end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Match available graphs (s1_n6 through s1_n11)
-    mode: str = "average"
+    mode: str = "weighted"
     timeout: int = 30
-    max_workers: int = 1
+    max_workers: int = 3
     q: int = 2
     graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
     cache_graphs: bool = True  # Enable in-memory graph caching (reduces I/O, increases RAM)
     cache_size_limit_gb: float = 2.0  # Only cache graphs smaller than this (GiB)
-    prefetch_count: int = 5  # Messages to buffer from RabbitMQ for pipeline parallelism
+    prefetch_count: int = 15  # Messages to buffer from RabbitMQ for pipeline parallelism
     sandbox_memory_limit_gb: float = 1.0  # Memory limit per sandbox process (GiB)
 
 
@@ -189,7 +189,15 @@ class PromptConfig:
     # Score display
     show_eval_scores: bool = False
     display_mode: str = "relative"
-    best_known_solutions: dict = dataclasses.field(default_factory=lambda: {(7, 2, 2): 5, (8, 2, 2): 7, (9, 2, 2): 11, (10, 2, 2): 16, (11, 2, 2): 24, (12, 2, 2): 37})
+    best_known_solutions: dict = dataclasses.field(default_factory=lambda: {
+        (6, 1, 2): 10,
+        (7, 1, 2): 16,
+        (8, 1, 2): 30,
+        (9, 1, 2): 52,
+        (10, 1, 2): 94,
+        (11, 1, 2): 172
+    })
+
     absolute_label: str = "Absolute scores (format (n, s, q): set_size, larger is better):"
     relative_label: str = "Performance relative to baseline (format (n, s, q): improvement%):"
 
@@ -212,7 +220,7 @@ class WandbConfig:
     project: str = "disfun"
     entity: str = "franziweindel-technical-university-of-munich"  # Set to your W&B username or team
     run_name: str = None  # Auto-generated with timestamp if None
-    run_name_tag: str = "average_seed_42"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
+    run_name_tag: str = "weighted_seed_13_rep"  # Tag appended to run name (e.g., "gpt4o", "starcoder2")
     log_interval: int = 300  # Log every 5 minutes
     tags: List[str] = dataclasses.field(default_factory=list) # e.g. ["gpt4o", "reasoning", "deduplication"]
     checkpoints_base_path: str = "/mnt/disfun/checkpoints" 
@@ -345,10 +353,10 @@ class Config:
   paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
   termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
   throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
-  num_samplers: int = 2
+  num_samplers: int = 3
   num_evaluators: int = 65
   num_pdb: int = 1
-  random_seed: int = 42  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
+  random_seed: int = 13  # Random seed for full reproducibility (controls both prompt construction and LLM generation). If None, non-deterministic.
 
 
 

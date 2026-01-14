@@ -23,7 +23,7 @@ Differences from the original DeepMind FunSearch version
 * Saves and resumes from checkpoint.
 * Enforces deduplication (hash-based) and version-mismatch checks.
 * Stops early after an optimal solution or a prompt/solution quota.
-* Implements different evaluation scoring (last - average - weighted - relative difference to a traget solution)
+* Implements different evaluation scoring (last, average, weighted. relative difference to a traget solution)
 """
 
 import ast
@@ -74,16 +74,16 @@ def _softmax(logits: np.ndarray, temperature: float) -> np.ndarray:
     return probs
 
 
-def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], target_signatures=None) -> float:
+def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], baseline_scores=None) -> float:
     """
     Reduces per-test scores into a single score based on the specified mode.
-    Extracts (n - s) from full problem instance tuples and aggregates for each s in s_values.
+    Extracts (n, s) from full problem instance tuples and aggregates for each s in s_values.
 
     Available modes:
     - "last": Uses the score for the largest n (end_n) for each s value.
-    - "average": Averages scores across all n values for each s - then averages across s values.
+    - "average": Averages scores across all n values for each s, then averages across s values.
     - "weighted": Weights scores by n to prioritize larger n-values.
-    - "relative_difference": Uses relative difference (actual - target) / target to normalize across targets.
+    - "relative_difference": Uses relative difference (actual - baseline) / baseline to normalize across problem sizes.
 
     Args:
         scores_per_test (dict): Dictionary mapping problem instance tuples to scores.
@@ -93,17 +93,19 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
         start_n (list): Start values for n per s-value.
         end_n (list): End values for n per s-value.
         s_values (list): List of s-values to consider.
-        target_signatures (dict, optional): Dictionary of target sizes for each (n - s).
+        baseline_scores (dict, optional): Dictionary of baseline scores for each problem dimension.
+                                         Keys can be (n, s) or (n, s, q, ...) - first two elements used.
+                                         Required for 'relative_difference' mode.
 
     Returns:
         float: Final reduced score.
     """
     try:
-        # Convert string keys to tuples and extract (n - s) from full problem instance tuples
+        # Convert string keys to tuples and extract (n, s) from full problem instance tuples
         parsed_scores = {}
         for k, v in scores_per_test.items():
             key = ast.literal_eval(k) if isinstance(k, str) else k
-            # Extract (n - s) from full tuple: take first two elements
+            # Extract (n, s) from full tuple: take first two elements
             ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
             parsed_scores[ns_key] = v
     except Exception as e:
@@ -112,8 +114,16 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
     if not (len(start_n) == len(end_n) == len(s_values)):
         raise ValueError("The number of elements in start_n, end_n, and s_values must match.")
 
-    if mode == "relative_difference" and target_signatures is None:
-        raise ValueError("target_signatures must be provided for 'relative_difference' mode.")
+    if mode == "relative_difference" and baseline_scores is None:
+        raise ValueError("baseline_scores must be provided for 'relative_difference' mode.")
+
+    # Convert baseline_scores keys to (n, s) 2-tuples (same conversion as parsed_scores)
+    parsed_baseline = {}
+    if baseline_scores:
+        for k, v in baseline_scores.items():
+            key = ast.literal_eval(k) if isinstance(k, str) else k
+            ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
+            parsed_baseline[ns_key] = v
 
     per_s_scores = []
 
@@ -137,9 +147,9 @@ def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6]
             relative_scores = []
             for dim in all_dimensions:
                 actual = parsed_scores.get(dim, 0)
-                target = target_signatures.get(dim, None)
-                if target is not None:
-                    relative_scores.append((actual - target) / target)
+                baseline = parsed_baseline.get(dim, None)
+                if baseline is not None and baseline != 0:
+                    relative_scores.append((actual - baseline) / baseline)
             per_s_scores.append(sum(relative_scores) / len(relative_scores) if relative_scores else 0)
 
         else:
@@ -831,7 +841,7 @@ class ProgramsDatabase:
         program.hash_value = hash_value
 
         # Calculate score once and reuse
-        score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.target_signatures)
+        score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.best_known_solutions)
 
         # Assign lineage tracking information
         if parent_ids is None:
@@ -1307,7 +1317,7 @@ class ProgramsDatabase:
     async def _check_queues_empty(self) -> bool:
         """Check if all queues are empty via RabbitMQ management API."""
         try:
-            cfg = self._conn_manager._config.rabbitmq
+            cfg = self._conn_manager.config
             vhost = '%2F' if not cfg.vhost else cfg.vhost
             timeout = aiohttp.ClientTimeout(total=5)
 
