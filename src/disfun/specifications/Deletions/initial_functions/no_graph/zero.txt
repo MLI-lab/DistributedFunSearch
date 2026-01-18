@@ -4,6 +4,5 @@ Baseline implementation that assigns equal priority to all nodes.
 
 <code>
 def priority(node, n, s, q) -> float:
-    """Returns the priority with which we want to add `node` to the independent set. a{score}"""
     return 0.0
 </code>

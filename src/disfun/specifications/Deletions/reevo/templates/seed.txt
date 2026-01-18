@@ -1,0 +1,13 @@
+Write a priority function for {problem_desc}
+{func_desc}
+
+[Trivial baseline]
+```python
+{better_code}
+```
+
+Available imports:
+{imports}
+
+Refer to the format above. Be creative and give `priority_v1`. Output code only and enclose your code with: ```python ... ```.
+{initial_reflection}

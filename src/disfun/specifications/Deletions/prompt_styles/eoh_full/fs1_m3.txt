@@ -1,7 +1,0 @@
-First, identify the main components in the function below. Next, analyze whether any of these components can be overfit to the in-distribution instances. Then, based on your analysis, simplify the components to enhance the generalization to potential out-of-distribution instances.
-
-Finally, describe your simplified algorithm in one sentence, and provide the revised code.
-
-Use this format:
-<thought>Your algorithm description in one sentence</thought>
-<code>Your implementation</code>

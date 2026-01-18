@@ -15,37 +15,30 @@
 
 """Unified LiteLLM-based Sampler with vLLM support.
 
-This sampler replaces both the original sampler.py (HuggingFace transformers)
-and gpt.py (Azure OpenAI) with a single unified implementation using LiteLLM.
-
 Key features:
-* Supports 100+ LLM providers through LiteLLM (OpenAI - Anthropic - Together AI - local vLLM - etc.)
-* Dynamic batching based on message load (10ms window - up to 10 prompts per batch)
+* Supports 100+ LLM providers through LiteLLM (OpenAI, Anthropic, Together AI, local vLLM, etc.)
+* Dynamic batching based on message load 
 * Dynamic temperature adjustment based on stored program count
 * Token tracking for both input and output
-* Time tracking (GPU time for local models - API latency for cloud models)
-* vLLM backend support for 10-20x faster local inference vs HuggingFace transformers
+* Time tracking (GPU time for local models, API latency for cloud models)
+* vLLM backend support for faster local inference vs HuggingFace transformers
 """
 
-import random
-import os
+import gc
 import json
 import logging
 import asyncio
-from typing import List, Dict, Any, Optional
+import os
+import sys
 import time
+from typing import List, Optional
 
-import litellm
 import aio_pika
-from dotenv import load_dotenv
+import litellm
 
 from disfun import programs_database
-from disfun.profiling import async_time_execution
 
 logger = logging.getLogger('main_logger')
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Setup dedicated cost logger
 cost_logger = logging.getLogger('cost_logger')
@@ -65,22 +58,12 @@ except ImportError:
     logger.warning("vLLM not available. Only API-based models will work.")
 
 
-def is_local_model(model: str) -> bool:
-    """Determine if model should use local vLLM vs API."""
-    # API models from various providers
-    api_prefixes = [
-        "gpt-", "claude-", "anthropic/", "together_ai/", "replicate/",
-        "openai/", "azure/", "openrouter/", "huggingface/"
-    ]
-    return not any(model.startswith(prefix) for prefix in api_prefixes)
-
-
 class LLM_model:
     """Unified language model interface.
 
     Supports two modes:
     1. Local models: vLLM Python API (each sampler loads model on assigned GPU)
-    2. API models: LiteLLM client (GPT - Claude - etc. via HTTP)
+    2. API models: LiteLLM client (GPT, Claude, etc. via HTTP)
     """
 
     def __init__(
@@ -95,10 +78,10 @@ class LLM_model:
             api_key: Optional[str] = None,
             device: Optional[int] = None,  # GPU device for local models
             reasoning_effort: Optional[str] = None,  # For GPT-5/o3 models
-            system_message: Optional[str] = None,  # System message for API models
             max_retries: int = 3,  # Maximum retry attempts for API calls
             random_seed: Optional[int] = None,  # Random seed for reproducible generation
             gpu_memory_utilization: float = 0.95,  # Fraction of GPU memory for vLLM
+            use_local_vllm: bool = True,  # True=local vLLM, False=LiteLLM API
     ) -> None:
         self.inference_time = 0.0
         self._samples_per_prompt = samples_per_prompt
@@ -111,11 +94,10 @@ class LLM_model:
         self.api_key = api_key
         self.device = device
         self.reasoning_effort = reasoning_effort
-        self.system_message = system_message
         self.max_retries = max_retries
         self.random_seed = random_seed
         self.generation_counter = 0  # Counter to increment seed for each generation call
-        self.previous_total_registered_programs = 0
+        self.previous_total_registered_programs = 0  # For dynamic temperature decay based on new programs stored
 
         # Cost tracking for API models
         self.total_cost = 0.0
@@ -123,63 +105,45 @@ class LLM_model:
         self.total_output_tokens = 0
         self.request_count = 0
 
-        # Logging flag for first prompt/output
-        self._logged_first_prompt = False
+        # Logging flag for first generation prompt/output
+        self._logged_first_generation = False
 
-        # Determine if using local vLLM or API
-        self.use_local_vllm = is_local_model(model)
+        # Local vLLM or LiteLLM API mode
+        self.use_local_vllm = use_local_vllm
 
         if self.use_local_vllm:
-            # LOCAL MODE: Use vLLM Python API
             if not VLLM_AVAILABLE:
-                raise RuntimeError(
-                    f"Model '{model}' appears to be a local model - but vLLM is not installed. "
-                    f"Install with: pip install vllm"
-                )
+                raise RuntimeError(f"use_local_vllm=True but vLLM is not installed. Install with: pip install vllm")
 
-            logger.info(f"Initializing LOCAL vLLM model: {model} on device {device}")
-
-            # Note: CUDA_VISIBLE_DEVICES must be set BEFORE importing vLLM (done in process_entry.py)
-            # Initialize vLLM engine (loads model on GPU)
-            # enforce_eager=False enables CUDA graphs for faster inference
+            logger.info(f"Initializing vLLM model: {model} on device {device}")
             try:
                 self.vllm_engine = vLLM_Engine(
                     model=model,
-                    tensor_parallel_size=1,  # Single GPU per sampler
+                    tensor_parallel_size=1,
                     dtype="float16",
                     gpu_memory_utilization=gpu_memory_utilization,
                     trust_remote_code=True,
-                    enforce_eager=False,  # Enable CUDA graphs for faster inference
+                    enforce_eager=False,  # Enables CUDA graphs for faster repeated inference
                 )
-                logger.info(f"vLLM engine initialized successfully on GPU {device}")
-
-                # Warmup: Run a dummy generation to compile CUDA graphs before real inference
-                # This prevents "Forward context is not set" errors during early batches
-                logger.info(f"vLLM: Running warmup generation to compile CUDA graphs...")
+                # Run dummy generation to compile CUDA graphs upfront (avoids slow first inference)
                 warmup_params = SamplingParams(temperature=0.1, max_tokens=16, n=1)
                 _ = self.vllm_engine.generate(["def hello():\n    "], warmup_params)
-                logger.info(f"vLLM: Warmup complete, CUDA graphs compiled")
+                logger.info(f"vLLM initialized on GPU {device}")
             except Exception as e:
-                logger.error(f"Failed to initialize vLLM engine: {e}")
+                logger.error(f"Failed to initialize vLLM: {e}")
                 raise
 
-            # vLLM sampling params
-            sampling_params_kwargs = {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                "max_tokens": self.max_new_tokens,
-                "repetition_penalty": self.repetition_penalty,
-                "n": self._samples_per_prompt,
-            }
-
-            # Add random seed for reproducible generation
-            if self.random_seed is not None:
-                sampling_params_kwargs["seed"] = self.random_seed
-
-            self.sampling_params = SamplingParams(**sampling_params_kwargs)
+            # vLLM sampling params (seed added at generation time with counter for reproducibility)
+            self.sampling_params = SamplingParams(
+                temperature=self.temperature,
+                top_p=self.top_p,
+                max_tokens=self.max_new_tokens,
+                repetition_penalty=self.repetition_penalty,
+                n=self._samples_per_prompt,
+            )
 
         else:
-            # API MODE: Use LiteLLM
+            # LiteLLM API mode
             logger.info(f"Initializing API model via LiteLLM: {model}")
 
             if api_base:
@@ -187,37 +151,23 @@ class LLM_model:
             if api_key:
                 litellm.api_key = api_key
 
-            # LiteLLM generation kwargs
+            # LiteLLM generation kwargs (seed added at generation time with counter for reproducibility)
             self.generate_kwargs = {
                 "temperature": self.temperature,
                 "max_tokens": self.max_new_tokens,
                 "top_p": self.top_p,
-                "frequency_penalty": max(0, self.repetition_penalty - 1.0),
+                "frequency_penalty": max(0, self.repetition_penalty - 1.0),  # OpenAI calls it frequency_penalty, convert from repetition_penalty
                 "n": self._samples_per_prompt,
             }
 
-            # Add random seed for reproducible generation
-            if self.random_seed is not None:
-                self.generate_kwargs["seed"] = self.random_seed
-
-            # Add reasoning_effort only for models that support it (o1 - o3 - o3-mini - gpt-5)
+            # Add reasoning_effort if set (OpenAI o1/o3/gpt-5 only, API will error if unsupported)
             if self.reasoning_effort:
-                model_lower = self.model.lower()
-                supports_reasoning = any(x in model_lower for x in ['o1', 'o3', 'gpt-5'])
-                # Exclude o1-mini which doesn't support reasoning_effort
-                if 'o1-mini' in model_lower:
-                    supports_reasoning = False
-
-                if supports_reasoning:
-                    self.generate_kwargs["reasoning_effort"] = self.reasoning_effort
-                    logger.info(f"Enabled reasoning_effort={self.reasoning_effort} for {self.model}")
-                else:
-                    logger.warning(f"Model {self.model} does not support reasoning_effort parameter, skipping this setting")
+                self.generate_kwargs["reasoning_effort"] = self.reasoning_effort
 
             # Log retry configuration for API models
             logger.info(f"API retry configuration: max_retries={self.max_retries} (exponential backoff)")
 
-        logger.info(f"Model initialized: mode={'LOCAL_VLLM' if self.use_local_vllm else 'API'} - "
+        logger.info(f"Model initialized: mode={'LOCAL_VLLM' if self.use_local_vllm else 'API'}, "
                    f"temp={temperature}, top_p={top_p}, max_tokens={max_new_tokens}")
 
     def adjust_temperature(self, total_registered_programs: int, temperature_period: int):
@@ -226,23 +176,11 @@ class LLM_model:
             effective = total_registered_programs - self.previous_total_registered_programs
             new_temp = max(0, self.temperature * (1 - effective / temperature_period))
 
+            # Update temperature (top_p stays unchanged)
             if self.use_local_vllm:
-                # Update vLLM sampling params
-                if new_temp > 0:
-                    self.sampling_params.temperature = max(0.1, new_temp)
-                    self.sampling_params.top_p = self.top_p
-                else:
-                    # Greedy decoding
-                    self.sampling_params.temperature = 0.0
-                    self.sampling_params.top_p = 1.0
+                self.sampling_params.temperature = new_temp
             else:
-                # Update LiteLLM kwargs
-                if new_temp > 0:
-                    self.generate_kwargs["temperature"] = max(0.1, new_temp)
-                    self.generate_kwargs["top_p"] = self.top_p
-                else:
-                    self.generate_kwargs["temperature"] = 0.0
-                    self.generate_kwargs.pop("top_p", None)
+                self.generate_kwargs["temperature"] = new_temp
 
             self.previous_total_registered_programs = total_registered_programs
             logger.debug(
@@ -254,17 +192,21 @@ class LLM_model:
             self,
             prompts: List[str],
             total_registered_programs: int = 0,
-            temperature_period: int = 10000
+            temperature_period: int = 10000,
+            samples_per_prompt: int | None = None,
+            system_message: str | None = None,
     ) -> tuple[List[List[str]], List[int], List[List[int]]]:
         """Generate samples for a batch of prompts.
 
-        For API models - all prompts in the batch are processed in parallel using
-        asyncio.gather - significantly reducing total latency compared to sequential calls.
+        For API models, all prompts in the batch are processed in parallel using
+        asyncio.gather, reducing total latency compared to sequential calls.
 
         Args:
             prompts: List of prompt strings
             total_registered_programs: Current count of stored programs
             temperature_period: Period for temperature decay
+            samples_per_prompt: Outputs per prompt (defaults to config value)
+            system_message: Override default system message (API models only)
 
         Returns:
             Tuple of (grouped_samples, input_token_counts, output_token_counts)
@@ -275,42 +217,50 @@ class LLM_model:
             except Exception as e:
                 logger.error(f"Error adjusting temperature: {e}")
 
-        if self.use_local_vllm:
-            return await self._draw_batch_vllm(prompts)
-        else:
-            return await self._draw_batch_api(prompts)
+        n = samples_per_prompt if samples_per_prompt is not None else self._samples_per_prompt
 
-    async def _draw_batch_vllm(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
+        if self.use_local_vllm:
+            return await self._draw_batch_vllm(prompts, n)
+        else:
+            return await self._draw_batch_api(prompts, n, system_message=system_message)
+
+    async def _draw_batch_vllm(self, prompts: List[str], n: int) -> tuple[List[List[str]], List[int], List[List[int]]]:
         """Generate samples using local vLLM engine.
 
         The vLLM generate() call is run in a thread pool to avoid blocking
         the asyncio event loop, which would prevent RabbitMQ heartbeats from
         being processed and cause connection timeouts.
+
+        Note: system_message is not used for vLLM completion models.
         """
         try:
             start_time = time.time()
 
-            logger.info(f"vLLM: Processing batch of {len(prompts)} prompts")
+            logger.info(f"vLLM: Processing batch of {len(prompts)} prompts (n={n})")
 
-            # Log first prompt ever at INFO level - subsequent at DEBUG
+            # Log first prompt at info level, subsequent at debug
             if prompts:
-                if not self._logged_first_prompt:
+                if not self._logged_first_generation:
                     logger.info(f"vLLM: First prompt:\n{'='*80}\n{prompts[0]}\n{'='*80}")
                 else:
                     logger.debug(f"vLLM: First prompt in batch:\n{'='*80}\n{prompts[0]}\n{'='*80}")
 
-            # Update seed for this generation call to ensure different outputs
-            # while maintaining reproducibility (same base_seed + counter = same sequence)
+            # Create sampling params with specified n (samples_per_prompt)
+            sampling_params = SamplingParams(
+                temperature=self.sampling_params.temperature,
+                top_p=self.sampling_params.top_p,
+                max_tokens=self.max_new_tokens,
+                repetition_penalty=self.repetition_penalty,
+                n=n,
+            )
             if self.random_seed is not None:
-                current_seed = self.random_seed + self.generation_counter
-                self.sampling_params.seed = current_seed
+                sampling_params.seed = self.random_seed + self.generation_counter
                 self.generation_counter += 1
-                logger.debug(f"vLLM: Using seed {current_seed} for generation #{self.generation_counter}")
+                logger.debug(f"vLLM: Using seed {sampling_params.seed} for generation #{self.generation_counter}")
 
-            # vLLM batch generation - run in thread pool to avoid blocking event loop
-            # This allows RabbitMQ heartbeats to be processed during long inference
+            # vLLM batch generation, run in thread pool to avoid blocking event loop
             outputs = await asyncio.to_thread(
-                self.vllm_engine.generate, prompts, self.sampling_params
+                self.vllm_engine.generate, prompts, sampling_params
             )
 
             all_samples = []
@@ -322,11 +272,11 @@ class LLM_model:
                 samples = [o.text for o in output.outputs]
                 all_samples.append(samples)
 
-                # Log first output ever at INFO level - subsequent at DEBUG
+                # Log first output at info level, subsequent at debug
                 if idx == 0 and samples:
-                    if not self._logged_first_prompt:
+                    if not self._logged_first_generation:
                         logger.info(f"vLLM: First model output:\n{'='*80}\n{samples[0]}\n{'='*80}")
-                        self._logged_first_prompt = True  # Set flag after logging first prompt and output
+                        self._logged_first_generation = True  # Set flag after logging first prompt and output
                     else:
                         logger.debug(f"vLLM: First model output:\n{'='*80}\n{samples[0]}\n{'='*80}")
 
@@ -344,27 +294,11 @@ class LLM_model:
             return all_samples, input_token_counts, all_output_token_counts
 
         except Exception as e:
-            error_str = str(e).lower()
-            error_type = type(e).__name__
-            # CUDA errors corrupt the GPU context - cannot recover in same process
-            if "cuda" in error_str or "illegal memory" in error_str or "cublas" in error_str:
-                logger.error(f"CUDA error detected: {error_type}: {e}")
-                logger.error("CUDA context is corrupted and unrecoverable. Exiting for clean restart...")
-                # Best effort cleanup to free GPU memory before exit
-                try:
-                    self.cleanup()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except Exception:
-                    pass  # Cleanup may fail if CUDA is corrupted, that's ok
-                import sys
-                sys.exit(1)
-            else:
-                # Log full exception details - some vLLM exceptions have empty str()
-                logger.error(f"Error during vLLM batch generation: {error_type}: {e!r}", exc_info=True)
-            return [], [], []
+            logger.error(f"vLLM error, restarting sampler: {e}")
+            self.cleanup()
+            sys.exit(1)
 
-    async def _draw_batch_api(self, prompts: List[str]) -> tuple[List[List[str]], List[int], List[List[int]]]:
+    async def _draw_batch_api(self, prompts: List[str], n: int, system_message: str | None = None) -> tuple[List[List[str]], List[int], List[List[int]]]:
         """Generate samples using LiteLLM API client with parallel async calls."""
         try:
             start_time = time.time()
@@ -373,27 +307,27 @@ class LLM_model:
             messages_batch = []
             for prompt in prompts:
                 messages = []
-                if self.system_message:
-                    messages.append({"role": "system", "content": self.system_message})
+                if system_message:
+                    messages.append({"role": "system", "content": system_message})
                 messages.append({"role": "user", "content": prompt})
                 messages_batch.append(messages)
 
-            logger.info(f"LiteLLM API: Processing batch of {len(prompts)} prompts in parallel")
+            logger.info(f"LiteLLM API: Processing batch of {len(prompts)} prompts in parallel (n={n})")
 
-            # Log first prompt ever at INFO level - subsequent at DEBUG
+            # Log first prompt at info level, subsequent at debug
             if prompts:
-                if not self._logged_first_prompt:
+                if not self._logged_first_generation:
                     logger.info(f"LiteLLM: First prompt:\n{'='*80}\n{prompts[0]}\n{'='*80}")
                 else:
                     logger.debug(f"LiteLLM: First prompt in batch:\n{'='*80}\n{prompts[0]}\n{'='*80}")
 
-            # Update seed for this generation call to ensure different outputs
-            # while maintaining reproducibility (same base_seed + counter = same sequence)
+            # Build generation kwargs with specified n (samples_per_prompt)
+            generate_kwargs = self.generate_kwargs.copy()
+            generate_kwargs["n"] = n
             if self.random_seed is not None:
-                current_seed = self.random_seed + self.generation_counter
-                self.generate_kwargs["seed"] = current_seed
+                generate_kwargs["seed"] = self.random_seed + self.generation_counter
                 self.generation_counter += 1
-                logger.debug(f"LiteLLM: Using seed {current_seed} for generation #{self.generation_counter}")
+                logger.debug(f"LiteLLM: Using seed {generate_kwargs['seed']} for generation #{self.generation_counter}")
 
             # Create async tasks for all API calls (parallel execution)
             async def call_api(messages, idx):
@@ -405,24 +339,11 @@ class LLM_model:
                         api_base=self.api_base,
                         api_key=self.api_key,
                         num_retries=self.max_retries,
-                        **self.generate_kwargs
+                        **generate_kwargs
                     )
                     return (idx, response, None)
                 except Exception as e:
-                    # Extract detailed error information
-                    error_msg = str(e)
-
-                    # Try to get more details from the exception
-                    details = []
-                    if hasattr(e, 'status_code'):
-                        details.append(f"status={e.status_code}")
-                    if hasattr(e, 'llm_provider'):
-                        details.append(f"provider={e.llm_provider}")
-
-                    if details:
-                        logger.error(f"LiteLLM API completion failed for prompt {idx}, {error_msg}, {' - '.join(details)}")
-                    else:
-                        logger.error(f"LiteLLM API completion failed for prompt {idx}, {error_msg}")
+                    logger.error(f"LiteLLM API error for prompt {idx}: {e}")
                     return (idx, None, e)
 
             # Execute all API calls in parallel using asyncio.gather
@@ -444,19 +365,19 @@ class LLM_model:
                 samples = [choice.message.content for choice in response.choices]
                 all_samples.append(samples)
 
-                # Log first output ever at INFO level - subsequent at DEBUG
+                # Log first output at info level, subsequent at debug
                 for sample_idx, sample in enumerate(samples):
-                    if not self._logged_first_prompt and idx == 0 and sample_idx == 0:
+                    if not self._logged_first_generation and idx == 0 and sample_idx == 0:
                         logger.info(f"LiteLLM: First model output:\n{'='*80}\n{sample}\n{'='*80}")
-                        self._logged_first_prompt = True  # Set flag after logging first prompt and output
+                        self._logged_first_generation = True  # Set flag after logging first prompt and output
                     else:
                         logger.debug(f"LiteLLM: Prompt {idx+1}/{len(results)}, Sample {sample_idx+1}/{len(samples)} output:\n{'='*80}\n{sample}\n{'='*80}")
 
                 usage = response.usage
                 input_token_counts.append(usage.prompt_tokens)
 
-                completion_tokens_per_sample = usage.completion_tokens // self._samples_per_prompt
-                output_token_counts_for_prompt = [completion_tokens_per_sample] * self._samples_per_prompt
+                completion_tokens_per_sample = usage.completion_tokens // n
+                output_token_counts_for_prompt = [completion_tokens_per_sample] * n
                 all_output_token_counts.append(output_token_counts_for_prompt)
 
                 # Calculate cost using LiteLLM's built-in cost tracking
@@ -474,7 +395,7 @@ class LLM_model:
 
                     # Log to dedicated cost log file (with PID prefix for tracking across rotations)
                     cost_logger.info(f"[PID {os.getpid()}] model={self.model}, req={self.request_count}, "
-                                   f"cost=${cost:.6f} - in={usage.prompt_tokens} - out={usage.completion_tokens} - "
+                                   f"cost=${cost:.6f}, in={usage.prompt_tokens}, out={usage.completion_tokens}, "
                                    f"session_total=${self.total_cost:.6f}")
                 except Exception as cost_err:
                     logger.warning(f"Could not calculate cost: {cost_err}")
@@ -490,62 +411,47 @@ class LLM_model:
             return [], [], []
 
     def cleanup(self):
-        """Clean up vLLM GPU memory (see vllm#1908 for known issues)."""
+        """Clean up vLLM GPU memory."""
         if not (self.use_local_vllm and getattr(self, 'vllm_engine', None)):
             return
 
-        import gc
         logger.info("LLM_model: Cleaning up vLLM...")
 
         try:
-            # 1. Destroy model parallel state (critical for memory release)
+            # Destroy distributed state (needed for multi-GPU setups)
             try:
                 from vllm.distributed.parallel_state import destroy_model_parallel
                 destroy_model_parallel()
             except ImportError:
                 pass
 
-            # 2. Delete internal components in order
-            if hasattr(self.vllm_engine, 'llm_engine'):
-                if hasattr(self.vllm_engine.llm_engine, 'model_executor'):
-                    if hasattr(self.vllm_engine.llm_engine.model_executor, 'driver_worker'):
-                        self.vllm_engine.llm_engine.model_executor.driver_worker = None
-                    self.vllm_engine.llm_engine.model_executor = None
-                self.vllm_engine.llm_engine = None
-
-            # 3. Delete engine
             self.vllm_engine = None
-
-            # 4. GC + CUDA cleanup
             gc.collect()
-            if VLLM_AVAILABLE and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
+            torch.cuda.empty_cache()
             logger.info("LLM_model: Cleanup done")
         except Exception as e:
             logger.error(f"LLM_model: Cleanup error: {e}")
 
 
 class Sampler:
-    """Node that samples program continuations and sends them for evaluation."""
+    """Samples program continuations and sends them for evaluation."""
 
-    def __init__(self, connection, channel, sampler_queue, evaluator_queue, config, device=None, log_dir=None, system_message=None, random_seed=None, rabbitmq_config=None):
-        self.connection = connection
-        self.channel = channel
-        self.sampler_queue = sampler_queue
-        self.evaluator_queue = evaluator_queue
+    def __init__(self, config, rabbitmq_config, device=None, log_dir=None, random_seed=None):
         self._config = config
-        self._rabbitmq_config = rabbitmq_config  # Store for reconnection
-        self._shutdown_requested = False
-        self._reconnect_delay = 5.0  # Initial reconnect delay in seconds
-        self._max_reconnect_delay = 60.0  # Maximum reconnect delay
         self.device = device
+
+        from disfun.utils import rabbitmq
+        self._conn = rabbitmq.ConnectionManager(
+            config=rabbitmq_config,
+            component_name=f"Sampler ({config.model})",
+            queue_names=["sampler_queue", "evaluator_queue"],
+            logger=logger
+        )
         self.temperature_period = self._config.temperature_period
         self.samples_per_prompt = self._config.samples_per_prompt
         self.samples_per_batch = self._config.prompts_per_batch
         self.log_dir = log_dir
-        self.system_message = system_message
-        self._logged_first_prompt = False  # Flag to log first prompt and output once
+        self._logged_first_reflection = False  # Flag to log first reflection output once
 
         try:
             self._llm = LLM_model(
@@ -559,10 +465,10 @@ class Sampler:
                 api_key=self._config.api_key,
                 device=device,
                 reasoning_effort=self._config.reasoning_effort,
-                system_message=self.system_message,
                 max_retries=self._config.max_retries,
                 random_seed=random_seed,
                 gpu_memory_utilization=getattr(self._config, 'gpu_memory_utilization', 0.95),
+                use_local_vllm=self._config.use_local_vllm,
             )
             mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")
@@ -570,262 +476,165 @@ class Sampler:
             logger.error(f"Error initializing model: {e}")
             raise
 
-    async def _ensure_connection(self):
-        """Create or verify RabbitMQ connection is alive.
-
-        If the connection is closed or None, creates a fresh connection,
-        channel, and queue objects. This enables automatic recovery from
-        network interruptions.
-        """
-        from disfun import process_utils
-
-        if self._rabbitmq_config is None:
-            logger.warning("Sampler: No RabbitMQ config stored, cannot reconnect")
-            return False
-
-        # Check if connection needs to be recreated
-        needs_reconnect = (
-            self.connection is None or
-            self.connection.is_closed or
-            self.channel is None or
-            self.channel.is_closed
-        )
-
-        if needs_reconnect:
-            logger.info(f"Sampler ({self._config.model}): Establishing new RabbitMQ connection...")
-            try:
-                # Close any stale connections first
-                await self._close_connection()
-
-                # Create fresh connection
-                self.connection = await process_utils.create_rabbitmq_connection(
-                    self._rabbitmq_config, timeout=300
-                )
-                self.channel = await self.connection.channel()
-                self.sampler_queue = await process_utils.declare_standard_queue(
-                    self.channel, "sampler_queue"
-                )
-                # Also declare evaluator queue for publishing
-                await process_utils.declare_standard_queue(self.channel, "evaluator_queue")
-
-                logger.info(f"Sampler ({self._config.model}): RabbitMQ connection re-established successfully")
-                return True
-            except Exception as e:
-                logger.error(f"Sampler ({self._config.model}): Failed to reconnect: {e}")
-                return False
-        return True
-
-    async def _close_connection(self):
-        """Safely close existing RabbitMQ connection and channel."""
-        try:
-            if self.channel is not None:
-                try:
-                    if not self.channel.is_closed:
-                        await self.channel.close()
-                except Exception as e:
-                    logger.debug(f"Sampler: Error closing channel: {e}")
-            if self.connection is not None:
-                try:
-                    if not self.connection.is_closed:
-                        await self.connection.close()
-                except Exception as e:
-                    logger.debug(f"Sampler: Error closing connection: {e}")
-        finally:
-            self.connection = None
-            self.channel = None
-            self.sampler_queue = None
-
     async def consume_and_process(self) -> None:
-        """Main consume loop with automatic connection recovery.
-
-        This method implements a robust consume loop that:
-        1. Checks shutdown flag before any reconnection attempt
-        2. Ensures connection is alive before consuming
-        3. Catches connection errors and re-establishes the connection
-        4. Uses exponential backoff for reconnection attempts
-        """
-
-        async def _consume_loop():
-            """Inner consume loop - processes messages from the queue."""
-            # Set prefetch as multiple of batch size to hide network latency
-            # While GPU processes batch N, network prefetches batch N+1
-            prefetch_multiplier = getattr(self._config, 'prefetch_multiplier', 1)
-            prefetch = self.samples_per_batch * prefetch_multiplier
-            logger.info(f"Sampler ({self._config.model}): Setting QoS prefetch_count={prefetch} (batch_size={self.samples_per_batch} x {prefetch_multiplier})...")
-            await self.channel.set_qos(prefetch_count=prefetch)
-
-            logger.info(f"Sampler ({self._config.model}): Starting iterator to consume messages...")
-            async with self.sampler_queue.iterator() as stream:
-                batch = []
-                batch_timeout = 0.01  # 10ms window
-                timeout_task = None
-                inference_in_progress = False  # Track if LLM is running
-
-                async def run_inference():
-                    """Process current batch. Sets inference_in_progress flag to prevent concurrent calls."""
-                    nonlocal batch, inference_in_progress
-                    if not batch or inference_in_progress:
-                        return
-                    batch_to_process = batch.copy()
-                    batch.clear()
-                    inference_in_progress = True
-                    try:
-                        await self.process_batch_s(batch_to_process)
-                    finally:
-                        inference_in_progress = False
-
-                async def process_batch_with_timeout():
-                    """Process batch after timeout expires."""
-                    nonlocal timeout_task
-                    try:
-                        await asyncio.sleep(batch_timeout)
-                    except asyncio.CancelledError:
-                        timeout_task = None
-                        return
-
-                    await run_inference()
-                    timeout_task = None
-
-                    # If messages arrived during processing - create new timeout task
-                    if batch and not inference_in_progress:
-                        timeout_task = asyncio.create_task(process_batch_with_timeout())
-
-                logger.info(f"Sampler ({self._config.model}): Consumer registered, now listening for messages...")
-                async for message in stream:
-                    batch.append(message)
-
-                    # Start timeout task if not running
-                    if timeout_task is None and not inference_in_progress:
-                        timeout_task = asyncio.create_task(process_batch_with_timeout())
-
-                    # If batch is full - cancel timeout and process immediately
-                    if len(batch) >= self.samples_per_batch and not inference_in_progress:
-                        if timeout_task:
-                            timeout_task.cancel()
-                            timeout_task = None
-                        await run_inference()
-
-        # Main reconnection loop
-        reconnect_delay = self._reconnect_delay
+        """Main consume loop with automatic connection recovery."""
 
         while True:
-            # Check shutdown flag at top of loop
-            if self._shutdown_requested:
-                logger.info(f"Sampler ({self._config.model}): Shutdown requested, exiting consume loop")
-                break
-
             try:
-                # Ensure connection is alive (reconnect if needed)
-                if self._rabbitmq_config is not None:
-                    connected = await self._ensure_connection()
-                    if not connected:
-                        if self._shutdown_requested:
-                            break
-                        logger.error(f"Sampler ({self._config.model}): Failed to establish connection, retrying in {reconnect_delay:.1f}s...")
-                        await asyncio.sleep(reconnect_delay)
-                        reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
-                        continue
+                # Connect with retry (handles exponential backoff internally)
+                if not await self._conn.connect_with_retry():
+                    break  # Shutdown requested
 
-                # Reset delay on successful connection
-                reconnect_delay = self._reconnect_delay
-
-                # Run the consume loop
-                await _consume_loop()
-
-                # If consume loop exits normally, break
-                break
+                await self._consume_loop()
+                break  # Normal exit
 
             except asyncio.CancelledError:
-                # Shutdown requested - exit cleanly without reconnection
                 logger.info(f"Sampler ({self._config.model}): Cancelled, exiting...")
                 break
 
-            except (aio_pika.exceptions.AMQPConnectionError,
-                    aio_pika.exceptions.ChannelClosed,
-                    aio_pika.exceptions.ChannelInvalidStateError,
-                    ConnectionError,
-                    OSError) as e:
-                # Check shutdown flag before attempting reconnection
-                if self._shutdown_requested:
-                    logger.info(f"Sampler ({self._config.model}): Connection error during shutdown, exiting")
-                    break
-
-                # Connection lost - attempt to reconnect
-                logger.warning(
-                    f"Sampler ({self._config.model}): Connection error: {e}. "
-                    f"Reconnecting in {reconnect_delay:.1f}s..."
-                )
-                await self._close_connection()
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
-                continue
-
             except Exception as e:
-                # Check shutdown flag before attempting reconnection
-                if self._shutdown_requested:
-                    logger.info(f"Sampler ({self._config.model}): Error during shutdown, exiting")
-                    break
+                logger.warning(f"Sampler ({self._config.model}): {type(e).__name__}: {e}. Reconnecting...")
+                await self._conn.close()
 
-                # Unexpected error - log and retry
-                logger.error(
-                    f"Sampler ({self._config.model}): Unexpected error: {e}. "
-                    f"Reconnecting in {reconnect_delay:.1f}s...",
-                    exc_info=True
-                )
-                await self._close_connection()
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 1.5, self._max_reconnect_delay)
-                continue
+    async def _consume_loop(self):
+        """Inner consume loop, processes messages from the queue."""
+        batch_size = self.samples_per_batch
+        batch_timeout = getattr(self._config, 'batch_timeout', 0.01)
 
-    async def process_batch_s(self, batch: List[aio_pika.IncomingMessage]):
-        prompts = []
+        # Prefetch multiple batches to hide network latency
+        prefetch_multiplier = getattr(self._config, 'prefetch_multiplier', 1)
+        prefetch = batch_size * prefetch_multiplier
+        await self._conn.channel.set_qos(prefetch_count=prefetch)
+
+        logger.info(f"Sampler ({self._config.model}): Listening (batch_size={batch_size}, prefetch={prefetch})")
+
+        async with self._conn.get_queue("sampler_queue").iterator() as stream:
+            batch = []
+            batch_start_time = time.time()
+
+            async for message in stream:
+                batch.append(message)
+
+                if len(batch) >= batch_size or (time.time() - batch_start_time) >= batch_timeout:
+                    await self.process_batch(batch)
+                    batch.clear()
+                    batch_start_time = time.time()
+
+    async def process_batch(self, batch: List[aio_pika.IncomingMessage]):
+        """Process a batch of prompts with optional reflection stage.
+
+        Flow:
+        1. Parse messages, extract generation_prompt and optional reflection_prompt
+        2. If any have reflection_prompt: batch those first, fill {reflection} placeholders
+        3. Batch all generation prompts together
+        4. Publish results
+        """
+        generation_prompts = []
+        reflection_data = []  # (index, prompt) for prompts needing reflection
         metadata = []
         flags = []
+        total_registered_programs = 0
+        batch_samples_per_prompt = None  # Use first prompt's value for the batch
+        batch_system_message = None  # Use first prompt's value for the batch
+        batch_reflection_system_message = None
 
-        for message in batch:
+        for i, message in enumerate(batch):
             try:
                 async with message.process():
                     data = json.loads(message.body.decode())
                     prompt_data = data["prompt"]
                     total_registered_programs = data.get("total_registered_programs", 0)
                     flag = data.get("flag", False)
-                    flags.append(flag)
                     prompt = programs_database.Prompt.from_dict(prompt_data)
 
-                    if prompt.code is not None:
-                        prompts.append(prompt.code)
-                        metadata.append({
-                            "island_id": prompt.island_id,
-                            "version_generated": prompt.version_generated,
-                            "expected_version": prompt.expected_version,
-                            "parent_ids": data.get("parent_ids", []),
-                        })
-                    else:
-                        logger.warning(f"Skipping prompt with island_id {prompt.island_id}: Prompt is empty.")
+                    if not prompt.generation_prompt:
+                        logger.warning(f"Skipping prompt with island_id {prompt.island_id}: empty prompt")
+                        continue
+
+                    generation_prompts.append(prompt.generation_prompt)
+                    flags.append(flag)
+                    metadata.append({
+                        "island_id": prompt.island_id,
+                        "version_generated": prompt.version_generated,
+                        "expected_version": prompt.expected_version,
+                        "parent_ids": data.get("parent_ids", []),
+                    })
+
+                    # Track batch-level settings (use first prompt's values)
+                    if batch_samples_per_prompt is None:
+                        batch_samples_per_prompt = prompt.samples_per_prompt
+                    if batch_system_message is None:
+                        batch_system_message = prompt.system_message
+                    if batch_reflection_system_message is None:
+                        batch_reflection_system_message = prompt.reflection_system_message
+
+                    # Track reflection prompts if present (ReEvo only)
+                    if prompt.reflection_prompt:
+                        reflection_data.append((
+                            len(generation_prompts) - 1,  # Index in generation_prompts
+                            prompt.reflection_prompt,
+                        ))
 
             except Exception as e:
                 logger.error(f"Sampler: Error processing message: {e}")
-                total_registered_programs = 0
                 continue
 
-        if not prompts:
-            logger.warning("No valid prompts in batch; skipping processing.")
+        if not generation_prompts:
+            logger.warning("No valid prompts in batch; skipping.")
             return
 
-        # Get the completions from the LLM
-        try:
-            samples_list, input_token_counts, output_token_counts = await self._llm.draw_batch_samples(
-                prompts, total_registered_programs, self.temperature_period
+        # Batch reflection prompts (if any)
+        reflection_input_tokens = [0] * len(generation_prompts)
+        reflection_outputs = [None] * len(generation_prompts)  # Track reflection outputs per prompt
+        total_inference_time = 0.0
+
+        if reflection_data:
+            indices, refl_prompts = zip(*reflection_data)
+            logger.debug(f"Running batched reflection for {len(refl_prompts)} prompts")
+
+            # Use draw_batch_samples with samples_per_prompt=1 for reflections
+            refl_samples, refl_in_tokens, _ = await self._llm.draw_batch_samples(
+                list(refl_prompts), samples_per_prompt=1,
+                system_message=batch_reflection_system_message
             )
-            inference_time = self._llm.inference_time
+            total_inference_time += self._llm.inference_time
+
+            # Flatten: each refl_samples[i] is a list with one element
+            refl_outputs = [samples[0] if samples else "" for samples in refl_samples]
+
+            # Log first reflection
+            if not self._logged_first_reflection and refl_outputs:
+                logger.info(f"First reflection output:\n{'='*80}\n{refl_outputs[0]}\n{'='*80}")
+                self._logged_first_reflection = True
+
+            # Fill {reflection} placeholders and store reflection outputs
+            for j, idx in enumerate(indices):
+                generation_prompts[idx] = generation_prompts[idx].replace("{reflection}", refl_outputs[j])
+                reflection_input_tokens[idx] = refl_in_tokens[j]
+                reflection_outputs[idx] = refl_outputs[j]  # Store for sending to database
+
+        # Batch all generation prompts
+        try:
+            samples_list, gen_input_tokens, output_token_counts = await self._llm.draw_batch_samples(
+                generation_prompts, total_registered_programs, self.temperature_period,
+                samples_per_prompt=batch_samples_per_prompt,
+                system_message=batch_system_message,
+            )
+            total_inference_time += self._llm.inference_time
         except Exception as e:
             logger.error(f"LLM sampling failed: {e}")
             return
 
+        # Combine input tokens (reflection + generation)
+        input_token_counts = [
+            reflection_input_tokens[i] + (gen_input_tokens[i] if gen_input_tokens else 0)
+            for i in range(len(generation_prompts))
+        ]
+
         # Calculate total samples generated in this batch to properly distribute inference time
         total_samples = sum(len(samples) for samples in samples_list)
-        time_per_sample = inference_time / total_samples if total_samples > 0 else 0.0
-        logger.debug(f"Batch inference time: {inference_time:.2f}s for {total_samples} samples = {time_per_sample:.4f}s per sample")
+        time_per_sample = total_inference_time / total_samples if total_samples > 0 else 0.0
+        logger.debug(f"Batch inference time: {total_inference_time:.2f}s for {total_samples} samples = {time_per_sample:.4f}s per sample")
 
         # Collect all messages for batch publishing
         messages_to_publish = []
@@ -842,6 +651,11 @@ class Sampler:
                     logger.error(f"Error logging duplicate data: {e}")
 
             for sample_idx, sample in enumerate(samples):
+                output_tokens = 0
+                if output_token_counts and prompt_idx < len(output_token_counts):
+                    if sample_idx < len(output_token_counts[prompt_idx]):
+                        output_tokens = output_token_counts[prompt_idx][sample_idx]
+
                 message_data = {
                     "sample": sample,
                     "island_id": meta["island_id"],
@@ -849,8 +663,10 @@ class Sampler:
                     "expected_version": meta["expected_version"],
                     "gpu_time": time_per_sample,
                     "input_tokens": input_token_counts[prompt_idx] if sample_idx == 0 else 0,
-                    "output_tokens": output_token_counts[prompt_idx][sample_idx],
+                    "output_tokens": output_tokens,
                     "parent_ids": meta.get("parent_ids", []),
+                    # Include reflection output for ReEvo (only on first sample to avoid duplicates)
+                    "reflection_output": reflection_outputs[prompt_idx] if sample_idx == 0 else None,
                 }
                 messages_to_publish.append(aio_pika.Message(body=json.dumps(message_data).encode()))
 
@@ -858,28 +674,20 @@ class Sampler:
         if messages_to_publish:
             try:
                 await asyncio.gather(*[
-                    self.channel.default_exchange.publish(msg, routing_key="evaluator_queue")
+                    self._conn.channel.default_exchange.publish(msg, routing_key="evaluator_queue")
                     for msg in messages_to_publish
                 ])
                 logger.debug(f"Batch published {len(messages_to_publish)} samples to evaluator_queue.")
             except Exception as e:
                 logger.error(f"Error batch publishing samples: {e}")
 
-    def request_shutdown(self):
-        """Signal that shutdown is requested - stops reconnection attempts."""
-        self._shutdown_requested = True
-
-    async def async_cleanup(self):
-        """Async cleanup - close RabbitMQ connections."""
-        try:
-            await self._close_connection()
-            logger.info("Sampler: RabbitMQ connections closed")
-        except Exception as e:
-            logger.error(f"Sampler: Error closing connections: {e}")
+    async def shutdown(self):
+        """Graceful shutdown: close connection and release model."""
+        await self._conn.close()
+        self.cleanup()
 
     def cleanup(self):
         """Release LLM resources (sync cleanup)."""
-        import gc
         try:
             if hasattr(self, '_llm'):
                 self._llm.cleanup()

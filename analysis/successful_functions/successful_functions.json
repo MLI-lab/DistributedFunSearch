@@ -1,0 +1,27 @@
+[
+  {
+    "source_checkpoint": "/mnt/disfun/checkpoints/checkpoint_run_20251201_113315_graph_seed_13/checkpoint_2025-12-02_11-34-03.pkl",
+    "island_id": 9,
+    "cluster_signature": "(10, 16, 30, 52, 94, 172)",
+    "cluster_score": 172.0,
+    "scores_per_test": {
+      "(6, 1, 2)": 10,
+      "(7, 1, 2)": 16,
+      "(9, 1, 2)": 52,
+      "(8, 1, 2)": 30,
+      "(10, 1, 2)": 94,
+      "(11, 1, 2)": 172
+    },
+    "program_index": 0,
+    "body": "#Same logic applied here but instead we made it more dynamic   \n    max_k=min([n//2 , n-s]) # Dynamic Maximum K limit\n    sequence_score=[0]*(max_k+1) # store each score per possible k    \n\n    for leng in reversed(range(1,max_k + 1)):\n        \n        scores = []\n\n        for ind in range(n - leng + 1):\n\n            current_subseq = node[ind : ind + leng]\n            num_of_zeros = current_subseq.count(\"0\")\n            \n            weight = pow(leng * num_of_zeros / (leng + num_of_zeros), .68 )            \n            scores.append(-weight*num_of_zeros/(n-s)*n*0.9765625)\n            \n        total_scores=sum(scores)/pow(leng,.3)        \n        sequence_score[leng]=total_scores\n        \n    tssum=sum(sequence_score[:])    \n    return (((tssum))*np.log(max_k+1))\n\n",
+    "docstring": null,
+    "thinking": null,
+    "thought": null,
+    "hash_value": "0511345a62bbcc6a15aa8a97a89a46e48d55282c9980c7e3b8d75d41ba020112",
+    "name": "priority",
+    "args": "node, G, n, s",
+    "detected_signature": "graph_networkx",
+    "priority_hash": "e5886b77dc870bae",
+    "duplicate_count": 14
+  }
+]

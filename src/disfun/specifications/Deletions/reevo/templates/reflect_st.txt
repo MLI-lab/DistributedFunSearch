@@ -1,0 +1,16 @@
+Below are two priority functions for {problem_desc}
+{func_desc}
+
+You are provided with two code versions below, where the second version performs better than the first one.
+
+[Worse code]
+```python
+{worse_code}
+```
+
+[Better code]
+```python
+{better_code}
+```
+
+You respond with hints for designing better priority functions that find larger independent sets in graph G, based on the two code versions and using less than 20 words.

@@ -1,0 +1,9 @@
+Below is your prior long-term reflection on designing priority functions for {problem_desc}
+
+[Prior long-term reflection]
+{prior_reflection}
+
+[Newly gained insights]
+{new_reflections}
+
+Write an updated long-term reflection with constructive hints for designing better priority functions. Use less than 50 words.

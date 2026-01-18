@@ -178,7 +178,7 @@ Benchmarked on 6 CPU threads (VT codes). Memory is proportional to unique signat
 | 26 | 2,485,534 | 807,798,550 | 16,777,216 | 744,835,619 | 33.87s | 4504 MB |
 | 28 | 9,256,396 | 3,498,917,688 | 67,108,864 | 3,250,250,458 | 3.3m | 8997 MB |
 
---> for evolving feasible till n=23
+--> for evolving feasible till n=23 (memory)
 
 ### s = 3
 

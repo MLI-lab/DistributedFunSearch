@@ -1,0 +1,1 @@
+Consider properties of the binary string `node`, such as specific patterns, the number of ones/zeros, or relationships with neighboring nodes in the graph.

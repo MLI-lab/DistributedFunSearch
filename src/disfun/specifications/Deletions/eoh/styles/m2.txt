@@ -1,0 +1,17 @@
+{problem_description}
+
+Here is the current best algorithm:
+{better_code}
+
+Available imports:
+{imports}
+
+Please identify the main algorithm parameters and assist me in creating a new algorithm that has different parameter settings of the function provided.
+First, describe your new algorithm and main steps in one sentence. Next, implement it in Python as a function named priority.
+{func_desc}
+
+Use this format:
+<thought>Your algorithm description in one sentence</thought>
+<code>Your implementation</code>
+
+Do not give additional explanations.

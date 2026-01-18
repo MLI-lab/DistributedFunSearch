@@ -1,8 +1,0 @@
-Please help me create a new algorithm that has a totally different form from the given ones but can be motivated from them.
-
-Firstly, identify the common backbone idea in the provided algorithms. Secondly, based on the backbone idea describe your new algorithm in one sentence. Thirdly, implement it in Python.
-
-Use this format:
-<thought>Your algorithm description in one sentence</thought>
-<code>Your implementation</code>
-

@@ -1,6 +1,6 @@
-# Limit threading libraries BEFORE any imports that use them
-# This prevents OpenBLAS/MKL/OpenMP from spawning threads per-process
-# Without this, each container spawns ~50 threads, causing massive CPU contention
+# Limit threading libraries BEFORE any imports that use them.
+# This prevents OpenBLAS, MKL, and OpenMP from spawning threads per process.
+# Without this, each container spawns ~50 threads, causing massive CPU contention.
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")       # OpenMP (graph-tool, some NumPy)
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")  # OpenBLAS (NumPy default)
@@ -14,26 +14,20 @@ import traceback
 import time
 import resource
 
-# Set memory limit to prevent runaway generated code from consuming all RAM
-# Default: 1GB per sandbox process (configurable via SANDBOX_MEMORY_LIMIT_GB env var)
+# Set memory limit to prevent runaway generated code from consuming all RAM.
+# Default is 1GB per sandbox process, configurable via SANDBOX_MEMORY_LIMIT_GB env var.
 MEMORY_LIMIT_GB = float(os.environ.get('SANDBOX_MEMORY_LIMIT_GB', '1'))
 MEMORY_LIMIT_BYTES = int(MEMORY_LIMIT_GB * 1024 * 1024 * 1024)
 try:
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
 except (ValueError, resource.error):
-    pass  # System limit may be lower than requested - proceed without limit
+    pass  # System limit may be lower than requested, proceed without limit
 
-# Use the current working directory
-CWD = os.path.abspath(os.getcwd())
-
-# Get graph directory from environment variable or use default
-# The graph_dir can be set via GRAPH_DIR environment variable passed from sandbox.py
-GRAPH_DIR = os.environ.get('GRAPH_DIR', None)
-
+# Get graph directory from environment variable (required, set by sandbox.py)
+GRAPH_DIR = os.environ.get('GRAPH_DIR')
 if GRAPH_DIR is None:
-    # Fallback to default location if not set
-    SRC_DIR = os.path.abspath(os.path.join(CWD, "..", ".."))
-    GRAPH_DIR = os.path.join(SRC_DIR, "graphs")
+    print("Error: GRAPH_DIR environment variable not set", file=sys.stderr)
+    sys.exit(1)
 
 def main(prog_file: str, input_file: str, output_file: str):
     """Executes a deserialized function with input and writes output to file."""

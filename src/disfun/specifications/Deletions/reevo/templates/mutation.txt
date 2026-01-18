@@ -1,0 +1,14 @@
+{user_generator}
+
+[Prior reflection]
+{reflection}
+
+[Current best function]
+```python
+{better_code}
+```
+
+Available imports:
+{imports}
+
+Please write a mutated function `priority_v1`, according to the reflection. Output code only and enclose your code with: ```python ... ```.

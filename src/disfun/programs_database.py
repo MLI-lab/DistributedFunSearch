@@ -18,8 +18,8 @@
 
 Differences from the original DeepMind FunSearch version
 
-* Works inside an async RabbitMQ loop (`consume_and_process` - `get_prompt`).
-* Logs cumulative evaluator CPU - sampler GPU - and I/O token counts.
+* Works inside an async RabbitMQ loop.
+* Logs cumulative evaluator CPU, sampler GPU, and I/O token counts.
 * Saves and resumes from checkpoint.
 * Enforces deduplication (hash-based) and version-mismatch checks.
 * Stops early after an optimal solution or a prompt/solution quota.
@@ -27,38 +27,34 @@ Differences from the original DeepMind FunSearch version
 """
 
 import ast
-import copy
 import dataclasses
 import time
 import logging
-import re
 import os
 import signal
 import numpy as np
 import asyncio
-import random
-import aiohttp
-from typing import Any
-from collections.abc import Mapping, Sequence
-from disfun import code_manipulation
-from disfun import specification_loader
-from disfun import checkpoint as checkpoint_module
-from disfun import wandb_logging
-import json
 import aio_pika
+from typing import Any
+from collections.abc import Mapping
+from disfun.utils import code_manipulation
+from disfun.utils import checkpointing as checkpoint_module
+from disfun.utils import wandb_logging
+from disfun.utils import prompt_builder
+from disfun.utils.profiling import async_time_execution
+from disfun.utils import rabbitmq
+import json
 
 # Wandb import (optional)
 try:
     import wandb
-    WANDB_AVAILABLE = True
 except ImportError:
-    WANDB_AVAILABLE = False
     wandb = None
 
 
 logger = logging.getLogger('main_logger')
 
-Signature = tuple[float, ...]
+# Type alias for per-test scores: maps test case (e.g., (n, s, q)) to achieved score
 ScoresPerTest = Mapping[Any, float]
 
 
@@ -74,152 +70,104 @@ def _softmax(logits: np.ndarray, temperature: float) -> np.ndarray:
     return probs
 
 
-def _reduce_score(scores_per_test: dict, mode: str = "last", start_n: list = [6], end_n: list = [11], s_values: list = [1], baseline_scores=None) -> float:
+def _group_scores_by_params(scores_dict: dict) -> dict:
+    """Group scores by (s, q, ...) parameters, keyed by n.
+
+    Input:  {(6,1,2): 10, (7,1,2): 15, (8,1,2): 22, (6,1,3): 12}
+    Output: {(1,2): {6: 10, 7: 15, 8: 22}, (1,3): {6: 12}}
     """
-    Reduces per-test scores into a single score based on the specified mode.
-    Extracts (n, s) from full problem instance tuples and aggregates for each s in s_values.
+    from collections import defaultdict
+    groups = defaultdict(dict)
+    for k, v in scores_dict.items():
+        key = ast.literal_eval(k) if isinstance(k, str) else k
+        key = tuple(key) if isinstance(key, (list, tuple)) else (key,)
+        n = key[0]
+        group_key = key[1:] if len(key) > 1 else ()
+        groups[group_key][n] = v
+    return groups
 
-    Available modes:
-    - "last": Uses the score for the largest n (end_n) for each s value.
-    - "average": Averages scores across all n values for each s, then averages across s values.
-    - "weighted": Weights scores by n to prioritize larger n-values.
-    - "relative_difference": Uses relative difference (actual - baseline) / baseline to normalize across problem sizes.
 
-    Args:
-        scores_per_test (dict): Dictionary mapping problem instance tuples to scores.
-                               Keys can be full tuples like (n, s, q) or (n, s, q, k, ...).
-                               The first two elements are used as (n, s) for aggregation.
-        mode (str): Scoring method to use.
-        start_n (list): Start values for n per s-value.
-        end_n (list): End values for n per s-value.
-        s_values (list): List of s-values to consider.
-        baseline_scores (dict, optional): Dictionary of baseline scores for each problem dimension.
-                                         Keys can be (n, s) or (n, s, q, ...) - first two elements used.
-                                         Required for 'relative_difference' mode.
+def _reduce_score(
+    scores_per_test: dict,
+    mode: str,
+    baseline_scores: dict | None = None
+) -> float:
+    """Reduce per-test scores into a single aggregate score.
 
-    Returns:
-        float: Final reduced score.
+    Groups by (s, q, ...), reduces each group by mode, averages across groups.
+    Modes: "last" (largest n), "average", "weighted" (by n), "relative_difference" (vs baseline).
     """
-    try:
-        # Convert string keys to tuples and extract (n, s) from full problem instance tuples
-        parsed_scores = {}
-        for k, v in scores_per_test.items():
-            key = ast.literal_eval(k) if isinstance(k, str) else k
-            # Extract (n, s) from full tuple: take first two elements
-            ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
-            parsed_scores[ns_key] = v
-    except Exception as e:
-        raise ValueError(f"Failed to parse scores_per_test keys: {e}") from e
+    groups = _group_scores_by_params(scores_per_test)
+    if not groups:
+        return 0.0
 
-    if not (len(start_n) == len(end_n) == len(s_values)):
-        raise ValueError("The number of elements in start_n, end_n, and s_values must match.")
+    baseline_groups = _group_scores_by_params(baseline_scores) if baseline_scores else {}
 
-    if mode == "relative_difference" and baseline_scores is None:
-        raise ValueError("baseline_scores must be provided for 'relative_difference' mode.")
+    if mode == "relative_difference" and not baseline_groups:
+        raise ValueError("baseline_scores required for 'relative_difference' mode")
 
-    # Convert baseline_scores keys to (n, s) 2-tuples (same conversion as parsed_scores)
-    parsed_baseline = {}
-    if baseline_scores:
-        for k, v in baseline_scores.items():
-            key = ast.literal_eval(k) if isinstance(k, str) else k
-            ns_key = tuple(key[:2]) if isinstance(key, tuple) and len(key) >= 2 else key
-            parsed_baseline[ns_key] = v
-
-    per_s_scores = []
-
-    for s, s_start_n, s_end_n in zip(s_values, start_n, end_n, strict=True):
-        all_dimensions = [(n, s) for n in range(s_start_n, s_end_n + 1)]
-
+    # Reduce each parameter group to a single score
+    group_scores = []
+    for group_key, n_scores in groups.items():
         if mode == "last":
-            per_s_scores.append(parsed_scores.get(all_dimensions[-1], 0))
+            # Use score at largest n (n_scores is unordered, so find max)
+            max_n = max(n_scores.keys())
+            group_scores.append(n_scores[max_n])
 
         elif mode == "average":
-            complete_scores = [parsed_scores.get(dim, 0) for dim in all_dimensions]
-            per_s_scores.append(sum(complete_scores) / len(complete_scores) if complete_scores else 0)
+            group_scores.append(sum(n_scores.values()) / len(n_scores))
 
         elif mode == "weighted":
-            weights = [dim[0] for dim in all_dimensions]
-            weighted_sum = sum(parsed_scores.get(dim, 0) * w for dim, w in zip(all_dimensions, weights, strict=True))
-            total_weight = sum(weights)
-            per_s_scores.append(weighted_sum / total_weight if total_weight > 0 else 0)
+            # Weight scores by n (larger n = more important)
+            weighted_sum = sum(score * n for n, score in n_scores.items())
+            total_weight = sum(n_scores.keys())
+            group_scores.append(weighted_sum / total_weight if total_weight > 0 else 0)
 
         elif mode == "relative_difference":
-            relative_scores = []
-            for dim in all_dimensions:
-                actual = parsed_scores.get(dim, 0)
-                baseline = parsed_baseline.get(dim, None)
-                if baseline is not None and baseline != 0:
-                    relative_scores.append((actual - baseline) / baseline)
-            per_s_scores.append(sum(relative_scores) / len(relative_scores) if relative_scores else 0)
+            # Compute (actual - baseline) / baseline for each n
+            baseline_n = baseline_groups.get(group_key, {})
+            relative = []
+            for n, actual in n_scores.items():
+                base = baseline_n.get(n)
+                if base is not None and base != 0:
+                    relative.append((actual - base) / base)
+            group_scores.append(sum(relative) / len(relative) if relative else 0)
 
         else:
-            raise ValueError("Invalid mode. Available modes are 'last', 'average', 'weighted', and 'relative_difference'.")
+            raise ValueError(f"Invalid mode: {mode}. Use 'last', 'average', 'weighted', or 'relative_difference'.")
 
-    return sum(per_s_scores) / len(per_s_scores) if per_s_scores else 0
-
-
-def _format_scores_for_prompt(
-    scores_per_test: dict,
-    display_mode: str,
-    best_known_solutions: dict,
-    absolute_label: str,
-    relative_label: str
-) -> str:
-    """
-    Formats scores for inclusion in function docstrings.
-
-    Args:
-        scores_per_test: Dictionary mapping (n,s) to achieved scores.
-        display_mode: Either "absolute" or "relative".
-        best_known_solutions: Dictionary mapping (n,s) to baseline scores.
-        absolute_label: Prefix text for absolute scores.
-        relative_label: Prefix text for relative improvements.
-
-    Returns:
-        Formatted string like "Absolute scores: {(6,1): 8, (7,1): 14}" or
-                            "Relative to baseline: {(6,1): +0.0%, (7,1): +7.1%}".
-    """
-    parsed_scores = {}
-    for k, v in scores_per_test.items():
-        key = eval(k) if isinstance(k, str) else k
-        parsed_scores[key] = v
-
-    if display_mode == "absolute":
-        items = [f"{k}: {v}" for k, v in sorted(parsed_scores.items())]
-        return f"{absolute_label} {{{', '.join(items)}}}"
-
-    elif display_mode == "relative":
-        improvements = []
-        for dim in sorted(parsed_scores.keys()):
-            score_ours = parsed_scores.get(dim, 0)
-            score_baseline = best_known_solutions.get(dim, None)
-
-            if score_baseline is not None and score_baseline != 0:
-                rel_improvement = ((score_ours - score_baseline) / abs(score_baseline)) * 100
-                improvements.append(f"{dim}: {rel_improvement:+.1f}%")
-            else:
-                improvements.append(f"{dim}: {score_ours}")
-
-        return f"{relative_label} {{{', '.join(improvements)}}}"
-
-    return ""
+    # Average across all parameter groups
+    return sum(group_scores) / len(group_scores) if group_scores else 0.0
 
 
 @dataclasses.dataclass(frozen=True)
 class Prompt:
-    """A prompt produced by the ProgramsDatabase - to be sent to Samplers."""
-    code: str
+    """A prompt produced by the ProgramsDatabase, to be sent to Samplers.
+
+    All strategies use generation_prompt for the main prompt.
+    ReEvo also uses reflection_prompt for the first stage.
+    System messages are included for API models.
+    """
+    generation_prompt: str
     version_generated: int
     island_id: int
     expected_version: int = None
+    reflection_prompt: str | None = None      # ReEvo first stage
+    samples_per_prompt: int | None = None     # Override sampler default
+    system_message: str | None = None         # System message for generation
+    reflection_system_message: str | None = None  # System message for reflection (ReEvo)
 
     def to_dict(self):
         """Returns prompt as dict (for JSON serialization)."""
         return {
-            "code": self.code,
+            "generation_prompt": self.generation_prompt,
             "version_generated": self.version_generated,
             "island_id": self.island_id,
             "expected_version": self.expected_version,
+            "reflection_prompt": self.reflection_prompt,
+            "samples_per_prompt": self.samples_per_prompt,
+            "system_message": self.system_message,
+            "reflection_system_message": self.reflection_system_message,
         }
 
     @staticmethod
@@ -229,117 +177,46 @@ class Prompt:
 
 
 class ProgramsDatabase:
-    """A collection of programs - organized as islands.
+    """Manages evolved programs across islands for diversity.
 
-    The ProgramsDatabase maintains a population of evolved programs across multiple islands
-    for diversity. It implements evolutionary lineage tracking to record parent-child
-    relationships between programs.
-
-    Evolutionary Lineage Tracking:
-    -----------------------------
-    Each program is assigned:
-    - program_id: Unique identifier (auto-incrementing)
-    - parent_ids: List of program IDs from the few-shot prompt that generated it
-    - generation: Evolutionary depth (0 for baseline - max(parent_generations) + 1 for offspring)
-    - timestamp: Creation time
-
-    Special Handling for Island Resets:
-    -----------------------------------
-    When weak islands are reset - founder programs (best programs from surviving islands)
-    are copied to the reset island. These founder programs inherit lineage from their
-    source program: the new founder's parent_ids contains the original program's program_id,
-    maintaining the evolutionary chain across island boundaries.
-
-    All lineage information is logged to self.lineage_log and tracked in W&B metrics
-    under the 'lineage/' namespace.
+    Tracks lineage (program_id, parent_ids, generation) and periodically resets
+    weak islands with founders from strong ones. Logs to W&B under 'lineage/'.
     """
 
     def __init__(
         self,
-        connection: aio_pika.RobustConnection,
-        channel: aio_pika.RobustChannel,
-        database_queue: aio_pika.Queue,
-        sampler_queue: aio_pika.Queue,
-        evaluator_queue: aio_pika.Queue,
         config,
         function_to_evolve: str,
+        connection_manager: rabbitmq.ConnectionManager,
         checkpoint_file: str = None,
-        save_checkpoints_path: str=None,
-        mode: str=None,
-        start_n=[6],
-        end_n=[11],
-        s_values=[1],
-        no_deduplication=False,
-        prompt_limit=400_000,
-        optimal_solution_programs=20_000,
-        max_drain_time=600,
-        target_signatures=None,
-        show_eval_scores=False,
-        display_mode="absolute",
+        save_checkpoints_path: str = None,
+        termination_config=None,
         best_known_solutions=None,
-        absolute_label="Absolute scores:",
-        relative_label="Relative to baseline:",
-        q=2,
         wandb_config=None,
         sampler_config=None,
         evaluator_config=None,
-        prompt_config=None,
+        prompt_spec: prompt_builder.PromptSpec = None,
         run_name=None,
-        rabbitmq_config=None
     ):
         self._islands = []
         self._config = config
-
-        # Use shared connection manager for RabbitMQ
-        from disfun import process_utils
-        self._conn_manager = process_utils.RabbitMQConnectionManager(
-            config=rabbitmq_config,
-            component_name="ProgramsDatabase",
-            queue_names=["database_queue", "sampler_queue", "evaluator_queue"],
-            logger=logger,
-            timeout=300
-        )
-        # Initialize with passed-in connection
-        self._conn_manager.connection = connection
-        self._conn_manager.channel = channel
-        if database_queue:
-            self._conn_manager.queues["database_queue"] = database_queue
-        if sampler_queue:
-            self._conn_manager.queues["sampler_queue"] = sampler_queue
-        if evaluator_queue:
-            self._conn_manager.queues["evaluator_queue"] = evaluator_queue
+        self._conn = connection_manager
 
         self._function_to_evolve = function_to_evolve
         self._best_score_per_island = [-float('inf')] * config.num_islands
         self._best_program_per_island = [None] * config.num_islands
         self._best_scores_per_test_per_island = [None] * config.num_islands
-        self._last_reset_time = time.time()
         self._total_resets = 0
         self.save_checkpoints_path = save_checkpoints_path
-        self.mode=mode
-        self.start_n= start_n
-        self.end_n = end_n
-        self.s_values= s_values
-        self.no_deduplication = no_deduplication
-        self.prompt_limit = prompt_limit
+        self.termination_config = termination_config
+        self.iteration_limit = termination_config.iteration_limit if termination_config else 400_000
         self.found_optimal_solution = False
-        self.optimal_solution_programs = optimal_solution_programs
+        self.optimal_solution_programs = termination_config.optimal_solution_programs if termination_config else 20_000
         self.prompts_since_optimal = 0
-        self.target_signatures=target_signatures
-        self.max_drain_time = max_drain_time
-        self._prompt_limit_reached = False
-        self._drain_start_time = None
+        self.target_signatures = termination_config.target_solutions if termination_config else None
+        self._iteration_limit_reached = False
 
-        self.show_eval_scores = show_eval_scores
-        self.display_mode = display_mode
         self.best_known_solutions = best_known_solutions or {}
-        self.absolute_label = absolute_label
-        self.relative_label = relative_label
-        self.q = q
-
-        if self.display_mode == "relative" and not self.best_known_solutions:
-            logger.warning("display_mode='relative' requires best_known_solutions - falling back to 'absolute'")
-            self.display_mode = "absolute"
 
         self.cumulative_evaluator_cpu_time = 0.0
         self.cumulative_sampler_gpu_time = 0.0
@@ -350,15 +227,23 @@ class ProgramsDatabase:
         # Model parameters for FLOP estimation (2N FLOPs per token where N = params)
         self.model_params_billions = sampler_config.model_params_billions if sampler_config and hasattr(sampler_config, 'model_params_billions') else None
 
-        self.duplicate_prompts=0
-        self.total_prompts=0 # equals total processed messages as each message stored triggers a prompt
+        self.duplicate_prompts = 0
+        self.iterations = 0             # Number of evolutionary cycles completed (prompt, sample, evaluate, store)
         self.total_stored_programs = 0
         self.version_mismatch_discarded = 0
-        self.duplicates_discarded=0
+        self.duplicates_discarded = 0
         self.execution_failed = 0
-        self.next_sampler_id = 0  # Counter for unique sampler IDs (saved to checkpoint for reproducibility)
+        self.next_sampler_id = 0        # Unique ID for each sampler, used as random seed for reproducibility
 
-        # Evolutionary lineage tracking (optional - can be disabled via config)
+        # Parallel vs sequential: tracks if database changed between consecutive prompt generations
+        # - Parallel: same version as previous prompt, no new data, prompts use same few-shot examples
+        # - Sequential: version increased, new programs stored, prompt benefits from recent results
+        self.database_version = 0       # Increments on each program store
+        self.last_prompt_version = 0    # Version when previous prompt was generated
+        self.parallel_prompts = 0       # Prompts generated from same database state as previous
+        self.sequential_prompts = 0     # Prompts that benefited from new stored programs
+
+        # Evolutionary lineage tracking (optional, can be disabled via config)
         self.save_lineage = config.save_lineage if hasattr(config, 'save_lineage') else False
         self.next_program_id = 1  # Counter for assigning unique program IDs
         self.lineage_log = [] if self.save_lineage else None  # Only initialize if enabled
@@ -369,16 +254,17 @@ class ProgramsDatabase:
         self._island_locks = None
         self._locks_initialized = False
 
-        # Template-based prompt system
+        # Prompt building
         self.evaluator_config = evaluator_config
-        self.prompt_config = prompt_config
-        self._template_str = None
-        self._placeholder_contents = None
-        self._function_args = None
-        self._inout_spec = None
-        self._function_header_template = None
-        self._template_loaded = False
-        self._logged_initial_prompt = False
+        self.prompt_spec = prompt_spec
+
+        # ReEvo reflection state
+        initial_reflection = getattr(prompt_spec, 'initial_reflection', '') or ''
+        self.reevo_state = {
+            "prior_reflection": initial_reflection,  # Current long-term reflection
+            "new_reflections": [],  # Accumulated short-term reflections from crossover
+        }
+        self._pending_reflection_type = {}  # {(island_id, version): "short_term" | "long_term"}
 
         for _ in range(config.num_islands):
             island = {}
@@ -388,115 +274,22 @@ class ProgramsDatabase:
             island['hash_set'] = set()  # O(1) deduplication lookup
             self._islands.append(island)
 
-        # Store W&B config for later initialization (defer to avoid blocking)
-        # IMPORTANT: Initialize these BEFORE loading checkpoint so checkpoint values aren't overwritten
+        # Store W&B config for later initialization 
         self.wandb_enabled = False
         self.wandb_config = wandb_config
         self.wandb_run_name = run_name  # Use the provided run_name (may be auto-generated)
         self.wandb_run_id = None  # Will be set after wandb.init or loaded from checkpoint
 
-        # Load checkpoint if provided (this may overwrite wandb_run_id)
+        # Load checkpoint if provided 
         self.load_checkpoint_file(checkpoint_file)
-        # Build comprehensive config for W&B
-        self.wandb_init_config = {
-            # ProgramsDatabase config
-            "num_islands": config.num_islands,
-            "fewshot_num_examples": prompt_config.fewshot_num_examples if prompt_config else 2,
-            "reset_period": config.reset_period,
-            "reset_programs": config.reset_programs,
-            "cluster_sampling_temperature_init": config.cluster_sampling_temperature_init,
-            "cluster_sampling_temperature_period": config.cluster_sampling_temperature_period,
-            "no_deduplication": config.no_deduplication,
-            # Evaluator config
-            "mode": mode,
-            "start_n": str(start_n),
-            "end_n": str(end_n),
-            "s_values": str(s_values),
-            "q": q,
-            # Prompt config
-            "show_eval_scores": show_eval_scores,
-            "display_mode": display_mode,
-            # Limits
-            "prompt_limit": prompt_limit,
-            "optimal_solution_programs": optimal_solution_programs,
-            "target_signatures": str(target_signatures) if target_signatures else None,
-        }
 
-        # Add evaluator config if provided
-        if evaluator_config:
-            self.wandb_init_config.update({
-                "timeout": evaluator_config.timeout,
-                "max_workers": evaluator_config.max_workers,
-            })
-            # Log evaluation script content (helpers available to LLM-generated code)
-            eval_script_path = getattr(evaluator_config, 'evaluation_script_path', None)
-            if eval_script_path:
-                try:
-                    with open(eval_script_path, 'r') as f:
-                        self.wandb_init_config["evaluation_script"] = f.read()
-                    self.wandb_init_config["evaluation_script_path"] = eval_script_path
-                except Exception as e:
-                    logger.warning(f"Failed to read evaluation script for W&B logging: {e}")
-
-        # Add sampler config if provided
-        if sampler_config:
-            self.wandb_init_config.update({
-                "samples_per_prompt": sampler_config.samples_per_prompt,
-                "temperature": sampler_config.temperature,
-                "temperature_period": sampler_config.temperature_period,
-                "max_new_tokens": sampler_config.max_new_tokens,
-                "top_p": sampler_config.top_p,
-                "repetition_penalty": sampler_config.repetition_penalty,
-                "model": sampler_config.model,
-                "prompts_per_batch_sampler": sampler_config.prompts_per_batch,
-                "model_params_billions": getattr(sampler_config, 'model_params_billions', None),
-            })
+        # Build W&B config
+        self.wandb_init_config = wandb_logging.build_wandb_init_config(
+            config, prompt_spec, evaluator_config, sampler_config, termination_config
+        )
 
         self._wandb_initialized = False
-
-        # Load template system (once at init)
-        self._load_template_system()
-
-    def _load_template_system(self):
-        """Load template and placeholder contents once at init."""
-        if self._template_loaded or self.prompt_config is None:
-            return
-
-        try:
-            from pathlib import Path
-
-            # Load template
-            self._template_str = specification_loader.load_template(self.prompt_config.template_path)
-
-            # Load placeholder contents (files and directories)
-            self._placeholder_contents = specification_loader.load_placeholder_contents(
-                self.prompt_config.placeholders
-            )
-
-            # Extract function signature from initial function
-            initial_func_path = next(Path(self.evaluator_config.initial_functions_dir).glob("*.txt"))
-            self._function_args, self._return_type = specification_loader.extract_function_signature(str(initial_func_path))
-
-            # Load inout_spec template from components if provided, otherwise empty
-            inout_spec_path = self.prompt_config.placeholders.get("inout_spec")
-            if inout_spec_path and Path(inout_spec_path).exists():
-                inout_spec_template = Path(inout_spec_path).read_text().strip()
-                self._inout_spec = inout_spec_template.format(
-                    function_args=self._function_args,
-                    return_type=self._return_type
-                )
-            else:
-                self._inout_spec = ""
-
-            # Pre-compute function_header template ({version} and {prev_version} replaced per-prompt)
-            self._function_header_template = f"def {self._function_to_evolve}_v{{version}}({self._function_args}) -> {self._return_type}:\n    \"\"\"Improved version of `{self._function_to_evolve}_v{{prev_version}}`.\"\"\""
-
-            self._template_loaded = True
-            logger.info(f"Loaded template system: template={self.prompt_config.template_path}, args={self._function_args}")
-
-        except Exception as e:
-            logger.error(f"Failed to load template system: {e}")
-            self._template_loaded = True  # Prevent retry
+        self._logged_initial_prompt = False
 
     def load_checkpoint_file(self, checkpoint_file: str):
         logger.info(f"Checkpoint file is {checkpoint_file}")
@@ -505,184 +298,50 @@ class ProgramsDatabase:
         else:
             return
 
-    def serialize_checkpoint(self) -> dict:
-        """Serializes the necessary state of the database for checkpointing."""
-        return checkpoint_module.serialize_checkpoint(self)
-
-    async def periodic_checkpoint(self):
-        """Periodically save checkpoints."""
-        await checkpoint_module.periodic_checkpoint(self)
-
-
-    def _compute_wandb_metrics(self) -> dict:
-        """Compute metrics for Weights & Biases logging."""
-        return wandb_logging.compute_wandb_metrics(self)
-
-    def _get_program_by_id(self, program_id: int):
-        """Find a program by its ID across all islands."""
-        return wandb_logging.get_program_by_id(self, program_id)
-
-    def _trace_lineage(self, program_id: int, max_depth: int = 100):
-        """Trace the full evolutionary lineage of a program."""
-        return wandb_logging.trace_lineage(self, program_id, max_depth)
-
-    def _generate_lineage_html(self, program_id: int, island_id: int):
-        """Generate an HTML visualization of a program's evolutionary lineage."""
-        return wandb_logging.generate_lineage_html(self, program_id, island_id)
-
-    def _generate_lineage_tree_diagram(self, program_id: int, island_id: int):
-        """Generate a simple tree diagram showing the genealogy structure."""
-        return wandb_logging.generate_lineage_tree_diagram(self, program_id, island_id)
-
-    def _log_top_programs_table(self):
-        """Log a W&B table with the best program from each island and their lineage."""
-        wandb_logging.log_top_programs_table(self)
-
-    async def _initialize_wandb(self):
-        """Initialize W&B asynchronously (called once on first logging attempt)."""
-        await wandb_logging.initialize_wandb(self)
-
-    async def periodic_wandb_logging(self):
-        """Periodically log metrics to Weights & Biases."""
-        await wandb_logging.periodic_wandb_logging(self)
-
-    def finish_wandb_run(self):
-        """Explicitly finish the W&B run when the experiment is truly complete."""
-        wandb_logging.finish_wandb_run(self)
-
-    # Properties for backward compatibility - delegate to connection manager
-    @property
-    def connection(self):
-        return self._conn_manager.connection
-
-    @connection.setter
-    def connection(self, value):
-        self._conn_manager.connection = value
-
-    @property
-    def channel(self):
-        return self._conn_manager.channel
-
-    @channel.setter
-    def channel(self, value):
-        self._conn_manager.channel = value
-
-    @property
-    def database_queue(self):
-        return self._conn_manager.get_queue("database_queue")
-
-    @database_queue.setter
-    def database_queue(self, value):
-        self._conn_manager.queues["database_queue"] = value
-
-    @property
-    def sampler_queue(self):
-        return self._conn_manager.get_queue("sampler_queue")
-
-    @sampler_queue.setter
-    def sampler_queue(self, value):
-        self._conn_manager.queues["sampler_queue"] = value
-
-    @property
-    def evaluator_queue(self):
-        return self._conn_manager.get_queue("evaluator_queue")
-
-    @evaluator_queue.setter
-    def evaluator_queue(self, value):
-        self._conn_manager.queues["evaluator_queue"] = value
-
-    async def _close_connection(self):
-        """Delegate to shared connection manager."""
-        await self._conn_manager.close()
-
-    async def _ensure_connection(self):
-        """Delegate to shared connection manager."""
-        return await self._conn_manager.ensure_connection()
-
     async def consume_and_process(self) -> None:
-        """Main consume loop with automatic connection recovery.
-
-        Uses the same reconnection pattern as Sampler and Evaluator for consistency.
-        """
-        batch_size = 10
-        batch_timeout = 0.01
-        reconnect_delay = 5.0
-        max_reconnect_delay = 60.0
-
+        """Main consume loop with automatic connection recovery."""
         logger.info("ProgramsDatabase: consume_and_process started")
 
-        async def _consume_loop():
-            """Inner consume loop - processes messages from the queue."""
-            await self.channel.set_qos(prefetch_count=batch_size)
-
-            async with self.database_queue.iterator() as stream:
-                batch = []
-                batch_start_time = time.time()
-
-                async for message in stream:
-                    logger.debug(f"Received message: {message.body.decode()}")
-                    batch.append(message)
-                    current_time = time.time()
-
-                    # Check if the batch should be processed
-                    if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
-                        await self.process_batch(batch)
-                        batch.clear()
-                        batch_start_time = current_time
-
-        # Main reconnection loop
         while True:
             try:
-                # Ensure connection is alive (reconnect if needed)
-                connected = await self._ensure_connection()
-                if not connected:
-                    logger.error(f"ProgramsDatabase: Failed to establish connection, retrying in {reconnect_delay:.1f}s...")
-                    await asyncio.sleep(reconnect_delay)
-                    reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
-                    continue
+                # Connect with retry (handles exponential backoff internally)
+                if not await self._conn.connect_with_retry():
+                    break  # Shutdown requested
 
-                # Reset delay on successful connection
-                reconnect_delay = 5.0
-
-                # Run the consume loop
-                await _consume_loop()
-
-                # If consume loop exits normally, break
-                break
+                await self._consume_loop()
+                break  # Normal exit
 
             except asyncio.CancelledError:
                 logger.info("ProgramsDatabase: Cancelled, exiting...")
                 break
 
-            except (aio_pika.exceptions.AMQPConnectionError,
-                    aio_pika.exceptions.ChannelClosed,
-                    aio_pika.exceptions.ChannelInvalidStateError,
-                    ConnectionError,
-                    OSError) as e:
-                # Connection lost - attempt to reconnect
-                logger.warning(
-                    f"ProgramsDatabase: Connection error: {e}. "
-                    f"Reconnecting in {reconnect_delay:.1f}s..."
-                )
-                await self._close_connection()
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
-                continue
-
             except Exception as e:
-                # Unexpected error - log and retry
-                logger.error(
-                    f"ProgramsDatabase: Unexpected error: {e}. "
-                    f"Reconnecting in {reconnect_delay:.1f}s...",
-                    exc_info=True
-                )
-                await self._close_connection()
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
-                continue
+                logger.warning(f"ProgramsDatabase: {type(e).__name__}: {e}. Reconnecting...")
+                await self._conn.close()
+
+    async def _consume_loop(self):
+        """Inner consume loop, processes messages from the queue."""
+        batch_size = self._config.batch_size
+        batch_timeout = self._config.batch_timeout
+
+        await self._conn.channel.set_qos(prefetch_count=batch_size)
+
+        async with self._conn.get_queue("database_queue").iterator() as stream:
+            batch = []
+            batch_start_time = time.time()
+
+            async for message in stream:
+                logger.debug(f"Received message: {message.body.decode()}")
+                batch.append(message)
+                current_time = time.time()
+
+                if len(batch) >= batch_size or (current_time - batch_start_time) >= batch_timeout:
+                    await self.process_batch(batch)
+                    batch.clear()
+                    batch_start_time = current_time
 
 
-    #@async_time_execution
+    @async_time_execution("Database")
     async def process_batch(self, batch: list[aio_pika.IncomingMessage]):
         try:
             tasks = [self.process_message(message) for message in batch]
@@ -697,7 +356,7 @@ class ProgramsDatabase:
 
     async def process_message(self, message: aio_pika.IncomingMessage):
         try:
-            self.total_prompts += 1
+            self.iterations += 1
             async with message.process():
                 data = json.loads(message.body.decode())
 
@@ -711,20 +370,30 @@ class ProgramsDatabase:
                     self.found_optimal_solution = True  # Mark as found
                     self.prompts_since_optimal = 0  # Reset counter for additional programs
 
-
                 self.cumulative_evaluator_cpu_time += evaluator_cpu_time
                 self.cumulative_sampler_gpu_time += sampler_gpu_time
-
-                self.cumulative_input_tokens  += input_tokens
+                self.cumulative_input_tokens += input_tokens
                 self.cumulative_output_tokens += output_tokens
 
-                logger.debug(f"Updated cumulative CPU time: {self.cumulative_evaluator_cpu_time:.2f} seconds")
-                logger.debug(f"Updated cumulative GPU time: {self.cumulative_sampler_gpu_time:.2f} seconds")
+                # Accumulate ReEvo reflections
+                reflection_output = data.get("reflection_output")
+                if reflection_output:
+                    island_id = data.get("island_id")
+                    expected_version = data.get("expected_version")
+                    key = (island_id, expected_version)
+                    reflection_type = self._pending_reflection_type.pop(key, None)
+
+                    if reflection_type == "short_term":
+                        self.reevo_state["new_reflections"].append(reflection_output)
+                        logger.debug(f"Accumulated short-term reflection (total: {len(self.reevo_state['new_reflections'])})")
+                    elif reflection_type == "long_term":
+                        self.reevo_state["prior_reflection"] = reflection_output
+                        self.reevo_state["new_reflections"] = []
+                        logger.debug(f"Updated long-term reflection, cleared {len(self.reevo_state['new_reflections'])} short-term reflections")
 
                 if data["new_function"] == "return":
                     await self.get_prompt()
                     self.execution_failed += 1
-                    logger.debug("Received 'return' for new_function. Skipping registration.")
                     return
 
                 try:
@@ -735,10 +404,10 @@ class ProgramsDatabase:
                 except Exception as e:
                     logger.error(f"Failed to convert program to Function instance: {e}")
                     await self.get_prompt()
+                    return
 
                 island_id = data.get("island_id")
                 parent_ids = data.get("parent_ids", [])  # Extract parent IDs for lineage tracking
-
 
                 if island_id is None:
                     # Register the program to all islands
@@ -767,41 +436,25 @@ class ProgramsDatabase:
         # Ensure locks are initialized before use
         self._ensure_locks_initialized()
 
-        # Check if reset period is defined
-        if self._config.reset_period is not None:
-            # Only check the timing if reset_period is not None
-            if (time.time() - self._last_reset_time > self._config.reset_period):
-                all_islands_sufficiently_populated = all(island['num_programs'] >= self._config.reset_programs for island in self._islands)
-
-                if all_islands_sufficiently_populated:
-                    logger.info(f"Reset period exceeded and islands have {self._config.reset_programs} or more programs, resetting islands.")
-                    self._last_reset_time = time.time()
-                    try:
-                        await self.reset_islands()
-                    except Exception as e:
-                        logger.error(f"Error in reset islands: {e}")
-                else:
-                    logger.warning("Reset period exceeded, but not all islands have enough programs. Skipping reset for now.")
-        else:
-            # If reset_period is None - only check population
-            all_islands_sufficiently_populated = all(island['num_programs'] >= self._config.reset_programs for island in self._islands)
-            if all_islands_sufficiently_populated:
-                logger.info("Reset period not defined, but all islands have enough programs. Proceeding to reset islands.")
-                try:
-                    await self.reset_islands()
-                except Exception as e:
-                    logger.error(f"Error in reset islands: {e}")
-            else:
-                logger.debug("Reset period not defined, but not all islands have enough programs. Skipping reset for now.")
+        # Check if all islands have enough programs for reset
+        all_islands_sufficiently_populated = all(
+            island['num_programs'] >= self._config.reset_programs
+            for island in self._islands
+        )
+        if all_islands_sufficiently_populated:
+            logger.info(f"All islands have {self._config.reset_programs}+ programs. Resetting islands.")
+            try:
+                await self.reset_islands()
+            except Exception as e:
+                logger.error(f"Error in reset islands: {e}")
 
         # Acquire lock for this island to prevent race conditions during deduplication check and registration
         async with self._island_locks[island_id]:
             # Proceed with program registration logic
             island = self._islands[island_id]
 
-            if not self.no_deduplication and self.function_body_exists(island, hash_value):
+            if not self._config.no_deduplication and self.function_body_exists(island, hash_value):
                 self.duplicates_discarded += 1
-                logger.debug("Program with identical body already exists in island. Skipping registration.")
                 return
 
             if expected_version is not None:
@@ -815,33 +468,20 @@ class ProgramsDatabase:
 
 
     def _register_program_in_island(self, program: code_manipulation.Function, island_id: int, scores_per_test: ScoresPerTest, hash_value: int = None, parent_ids: list[int] = None):
-        """Register a program in an island and assign evolutionary lineage.
+        """Register a program in an island with lineage tracking.
 
-        Args:
-            program: The Function object to register
-            island_id: Target island ID
-            scores_per_test: Dictionary of test scores
-            hash_value: Hash of program's output for deduplication
-            parent_ids: List of program IDs that were in the few-shot prompt (default: [])
-
-        Lineage Assignment:
-        ------------------
-        Each registered program receives:
-        - program_id: Unique auto-incrementing identifier
-        - parent_ids: Programs from the few-shot prompt that generated this program
-        - generation: max(parent_generations) + 1 - or 0 if no parents (baseline)
-        - timestamp: Current time
-
-        The lineage information is logged to self.lineage_log for tracking evolutionary trajectories.
+        Assigns program_id, parent_ids, generation (max parent gen + 1), and timestamp.
+        Logs to self.lineage_log if lineage tracking is enabled.
         """
         self.total_stored_programs += 1
+        self.database_version += 1  # Track state changes for parallel vs sequential analysis
         island = self._islands[island_id]
         clusters = island['clusters']
         signature = self._get_signature(scores_per_test)
         program.hash_value = hash_value
 
         # Calculate score once and reuse
-        score = _reduce_score(scores_per_test, self.mode, self.start_n, self.end_n, self.s_values, self.best_known_solutions)
+        score = _reduce_score(scores_per_test, self.evaluator_config.mode, self.best_known_solutions)
 
         # Assign lineage tracking information
         if parent_ids is None:
@@ -851,7 +491,7 @@ class ProgramsDatabase:
         self.next_program_id += 1
         program.parent_ids = parent_ids
 
-        # Calculate generation: max of parent generations + 1 - or 0 if no parents
+        # Calculate generation: max of parent generations + 1, or 0 if no parents
         if parent_ids:
             # O(1) lookup instead of scanning all programs
             max_parent_generation = max(
@@ -907,7 +547,7 @@ class ProgramsDatabase:
                 self._best_score_per_island[island_id] = score
                 logger.info(f'Best score of island {island_id} increased to {score} with program {program} and scores {scores_per_test}')
 
-            # If the score is equal to the best score - check the program signature
+            # If the score equals the best score, check the program signature
             elif score == self._best_score_per_island[island_id]:
                 # Get the current best program's signature
                 current_best_signature = self._get_signature(self._best_scores_per_test_per_island[island_id])
@@ -923,28 +563,19 @@ class ProgramsDatabase:
             logger.error(f"Could not update best score: {e}")
 
     async def reset_islands(self):
-        """Reset the weakest half of islands with founders from the best islands.
+        """Reset the weakest half of islands, seeding each with a founder from a surviving island.
 
-        This method maintains diversity by periodically resetting underperforming islands.
-        The weakest islands (by best score) are cleared - and each is seeded with the best
-        program from a randomly selected surviving island.
-
-        Lineage Tracking During Resets:
-        --------------------------------
-        Founder programs maintain evolutionary continuity across island boundaries.
-        When a program is copied as a founder to a reset island - it receives a new program_id
-        but its parent_ids contains the original program's program_id. This creates an
-        evolutionary link showing the program was "migrated" from another island rather than
-        evolved from a prompt.
+        Maintains diversity by clearing underperforming islands and migrating top programs.
+        Founder programs get new program_id but keep parent link to original for lineage tracking.
         """
         # Ensure locks are initialized before resetting
         self._ensure_locks_initialized()
 
         try:
-            await self.sampler_queue.purge()
-            await self.evaluator_queue.purge()
+            await self._conn.get_queue("sampler_queue").purge()
+            await self._conn.get_queue("evaluator_queue").purge()
         except Exception as e:
-            logger.error(f"Could not remove all messages from the queue: {e}")
+            logger.error(f"Could not purge queues: {e}")
         try:
             indices_sorted_by_score = np.argsort(self._best_score_per_island)
             num_islands_to_reset = self._config.num_islands // 2
@@ -987,242 +618,204 @@ class ProgramsDatabase:
             self.prompts_since_optimal += 1  # Track additional programs after the optimal solution
             logger.info(f"Functions processed since optimal: {self.prompts_since_optimal}")
 
-        elif self.total_prompts >= self.prompt_limit:
-            if not self._prompt_limit_reached:
-                self._prompt_limit_reached = True
-                self._drain_start_time = time.time()
-                await self._handle_prompt_limit_reached()
-            return
+        elif self.iterations >= self.iteration_limit:
+            if not self._iteration_limit_reached:
+                self._iteration_limit_reached = True
+                self._save_and_shutdown(f"Reached {self.iteration_limit} iterations.")
 
-        logger.debug(f"len(self._islands) {len(self._islands)}")
+        # Track parallel vs sequential: did database change since last prompt?
+        if self.database_version == self.last_prompt_version:
+            self.parallel_prompts += 1
+        else:
+            self.sequential_prompts += 1
+            self.last_prompt_version = self.database_version
+
         island_id = np.random.randint(len(self._islands))
-        logger.debug(f"Island id is {island_id}")
         island = self._islands[island_id]
 
-        code, flag_duplicate, version_generated, parent_ids = self._generate_prompt_for_island(island)
+        result = self._generate_prompt_for_island(island)
         expected_version = island['version']
 
         # Log initial prompt to W&B (once)
-        if not self._logged_initial_prompt and code:
-            logger.info(f"Initial prompt:\n{'='*80}\n{code}\n{'='*80}")
+        if not self._logged_initial_prompt:
+            logger.info(f"Initial prompt:\n{'='*80}\n{result['generation_prompt']}\n{'='*80}")
             if self.wandb_enabled and self._wandb_initialized and wandb.run:
                 try:
-                    wandb.run.summary["initial_prompt"] = code
+                    wandb.run.summary["initial_prompt"] = result["generation_prompt"]
                 except Exception as e:
                     logger.warning(f"Failed to log initial prompt to W&B: {e}")
             self._logged_initial_prompt = True
 
-        prompt = Prompt(code, version_generated, island_id, expected_version)
+        prompt = Prompt(
+            generation_prompt=result["generation_prompt"],
+            version_generated=result["version_generated"],
+            island_id=island_id,
+            expected_version=expected_version,
+            reflection_prompt=result["reflection_prompt"],
+            samples_per_prompt=result["samples_per_prompt"],
+            system_message=result.get("system_message"),
+            reflection_system_message=result.get("reflection_system_message"),
+        )
+
+        # Track reflection type for ReEvo (to know how to accumulate when result comes back)
+        template_name = result.get("template_name")
+        if template_name in ("crossover",):
+            self._pending_reflection_type[(island_id, expected_version)] = "short_term"
+        elif template_name in ("mutation",):
+            self._pending_reflection_type[(island_id, expected_version)] = "long_term"
+
         message_data = {
             "prompt": prompt.to_dict(),
             "total_registered_programs": island['num_programs'],
-            "flag":flag_duplicate,
-            "parent_ids": parent_ids  # Include parent IDs for lineage tracking
+            "flag": result["flag_duplicate"],  # Signals duplicate few-shot examples for debugging
+            "parent_ids": result["parent_ids"],
         }
 
         try:
             serialized_message = json.dumps(message_data)
-            await self.channel.default_exchange.publish(
+            await self._conn.channel.default_exchange.publish(
                 aio_pika.Message(body=serialized_message.encode()),
                 routing_key='sampler_queue'
             )
-            logger.debug("Database: Successfully published prompt to sampler with total registered programs.")
         except Exception as e:
 
             logger.error(f"Database: Error during prompt preparation or message sending: {e}")
 
 
-    def _generate_prompt_for_island(self, island, multiple=False) -> tuple[str | None, int, int, list[int]]:
-        """Generate a prompt for an island.
+    def _generate_prompt_for_island(self, island, multiple=False) -> dict:
+        """Generate a prompt by sampling programs from island clusters.
 
         Returns:
-            tuple: (prompt - flag_duplicate - version_generated - parent_ids)
+            dict with keys:
+                - generation_prompt: str | None
+                - reflection_prompt: str | None (ReEvo only)
+                - samples_per_prompt: int | None
+                - flag_duplicate: bool
+                - version_generated: int
+                - parent_ids: list[int]
         """
         clusters = island['clusters']
         signatures = list(clusters.keys())
-        fewshot_num_examples = self.prompt_config.fewshot_num_examples if self.prompt_config else 2
+
+        empty_result = {
+            "generation_prompt": None,
+            "reflection_prompt": None,
+            "samples_per_prompt": None,
+            "flag_duplicate": False,
+            "version_generated": 0,
+            "parent_ids": [],
+        }
+
         if not signatures:
-            logger.warning(f"No clusters found in island {island}. Skipping prompt generation.")
-            return None, False, 0, []
+            logger.warning("No clusters in island. Skipping prompt generation.")
+            return empty_result
 
-        def compute_valid_signatures_and_probabilities(signatures, exclude_signature=None):
-            """Helper function to compute valid signatures and probabilities."""
-            filtered_signatures = [s for s in signatures if s != exclude_signature] if exclude_signature else signatures
-            cluster_scores = np.array([clusters[s]['score'] for s in filtered_signatures])
-            period = self._config.cluster_sampling_temperature_period
-            temperature = self._config.cluster_sampling_temperature_init * (1 - (island['num_programs'] % period) / period)
-            while True:
-                try:
-                    probabilities = _softmax(cluster_scores, temperature)
-                    logger.debug(f"Probabilities are {probabilities}")
-                except Exception as e:
-                    logger.error(f"Cannot compute softmax: {e}")
-                    break
+        template_name, num_programs_needed = prompt_builder.select_template(
+            self.prompt_spec, state=self.reevo_state
+        )
+        # Get samples_per_prompt from template requirements (may be None)
+        template_req = self.prompt_spec.template_requirements.get(template_name)
+        samples_per_prompt = template_req.samples_per_prompt if template_req else None
 
-                valid_indices = np.where(probabilities > 1e-6)[0]
-                valid_probabilities = probabilities[valid_indices]
-                valid_signatures = [filtered_signatures[i] for i in valid_indices]
-                logger.debug(f"Valid sig are {valid_signatures}")
+        # Compute sampling probabilities with temperature-based softmax
+        valid_sigs, probs = self._compute_cluster_probabilities(island, signatures)
+        if not valid_sigs:
+            return empty_result
 
-                if len(valid_signatures) > 0:
-                    return valid_signatures, valid_probabilities
+        # Sample clusters (use all if fewer than needed)
+        num_to_sample = min(len(valid_sigs), num_programs_needed)
+        if num_to_sample < num_programs_needed:
+            logger.warning(f"Only {num_to_sample} cluster(s) available, need {num_programs_needed}. Using {num_to_sample} few-shot example(s).")
 
-                # Reduce temperature if no valid signatures are found
-                temperature *= 0.9
-                if temperature < 1e-6:
-                    logger.warning("Temperature reduced below threshold. Falling back to uniform sampling.")
-                    break
+        indices = np.random.choice(len(valid_sigs), size=num_to_sample, p=probs, replace=False)
+        selected_sigs = [valid_sigs[i] for i in indices]
 
-            # Fallback: uniform sampling
-            logger.warning("Using uniform sampling as fallback.")
-            valid_signatures = filtered_signatures
-            valid_probabilities = np.ones(len(filtered_signatures)) / len(filtered_signatures)
-            return valid_signatures, valid_probabilities
-
-        # Compute valid signatures and probabilities.
-        valid_signatures, valid_probabilities = compute_valid_signatures_and_probabilities(signatures)
+        # Sample one program from each selected cluster
         sampled_programs = []
-        sampled_signatures = set()
-        parent_ids = []  # Track parent program IDs
-        logger.debug(f"Length of valid sig: {len(valid_signatures)}")
-
-        # If only one valid signature is available - sample from it once.
-        if len(valid_signatures) == 1:
-            selected_signature = valid_signatures[0]
-            cluster = clusters[selected_signature]
-            cluster_programs = cluster['programs']
-            logger.debug(f"Selected signature: {selected_signature} with programs {cluster_programs}")
-            sampled_signatures.add(selected_signature)
-            if len(cluster_programs) >= 1:
-                program = self.sample_program(cluster)
-                scores = cluster.get('scores_per_test', {})
-                sampled_programs.append((program, scores))
-                # Track parent ID
-                if program.program_id is not None:
-                    parent_ids.append(program.program_id)
-                version_generated = 1
-                prompt, flag = self._generate_prompt(sampled_programs)
-                return prompt, flag, version_generated, parent_ids
-            else:
-                logger.warning("Single valid cluster has no programs. Skipping prompt generation.")
-                return None, False, 0, []
-
-        # If there are multiple valid signatures:
-        # Determine the number of clusters to sample.
-        if len(valid_signatures) >= fewshot_num_examples:
-            logger.debug("Sampling from multiple valid clusters.")
-            # Sample exactly fewshot_num_examples clusters without replacement.
-            cluster_indices = np.random.choice(
-                len(valid_signatures),
-                size=fewshot_num_examples,
-                p=valid_probabilities,
-                replace=False
-            )
-            sampled_signatures.update([valid_signatures[i] for i in cluster_indices])
-        else:
-            # If fewer than desired valid clusters are available - use all available ones.
-            logger.warning("Fewer valid clusters than fewshot_num_examples; using all available clusters.")
-            sampled_signatures.update(valid_signatures)
-            # Optionally - you could recalculate probabilities excluding these and sample additional ones if desired.
-
-        # Sample one program from each selected cluster.
-        for signature in sampled_signatures:
-            cluster = clusters[signature]
-            cluster_programs = cluster['programs']
-            if not cluster_programs:
-                logger.warning(f"Cluster {signature} has no programs. Skipping.")
+        parent_ids = []
+        for sig in selected_sigs:
+            cluster = clusters[sig]
+            if not cluster['programs']:
                 continue
             program = self.sample_program(cluster)
-            scores = cluster.get('scores_per_test', {})
-            sampled_programs.append((program, scores))
-            # Track parent ID
+            sampled_programs.append((program, cluster.get('scores_per_test', {})))
             if program.program_id is not None:
                 parent_ids.append(program.program_id)
 
-        # Sort sampled programs by the corresponding cluster's score.
-        sorted_programs = sorted(sampled_programs, key=lambda p: clusters[next(iter(sampled_signatures))]['score'])
-        version_generated = len(sorted_programs)
-        prompt, flag_duplicate = self._generate_prompt(sorted_programs)
-        return prompt, flag_duplicate, version_generated, parent_ids
+        if not sampled_programs:
+            return empty_result
 
-    def _format_scores(self, scores: dict) -> str:
-        """Format scores for inclusion in fewshot docstrings."""
-        return _format_scores_for_prompt(
-            scores,
-            self.display_mode,
-            self.best_known_solutions,
-            self.absolute_label,
-            self.relative_label
-        )
+        # Check for duplicate few-shot examples (same hash = low diversity)
+        flag_duplicate = False
+        if len(sampled_programs) == 2:
+            h0, h1 = sampled_programs[0][0].hash_value, sampled_programs[1][0].hash_value
+            if h0 is not None and h0 == h1:
+                flag_duplicate = True
+                self.duplicate_prompts += 1
 
-    def _generate_prompt(self, implementations_with_scores: Sequence[tuple]) -> str:
-        """Generate prompt using template system."""
-        if not self._template_loaded or self._template_str is None:
-            logger.error("Template system not loaded")
-            return None, False
+        result = {
+            "flag_duplicate": flag_duplicate,
+            "version_generated": len(sampled_programs),
+            "parent_ids": parent_ids,
+            "samples_per_prompt": samples_per_prompt,
+            "template_name": template_name,  # For ReEvo reflection tracking
+        }
 
-        implementations = [impl for impl, _ in implementations_with_scores]
-        scores_list = [scores for _, scores in implementations_with_scores]
+        # Build prompt(s) based on strategy
+        if self.prompt_spec.strategy == prompt_builder.PromptStrategy.REEVO:
+            # ReEvo: reflection + generation prompts
+            refl_prompt, gen_prompt = prompt_builder.build_reevo_prompts(
+                self.prompt_spec, template_name, sampled_programs, state=self.reevo_state
+            )
+            result["reflection_prompt"] = refl_prompt
+            result["generation_prompt"] = gen_prompt
+            result["system_message"] = self.prompt_spec.system_message
+            result["reflection_system_message"] = self.prompt_spec.reflector_system_message
+        else:
+            # FunSearch/EoH: single generation prompt
+            result["generation_prompt"] = prompt_builder.build_prompt(
+                self.prompt_spec, template_name, sampled_programs, state=self.reevo_state
+            )
+            result["reflection_prompt"] = None
+            result["system_message"] = self.prompt_spec.system_message
+            result["reflection_system_message"] = None
 
-        # Version functions for fewshot display
-        implementations = copy.deepcopy(implementations)
-        for i, impl in enumerate(implementations):
-            impl.name = f'{self._function_to_evolve}_v{i}'
-            if i > 0:
-                impl.docstring = f'Improved version of `{self._function_to_evolve}_v{i - 1}`. {{score}}'
+        return result
 
-        num_examples = len(implementations)
-        version = num_examples  # Next version after v0, v1, ... is vN where N = num_examples
+    def _compute_cluster_probabilities(self, island, signatures):
+        """Compute sampling probabilities for clusters using temperature-scaled softmax.
 
-        # Determine fewshot count (may be overridden by prompt_style)
-        fewshot_override = None
-        prompt = self._template_str
+        Temperature decays cyclically: high (explore) -> low (exploit) -> reset.
+        Filters out near-zero probabilities to avoid numerical issues in sampling.
+        """
+        if not signatures:
+            return [], np.array([])
 
-        # Fill static placeholders from pre-loaded contents
-        for name, (content, style_dict) in self._placeholder_contents.items():
-            if style_dict is not None:
-                # Directory: sample from in-memory dict
-                _, (content, fewshot_override) = random.choice(list(style_dict.items()))
-            # For evaluation_script: strip priority function and wrap in code fences
-            if name == "evaluation_script" and content:
-                content = specification_loader.strip_function_from_code(content, "priority")
-                content = f"```python\n{content}\n```"
-            prompt = prompt.replace(f"{{{name}}}", content or "")
+        clusters = island['clusters']
+        scores = np.array([clusters[s]['score'] for s in signatures])
 
-        # Determine actual fewshot count
-        num_fewshot = fewshot_override if fewshot_override is not None else self.prompt_config.fewshot_num_examples
-        fewshot_programs = list(zip(implementations[:num_fewshot], scores_list[:num_fewshot], strict=True))
+        # Temperature decays from init to ~0 over each period, then resets
+        period = self._config.cluster_sampling_temperature_period
+        progress = (island['num_programs'] % period) / period
+        temp = self._config.cluster_sampling_temperature_init * (1 - progress)
+        temp = max(temp, 0.01)  # Floor to avoid numerical issues
 
-        # Build fewshot examples (handles score display internally)
-        fewshot_examples = specification_loader.build_fewshot_examples(
-            fewshot_programs,
-            self.prompt_config,
-            self._format_scores if self.prompt_config.show_eval_scores else None
-        )
+        try:
+            probs = _softmax(scores, temp)
+        except Exception as e:
+            logger.warning(f"Softmax failed: {e}, using uniform")
+            return signatures, np.ones(len(signatures)) / len(signatures)
 
-        # Fill reserved dynamic placeholders
-        prompt = prompt.replace("{fewshot_examples}", fewshot_examples)
-        prompt = prompt.replace("{num_examples}", str(num_fewshot))
-        prompt = prompt.replace("{version}", str(version))
-        function_header = self._function_header_template.replace("{version}", str(version)).replace("{prev_version}", str(version - 1))
-        prompt = prompt.replace("{function_header}", function_header)
-        prompt = prompt.replace("{inout_spec}", self._inout_spec)
+        # Filter out near-zero probabilities
+        valid_mask = probs > 1e-6
+        if not valid_mask.any():
+            return signatures, np.ones(len(signatures)) / len(signatures)
 
-        # Merge adjacent docstrings: """\n""" or """ """ becomes single continuation
-        # Match """, optional whitespace/newlines, then """ and merge them
-        prompt = re.sub(r'"""\s*"""', '', prompt)
+        valid_sigs = [s for s, m in zip(signatures, valid_mask) if m]
+        valid_probs = probs[valid_mask]
+        valid_probs /= valid_probs.sum()  # Renormalize
 
-        # Clean up multiple consecutive blank lines from empty placeholders
-        prompt = re.sub(r'\n{3,}', '\n\n', prompt)
-
-        # Check for duplicates
-        duplicate_prompt = False
-        if len(implementations) == 2 and implementations[0].hash_value == implementations[1].hash_value:
-            duplicate_prompt = True
-            self.duplicate_prompts += 1
-
-        logger.debug(f"Template prompt constructed: {len(prompt)} characters")
-        return prompt.rstrip('\n'), duplicate_prompt
+        return valid_sigs, valid_probs
 
     def function_body_exists(self, island, hash_value: int) -> bool:
         """O(1) check if a program with this hash exists in the island."""
@@ -1232,11 +825,8 @@ class ProgramsDatabase:
     def _get_signature(self, scores_per_test):
         """Get signature for tie-breaking when aggregate scores are equal.
 
-        Returns tuple of scores sorted by keys in DESCENDING order (largest n first).
+        Returns tuple of scores sorted by keys in descending order (largest n first).
         This prioritizes harder test cases (larger n) in tie-breaking.
-
-        Example: For keys (6,1,2), (7,1,2), ..., (11,1,2)
-        Returns: (score_n11, score_n10, score_n9, score_n8, score_n7, score_n6)
         """
         if all(isinstance(k, str) for k in scores_per_test.keys()):
             scores_per_test = {ast.literal_eval(k): v for k, v in scores_per_test.items()}
@@ -1250,7 +840,7 @@ class ProgramsDatabase:
         return tuple(ensure_hashable(scores_per_test[k]) for k in sorted(scores_per_test.keys(), reverse=True))
 
     def sample_program(self, cluster_data, temperature=1.0):
-        """Samples a program from the cluster - favoring shorter programs."""
+        """Samples a program from the cluster, favoring shorter programs."""
         programs = cluster_data['programs']
         if not programs:
             raise ValueError("Cluster contains no programs to sample.")
@@ -1272,62 +862,3 @@ class ProgramsDatabase:
         checkpoint_module.save_checkpoint(self)
         os.kill(os.getpid(), signal.SIGTERM)
 
-    async def _handle_prompt_limit_reached(self):
-        """Handle prompt limit: purge queues and either shutdown or start drain watcher."""
-        if self.max_drain_time == 0:
-            logger.info(f"Reached {self.prompt_limit} prompts (max_drain_time=0). Purging all queues...")
-            try:
-                await self.sampler_queue.purge()
-                await self.evaluator_queue.purge()
-            except Exception as e:
-                logger.error(f"Failed to purge queues: {e}")
-            self._save_and_shutdown("All queues purged.")
-        else:
-            logger.info(f"Reached {self.prompt_limit} prompts. Purging sampler queue, draining evaluators (max_drain_time={self.max_drain_time}s)...")
-            try:
-                await self.sampler_queue.purge()
-            except Exception as e:
-                logger.error(f"Failed to purge sampler queue: {e}")
-            asyncio.create_task(self._watch_for_drain())
-
-    async def _watch_for_drain(self):
-        """Monitor queues and trigger shutdown when drained or timeout expires."""
-        empty_count = 0
-        while True:
-            await asyncio.sleep(10)
-            elapsed = time.time() - self._drain_start_time
-
-            if self.max_drain_time > 0 and elapsed >= self.max_drain_time:
-                self._save_and_shutdown(f"Drain timeout ({self.max_drain_time}s) reached.")
-                return
-
-            try:
-                if await self._check_queues_empty():
-                    empty_count += 1
-                    logger.info(f"All queues empty ({empty_count}/3) after {elapsed:.1f}s")
-                    if empty_count >= 3:
-                        self._save_and_shutdown(f"All queues drained after {elapsed:.1f}s.")
-                        return
-                else:
-                    empty_count = 0
-            except Exception as e:
-                logger.error(f"Drain watcher error: {e}")
-                empty_count = 0
-
-    async def _check_queues_empty(self) -> bool:
-        """Check if all queues are empty via RabbitMQ management API."""
-        try:
-            cfg = self._conn_manager.config
-            vhost = '%2F' if not cfg.vhost else cfg.vhost
-            timeout = aiohttp.ClientTimeout(total=5)
-
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                for queue_name in ['sampler_queue', 'evaluator_queue', 'database_queue']:
-                    url = f"http://{cfg.host}:{cfg.management_port}/api/queues/{vhost}/{queue_name}"
-                    async with session.get(url, auth=aiohttp.BasicAuth(cfg.username, cfg.password)) as resp:
-                        if resp.status == 200 and (await resp.json()).get('messages', 0) > 0:
-                            return False
-            return True
-        except Exception as e:
-            logger.error(f"Error checking queue status: {e}")
-            return False

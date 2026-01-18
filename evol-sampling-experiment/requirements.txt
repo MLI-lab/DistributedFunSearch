@@ -1,0 +1,12 @@
+# Core dependencies
+torch>=2.0.0
+transformers>=4.35.0
+datasets>=2.14.0
+sympy>=1.12
+tqdm>=4.65.0
+
+# Fast inference (optional but recommended)
+vllm>=0.3.0
+
+# For reproducibility
+numpy>=1.24.0

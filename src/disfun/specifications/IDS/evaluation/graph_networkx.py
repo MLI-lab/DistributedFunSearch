@@ -37,10 +37,6 @@ def str2int(s): return int(s, 2)
 def int2str(n, length): return format(n, f'0{length}b')
 def hamming_distance(s1, s2): return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
-# Global graph cache
-_GRAPH_CACHE = {}
-
-
 def load_graph(graph_db_path):
     """Load graph from LMDB database into NetworkX Graph."""
 
@@ -92,29 +88,7 @@ def evaluate(params, graph_dir):
 def solve(n, s, q, graph_dir):
     """Find a large independent set using NetworkX (slower but simpler for LLMs)."""
     path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
-    cache_key = (s, n)
-
-    cache_enabled = globals().get('CACHE_GRAPHS', False)
-    cache_limit_gb = globals().get('CACHE_SIZE_LIMIT_GB', 2.0)
-
-    if cache_enabled and cache_key in _GRAPH_CACHE:
-        print(f"Using cached graph for s={s}, n={n}", file=sys.stderr)
-        G = _GRAPH_CACHE[cache_key]
-    else:
-        print(f"Loading graph from: {path}", file=sys.stderr)
-        G = load_graph(path)
-
-        if cache_enabled:
-            num_nodes = G.number_of_nodes()
-            num_edges = G.number_of_edges()
-            estimated_size_bytes = (num_nodes * 100) + (num_edges * 50)
-            estimated_size_gb = estimated_size_bytes / (1024**3)
-
-            if estimated_size_gb < cache_limit_gb:
-                print(f"Caching graph (estimated size: {estimated_size_gb:.2f} GB)", file=sys.stderr)
-                _GRAPH_CACHE[cache_key] = G
-            else:
-                print(f"Graph too large to cache ({estimated_size_gb:.2f} GB > {cache_limit_gb} GB limit)", file=sys.stderr)
+    G = load_graph(path)
 
     # Make a copy for priority computation
     G_for_priority = G.copy()

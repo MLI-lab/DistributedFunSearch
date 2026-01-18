@@ -1,0 +1,9 @@
+"""
+Construct deletion-correcting codes by finding large independent sets.
+Nodes are binary strings of length n. Two nodes are neighbors if they share a subsequence of length >= n-s.
+The priority function must return a numeric value (int or float). Higher priority nodes are added first.
+
+node_to_vertex: Dict mapping string to int vertex index. Example: node_to_vertex["01101"] -> 5
+vertex_to_node: Dict mapping int to string. Example: vertex_to_node[5] -> "01101"
+{prompt_style}
+"""

@@ -482,8 +482,8 @@ def main():
     print()
 
     # Setup checkpoint and log paths
-    checkpoint_path = output_dir / "evaluation_checkpoint.json"
-    log_path = output_dir / "evaluation_progress.log"
+    checkpoint_path = output_dir / "evaluation_checkpoint_type1.json"
+    log_path = output_dir / "evaluation_progress_type1.log"
 
     # Checkpoint metadata
     metadata = {

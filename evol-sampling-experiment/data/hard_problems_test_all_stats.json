@@ -1,0 +1,36 @@
+{
+  "n_processed": 5,
+  "n_hard": 2,
+  "stats": [
+    {
+      "problem_idx": 0,
+      "n_samples": 4,
+      "n_correct": 0,
+      "pass_rate": 0.0
+    },
+    {
+      "problem_idx": 1,
+      "n_samples": 4,
+      "n_correct": 4,
+      "pass_rate": 1.0
+    },
+    {
+      "problem_idx": 2,
+      "n_samples": 4,
+      "n_correct": 3,
+      "pass_rate": 0.75
+    },
+    {
+      "problem_idx": 3,
+      "n_samples": 4,
+      "n_correct": 4,
+      "pass_rate": 1.0
+    },
+    {
+      "problem_idx": 4,
+      "n_samples": 4,
+      "n_correct": 0,
+      "pass_rate": 0.0
+    }
+  ]
+}

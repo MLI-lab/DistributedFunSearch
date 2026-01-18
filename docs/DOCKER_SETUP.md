@@ -2,7 +2,7 @@
 
 DistributedFunSearch uses Docker Compose to run two containers: **disfun-main** (`pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime`) for the evolutionary search with GPU support, and **rabbitmq** (`rabbitmq:3.13.4-management`) for message passing. Both containers communicate via a Docker bridge network.
 
-**CUDA Compatibility:** The devcontainer uses PyTorch 2.2.2 with CUDA 12.1. Check your server's CUDA version with `nvidia-smi` and look for the version in the top-right corner. If it differs from 12.1, update the base image in `.devcontainer/Dockerfile` to match (e.g., `cuda11.8` or `cuda12.4`). Find compatible PyTorch Docker images [here](https://pytorch.org/get-started/previous-versions/).
+**CUDA Compatibility:** The devcontainer uses PyTorch 2.2.2 with CUDA 12.1. Check your server's CUDA version with `nvidia-smi`, update the base image in `.devcontainer/Dockerfile` to match (e.g., `cuda11.8` or `cuda12.4`). Find compatible PyTorch Docker images [here](https://pytorch.org/get-started/previous-versions/).
 
 ## Quick start
 
@@ -104,66 +104,6 @@ docker exec rabbitmq rabbitmqctl set_permissions -p exp1 guest ".*" ".*" ".*"
 ```
 
 Repeat for each experiment with different vhost names. Each experiment will have completely isolated queues.
-
-## Troubleshooting GPU/CUDA issues in Docker
-
-A common issue with NVIDIA GPUs in Docker containers is CUDA initialization failures, especially with driver version 535.x. Symptoms include:
-
-```
-RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}
-```
-
-Or more generally: "CUDA initialization error" or "CUDA context already exists".
-
-**Cause:** When a GPU process crashes or is killed without cleanup, the CUDA context can become "zombie" - the driver thinks the GPU is still in use, but the process no longer exists in the container.
-
-**Step 1: Identify zombie GPU processes**
-
-```bash
-nvidia-smi --query-compute-apps=pid --format=csv
-```
-
-If this shows a PID that doesn't exist when you run `ps aux | grep <PID>`, you have a zombie process.
-
-**Step 2: Try to kill the process**
-
-```bash
-kill -9 <PID>
-```
-
-If the process doesn't exist in the container but still shows in nvidia-smi, proceed to Step 3.
-
-**Step 3: Use a different GPU (if available)**
-
-```bash
-# Check which GPUs have memory in use
-nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv
-
-# Use a free GPU
-CUDA_VISIBLE_DEVICES=0 python -m disfun  # or 1, 2, 3 etc.
-```
-
-**Step 4: Restart the container (cleanest solution)**
-
-If the above steps don't work, restart the container:
-
-```bash
-# From outside the container
-docker restart <container_name>
-```
-
-**Step 5: Force vLLM legacy engine (workaround)**
-
-vLLM's v1 engine uses multiprocessing which can fail with stale CUDA contexts. Force the legacy engine:
-
-```bash
-VLLM_USE_V1=0 python -m disfun
-```
-
-**Prevention tips:**
-- Always use `Ctrl+C` to stop experiments gracefully (allows cleanup)
-- Avoid `kill -9` on GPU processes when possible
-- Consider upgrading to NVIDIA driver 545+ or 550+ which have better container support
 
 ## Multi-node setup
 

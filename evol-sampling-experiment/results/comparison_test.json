@@ -1,0 +1,46 @@
+{
+  "config": {
+    "n_total": 16,
+    "n_problems": 2
+  },
+  "iid_solved": 1,
+  "iid_solve_rate": 0.5,
+  "evol_solved": 1,
+  "evol_solve_rate": 0.5,
+  "evol_only_solved": 0,
+  "iid_only_solved": 0,
+  "both_solved": 1,
+  "neither_solved": 1,
+  "total_iid_tokens": 41612,
+  "total_evol_tokens": 74190,
+  "token_overhead_ratio": 1.782899163702778,
+  "evol_successes_from_seeds": 1,
+  "evol_successes_from_refinements": 0,
+  "successes_by_generation": {
+    "0": 1
+  },
+  "detailed_results": [
+    {
+      "problem": "What is the range of the function $y = \\frac{x^2 + 3x + 2}{x+1}$?  (Express your answer using interval notation.)",
+      "answer": "(-\\infty, 1)\\cup(1, \\infty)",
+      "problem_idx": 0,
+      "iid_any_correct": false,
+      "iid_n_correct": 0,
+      "evol_any_correct": false,
+      "evol_n_correct": 0,
+      "evol_correct_generations": []
+    },
+    {
+      "problem": "The entire graph of the function $f(x)$ is shown below ($f$ is only defined when $x$ is between $-4$ and $4$ inclusive). How many values of $x$ satisfy $f(f(x)) = 2$?\n\n[asy]\nimport graph; size(9cm);\n\n...",
+      "answer": "3",
+      "problem_idx": 4,
+      "iid_any_correct": true,
+      "iid_n_correct": 2,
+      "evol_any_correct": true,
+      "evol_n_correct": 1,
+      "evol_correct_generations": [
+        0
+      ]
+    }
+  ]
+}

@@ -1,3 +1,0 @@
-The function should accept inputs: {function_args}.
-The function should return output: {return_type}.
-Do not give additional explanations.

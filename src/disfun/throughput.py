@@ -1,24 +1,24 @@
 """Throughput measurement for DistributedFunSearch."""
 
 import os
-import re
 import json
 import time
 import asyncio
 import dataclasses
 from datetime import datetime
-from pathlib import Path
 
 import numpy as np
-import psutil
 import aio_pika
 import wandb
 import torch.multiprocessing as mp
 
-from disfun import code_manipulation, process_utils, programs_database
-from disfun.process_utils import convert_tuple_keys
-from disfun.scaling_utils import ResourceManager
-from disfun.process_entry import sampler_process_entry, evaluator_process_entry
+from disfun.utils import code_manipulation, prompt_builder
+from disfun.sandbox import cleanup_orphaned_sandbox_processes
+from disfun.utils.wandb_logging import convert_tuple_keys
+from disfun.utils.resource_manager import ResourceManager
+from disfun import programs_database
+from disfun.utils import rabbitmq
+from disfun.startup import sampler_process_entry, evaluator_process_entry, initialize_logger, load_initial_programs
 
 
 class ThroughputRunner:
@@ -36,7 +36,7 @@ class ThroughputRunner:
         self.checkpoint_path = checkpoint_path
 
         self.log_filename = f"throughput_pid{os.getpid()}.log"
-        self.logger = process_utils.initialize_logger(log_dir, self.log_filename, process_type="Throughput")
+        self.logger = initialize_logger(log_dir, self.log_filename, process_type="Throughput")
 
         self.sampler_processes = []
         self.evaluator_processes = []
@@ -47,7 +47,7 @@ class ThroughputRunner:
         """Get current message counts for all queues."""
         depths = {"sampler_queue": 0, "evaluator_queue": 0, "database_queue": 0}
         try:
-            conn = await process_utils.create_rabbitmq_connection(self.config, timeout=5)
+            conn = await rabbitmq.create_connection(self.config, timeout=5)
             ch = await conn.channel()
             for q_name in depths.keys():
                 try:
@@ -66,7 +66,7 @@ class ThroughputRunner:
         self.logger.info("Checking queue state before starting...")
         is_clean = True
         try:
-            conn = await process_utils.create_rabbitmq_connection(self.config, timeout=10)
+            conn = await rabbitmq.create_connection(self.config, timeout=10)
             ch = await conn.channel()
             for q_name in ["evaluator_queue", "sampler_queue", "database_queue"]:
                 try:
@@ -104,7 +104,7 @@ class ThroughputRunner:
         self.logger.info(f"Throughput: {self.config.num_samplers} samplers, {self.config.num_evaluators} evaluators")
         self.logger.info(f"Duration: {tc.warmup_minutes}min warmup + {tc.run_duration_minutes}min measurement")
 
-        # Check queue state before starting - clean up if dirty
+        # Check queue state before starting, clean up if dirty
         await self.check_queue_state()
 
         # Init W&B
@@ -134,44 +134,53 @@ class ThroughputRunner:
         # Create ResourceManager for resource tracking
         self.resource_manager = ResourceManager(log_dir=self.log_dir, scaling_config=modified_config.scaling)
 
-        # Set up RabbitMQ
+        # Set up RabbitMQ for main process (queue monitoring)
         self.logger.info(f"Connecting to RabbitMQ at {modified_config.rabbitmq.host}:{modified_config.rabbitmq.port} vhost={modified_config.rabbitmq.vhost}")
         try:
-            conn1 = await process_utils.create_rabbitmq_connection(modified_config, timeout=300)
-            conn2 = await process_utils.create_rabbitmq_connection(modified_config, timeout=300)
-            self.connections = [conn1, conn2]
-            self.logger.info("RabbitMQ connections established successfully")
+            conn = await rabbitmq.create_connection(modified_config, timeout=300)
+            self.connections = [conn]
+            self.logger.info("RabbitMQ connection established successfully")
         except Exception as e:
             self.logger.error(f"Failed to connect to RabbitMQ: {e}")
             raise
 
-        ch1, ch2 = await conn1.channel(), await conn2.channel()
-        eval_q = await process_utils.declare_standard_queue(ch1, "evaluator_queue")
-        sampler_q = await process_utils.declare_standard_queue(ch1, "sampler_queue")
-        db_q = await process_utils.declare_standard_queue(ch2, "database_queue")
+        ch = await conn.channel()
+        eval_q = await rabbitmq.declare_queue(ch, "evaluator_queue")
+        sampler_q = await rabbitmq.declare_queue(ch, "sampler_queue")
 
-        # Create database (W&B disabled here - we handle it ourselves)
+        # Load prompt specification
+        prompt_spec = prompt_builder.load_prompt_spec_from_config(modified_config)
+
+        # Create termination config with unlimited values for throughput mode
+        throughput_termination = dataclasses.replace(
+            modified_config.termination,
+            iteration_limit=999_999_999,
+            optimal_solution_programs=999_999_999,
+            target_solutions=None
+        )
+
+        # Create connection manager for ProgramsDatabase
+        db_connection_manager = rabbitmq.ConnectionManager(
+            config=modified_config,
+            component_name="ProgramsDatabase",
+            queue_names=["database_queue", "sampler_queue", "evaluator_queue"],
+            timeout=300
+        )
+
+        # Create database with connection manager (W&B disabled for throughput)
         self.database = programs_database.ProgramsDatabase(
-            conn2, ch2, db_q, sampler_q, eval_q,
-            modified_config.programs_database, "priority", self.checkpoint_path,
-            os.path.join(wc.checkpoints_base_path, f"checkpoint_{run_name}"),
-            mode=modified_config.evaluator.mode,
-            start_n=modified_config.evaluator.start_n, end_n=modified_config.evaluator.end_n,
-            s_values=modified_config.evaluator.s_values,
-            no_deduplication=modified_config.programs_database.no_deduplication,
-            prompt_limit=999_999_999, optimal_solution_programs=999_999_999, max_drain_time=0,
-            target_signatures=None,
-            show_eval_scores=modified_config.prompt.show_eval_scores,
-            display_mode=modified_config.prompt.display_mode,
+            config=modified_config.programs_database,
+            function_to_evolve="priority",
+            connection_manager=db_connection_manager,
+            checkpoint_file=self.checkpoint_path,
+            save_checkpoints_path=os.path.join(wc.checkpoints_base_path, f"checkpoint_{run_name}"),
+            termination_config=throughput_termination,
             best_known_solutions=modified_config.prompt.best_known_solutions,
-            absolute_label=modified_config.prompt.absolute_label,
-            relative_label=modified_config.prompt.relative_label,
-            q=modified_config.evaluator.q,
             wandb_config=dataclasses.replace(wc, enabled=False),
             sampler_config=modified_config.sampler,
             evaluator_config=modified_config.evaluator,
-            prompt_config=modified_config.prompt,
-            run_name=run_name, rabbitmq_config=modified_config,
+            prompt_spec=prompt_spec,
+            run_name=run_name,
         )
 
         db_task = asyncio.create_task(self.database.consume_and_process())
@@ -188,18 +197,18 @@ class ThroughputRunner:
         # Publish initial programs or sample from checkpoint
         copies = getattr(modified_config.programs_database, "initial_program_copies", 1)
         if self.checkpoint_path and self.database.total_stored_programs > 0:
-            # Checkpoint loaded - sample prompts from database to prime the pipeline
+            # Checkpoint loaded. Sample prompts from database to prime the pipeline.
             self.logger.info(f"Checkpoint loaded with {self.database.total_stored_programs} programs. Sampling {copies} prompts to prime pipeline.")
             for _ in range(copies):
                 # Trigger prompt generation from the loaded database
                 await self.database.get_prompt()
         else:
-            # No checkpoint - use initial programs
+            # No checkpoint, use initial programs
             initial_progs = self._load_initial_programs(modified_config)
             if initial_progs:
                 self.logger.info(f"Publishing {len(initial_progs) * copies} initial programs to evaluator queue.")
                 for prog in initial_progs * copies:
-                    await ch1.default_exchange.publish(aio_pika.Message(body=prog.encode()), routing_key="evaluator_queue")
+                    await ch.default_exchange.publish(aio_pika.Message(body=prog.encode()), routing_key="evaluator_queue")
 
         # Warm-up
         self.logger.info(f"Warm-up: {tc.warmup_minutes} min")
@@ -216,7 +225,7 @@ class ThroughputRunner:
 
         self.logger.info(f"Measurement: {num_windows} windows of {tc.window_duration_minutes} min")
         for w in range(num_windows):
-            start_prompts = self.database.total_prompts
+            start_prompts = self.database.iterations
 
             # Collect resource samples during this window
             gpu_samples = []
@@ -247,7 +256,7 @@ class ThroughputRunner:
 
                 await asyncio.sleep(sample_interval)
 
-            window_iters.append(self.database.total_prompts - start_prompts)
+            window_iters.append(self.database.iterations - start_prompts)
 
             # Calculate mean utilization for this window
             mean_gpu_util = sum(gpu_samples) / len(gpu_samples) if gpu_samples else 0
@@ -338,10 +347,8 @@ class ThroughputRunner:
 
     def _start_processes(self, config):
         """Start sampler and evaluator processes."""
-        from disfun.sampler import is_local_model
-
         ctx = mp.get_context("spawn")
-        use_local = is_local_model(config.sampler.model)
+        use_local = config.sampler.use_local_vllm
         rm = ResourceManager(log_dir=self.log_dir, scaling_config=config.scaling)
 
         assigned_gpus = set()
@@ -369,21 +376,11 @@ class ThroughputRunner:
 
     def _load_initial_programs(self, config):
         """Load initial programs from directory."""
-        programs = []
-        init_dir = Path(config.evaluator.initial_functions_dir)
-        if not init_dir.exists():
-            return programs
-
-        for f in sorted(init_dir.glob("*.txt")):
-            try:
-                body = f.read_text().strip()
-                body = re.sub(r"<thinking>.*?</thinking>\s*", "", body, flags=re.DOTALL)
-                body = re.sub(r"<thought>.*?</thought>\s*", "", body, flags=re.DOTALL)
-                body = re.sub(r"<code>(.*?)</code>", r"\1", body, flags=re.DOTALL)
-                programs.append(json.dumps({"sample": body.strip(), "island_id": None, "version_generated": None, "expected_version": 0}))
-            except Exception:
-                pass
-        return programs
+        return load_initial_programs(
+            config.evaluator.initial_functions_dir,
+            strip_tags=True,
+            logger=self.logger
+        )
 
     async def cleanup(self):
         """Clean up processes and queues."""
@@ -424,7 +421,7 @@ class ThroughputRunner:
 
         # Delete queues
         try:
-            conn = await process_utils.create_rabbitmq_connection(self.config, timeout=10)
+            conn = await rabbitmq.create_connection(self.config, timeout=10)
             ch = await conn.channel()
             for q in ["evaluator_queue", "sampler_queue", "database_queue"]:
                 try:
@@ -443,12 +440,7 @@ class ThroughputRunner:
             self.logger.warning(f"Queue cleanup failed: {e}")
 
         # Kill orphaned sandbox processes
-        for proc in psutil.process_iter(["cmdline"]):
-            try:
-                if proc.info.get("cmdline") and "container_main.py" in " ".join(proc.info["cmdline"]):
-                    proc.kill()
-            except Exception:
-                pass
+        cleanup_orphaned_sandbox_processes(self.logger)
 
         if self.config.wandb.enabled:
             wandb.finish()
@@ -461,7 +453,7 @@ class ThroughputRunner:
         with open(path, "w") as f:
             json.dump(results, f, indent=2)
 
-        print(f"\n{'='*60}\nTHROUGHPUT RESULTS\n{'='*60}")
+        print(f"\n{'='*60}\nThroughput Results\n{'='*60}")
         print(f"Samplers: {results['num_samplers']}, Evaluators: {results['num_evaluators']}")
         print(f"Model: {results['model']}")
         print(f"Duration: {results['warmup_minutes']}min warmup + {results['run_duration_minutes']}min measurement")
@@ -487,12 +479,153 @@ async def run_throughput(config, config_path, log_dir, sandbox_base_path, specif
         runner.save_results(results)
         return results
     except Exception as e:
-        # Log the full exception with traceback
         import traceback
         runner.logger.error(f"Throughput measurement failed: {e}")
         runner.logger.error(traceback.format_exc())
-        print(f"\n*** THROUGHPUT ERROR: {e} ***", flush=True)
+        print(f"\n*** Throughput error: {e} ***", flush=True)
         print(traceback.format_exc(), flush=True)
         raise
     finally:
         await runner.cleanup()
+
+
+# Sweep functionality
+
+def _generate_sweep_combinations(config):
+    """Generate all parameter combinations from config.sweep."""
+    from itertools import product
+
+    if not hasattr(config, 'sweep') or config.sweep is None:
+        return []
+
+    sweep = config.sweep
+    sweep_params = {}
+
+    if hasattr(sweep, 'prompts_per_batch') and sweep.prompts_per_batch:
+        sweep_params["prompts_per_batch"] = list(sweep.prompts_per_batch)
+    if hasattr(sweep, 'evaluator_prefetch') and sweep.evaluator_prefetch:
+        sweep_params["evaluator_prefetch"] = list(sweep.evaluator_prefetch)
+    if hasattr(sweep, 'max_workers') and sweep.max_workers:
+        sweep_params["max_workers"] = list(sweep.max_workers)
+    if hasattr(sweep, 'sampler_prefetch_multiplier') and sweep.sampler_prefetch_multiplier:
+        sweep_params["sampler_prefetch_multiplier"] = list(sweep.sampler_prefetch_multiplier)
+
+    if not sweep_params:
+        return []
+
+    keys = list(sweep_params.keys())
+    values = [sweep_params[k] for k in keys]
+    return [dict(zip(keys, combo)) for combo in product(*values)]
+
+
+def _apply_sweep_params(base_config, sweep_params):
+    """Create modified config with sweep parameters applied."""
+    import cloudpickle
+
+    sampler_kwargs = {}
+    if "prompts_per_batch" in sweep_params:
+        sampler_kwargs["prompts_per_batch"] = sweep_params["prompts_per_batch"]
+    if "sampler_prefetch_multiplier" in sweep_params:
+        sampler_kwargs["prefetch_multiplier"] = sweep_params["sampler_prefetch_multiplier"]
+
+    modified_sampler = dataclasses.replace(base_config.sampler, **sampler_kwargs) if sampler_kwargs else base_config.sampler
+
+    evaluator_kwargs = {}
+    if "evaluator_prefetch" in sweep_params:
+        evaluator_kwargs["prefetch_count"] = sweep_params["evaluator_prefetch"]
+    if "max_workers" in sweep_params:
+        evaluator_kwargs["max_workers"] = sweep_params["max_workers"]
+
+    modified_evaluator = dataclasses.replace(base_config.evaluator, **evaluator_kwargs) if evaluator_kwargs else base_config.evaluator
+
+    # Update W&B run name
+    sweep_tag = "_".join(f"{k[:2]}{v}" for k, v in sweep_params.items())
+    modified_wandb = dataclasses.replace(
+        base_config.wandb,
+        run_name=f"sweep_{sweep_tag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        run_name_tag=f"sweep_{sweep_tag}"
+    )
+
+    return dataclasses.replace(
+        base_config,
+        sampler=modified_sampler,
+        evaluator=modified_evaluator,
+        wandb=modified_wandb
+    )
+
+
+async def run_sweep(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path=None, start_idx=0):
+    """Run parameter sweep across all combinations in config.sweep."""
+    import cloudpickle
+
+    combinations = _generate_sweep_combinations(config)
+    if not combinations:
+        print("No sweep parameters configured. Run single measurement instead.")
+        return await run_throughput(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path)
+
+    total = len(combinations)
+    tc = config.throughput
+
+    print(f"\n{'#'*70}")
+    print(f"Throughput Sweep")
+    print(f"{'#'*70}")
+    print(f"Samplers: {config.num_samplers}, Evaluators: {config.num_evaluators}")
+    print(f"Total configurations: {total}, starting from: {start_idx + 1}")
+    print(f"Duration per config: {tc.warmup_minutes}min warmup + {tc.run_duration_minutes}min measurement")
+    print(f"{'#'*70}\n")
+
+    results_file = os.path.join(log_dir, f"sweep_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    all_results = []
+
+    for idx, sweep_params in enumerate(combinations[start_idx:], start=start_idx):
+        print(f"\n{'='*70}")
+        print(f"Configuration {idx + 1}/{total}: {sweep_params}")
+        print(f"{'='*70}\n")
+
+        modified_config = _apply_sweep_params(config, sweep_params)
+
+        # Save modified config for subprocess
+        sweep_tag = "_".join(f"{k[:2]}{v}" for k, v in sweep_params.items())
+        config_log_dir = os.path.join(log_dir, f"sweep_{sweep_tag}")
+        os.makedirs(config_log_dir, exist_ok=True)
+        sweep_config_path = os.path.join(config_log_dir, "config.pkl")
+        with open(sweep_config_path, 'wb') as f:
+            cloudpickle.dump(modified_config, f)
+
+        try:
+            result = await run_throughput(
+                modified_config, sweep_config_path, config_log_dir, sandbox_base_path,
+                specification, inputs, target_signatures, checkpoint_path
+            )
+            result["sweep_params"] = sweep_params
+            result["config_idx"] = idx
+            all_results.append(result)
+
+            print(f"Config {idx + 1} result: {result['iterations_per_hour_mean']:.0f} +/- {result['iterations_per_hour_std']:.0f} iter/hr")
+
+        except Exception as e:
+            print(f"ERROR in config {idx + 1}: {e}")
+            all_results.append({"sweep_params": sweep_params, "config_idx": idx, "error": str(e)})
+
+        # Save intermediate results
+        with open(results_file, 'w') as f:
+            json.dump(all_results, f, indent=2)
+
+        # Cooldown between configs
+        if idx < total - 1 and hasattr(tc, 'cooldown_seconds'):
+            print(f"Cooldown: {tc.cooldown_seconds}s...")
+            await asyncio.sleep(tc.cooldown_seconds)
+
+    # Print summary
+    print(f"\n{'#'*70}")
+    print("Sweep Complete")
+    print(f"{'#'*70}")
+    valid = [r for r in all_results if "error" not in r and r.get("iterations_per_hour_mean", 0) > 0]
+    if valid:
+        sorted_results = sorted(valid, key=lambda x: x["iterations_per_hour_mean"], reverse=True)
+        print("Top 5 configurations:")
+        for i, r in enumerate(sorted_results[:5]):
+            print(f"  {i+1}. {r['iterations_per_hour_mean']:.0f} iter/hr | {r['sweep_params']}")
+    print(f"Results saved: {results_file}")
+
+    return all_results

@@ -1,108 +1,111 @@
-# Ignore implementation-specific directories
-implementation/sandboxstorage/
-implementation/__pycache__/
-implementation/ChachingFace/models--meta-llama--Meta-Llama-3.1-8B-Instruct
-implementation/ChachingFace/models--meta-llama--CodeLlama-13b-Python-hf
-implementation/ChachingFace/models--bigcode--starcoder2-15b
-implementation/ChachingFace/.locks
-implementation/Checkpoints_*
-
-# Ignore analysis checkpoints
-analysis/Checkpoints_*
-analysis/checkpoint_full.txt
-
-# Ignore logs
-logs/
-*.log
-# Ignore compiled Python files
-*.pyc
-
-# Ignore specific analysis files or directories
-analysis/analysis_*
-
-# Ignore PDFs
-*.pdf
-
-# Ignore private SSH configurations (if applicable)
-.ssh/
-
-# Ignore package-related files
-src/decos.egg-info/
-src/disfun.egg-info/
-*.egg-info/
-
-# Ignore experiment sandbox
-src/experiments/experiment1/sandbox/
-
-# Ignore Python cache files
-src/decos/__pycache__/
-
-# Ignore all experiment directories
-src/experiments/experiment*/
-
-# But do NOT ignore experiment1
-!src/experiments/experiment1/
-
-# Legacy specific ignores
-src/graphs/KaMIS/
-
-# Ignore all logs folders
-**/logs/
-
-# Ignore all sandbox folders
-**/sandbox/
-
-# Ignore all __pycache__ directories
+# ==============================================================================
+# Python
+# ==============================================================================
+__pycache__/
 **/__pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+*.egg-info/
+*.eggs/
+.eggs/
 
-# Ignore Claude AI files
-.claude/
-CLAUDE.md
-.claude_history
+# ==============================================================================
+# Build & Distribution
+# ==============================================================================
+build/
+dist/
+*.egg
 
-# Ignore baselines directory
-src/baselines/
+# ==============================================================================
+# Environment & Secrets
+# ==============================================================================
+.env
+*.env
+!.env.example
+.ssh/
 
-# Ignore Weights & Biases files
-wandb/
-**/wandb/
-*.wandb
+# ==============================================================================
+# Logs
+# ==============================================================================
+logs/
+**/logs/
+*.log
 
-# Ignore checkpoint files
+# ==============================================================================
+# Checkpoints & Model Weights
+# ==============================================================================
 **/Checkpoints/
 *.pkl
 *.ckpt
 *.pth
 *.checkpoint
 
-# Ignore RabbitMQ data directory
+# ==============================================================================
+# Sandbox & Runtime Directories
+# ==============================================================================
+**/sandbox/
 rabbitmq/
 
-# Ignore build directories
-build/
-dist/
+# ==============================================================================
+# ML Experiment Tracking
+# ==============================================================================
+wandb/
+**/wandb/
+*.wandb
 
-# Ignore SLURM job scripts
-src/experiments/experiment1/exp1.sh
+# ==============================================================================
+# IDE & Editor
+# ==============================================================================
+.claude/
+CLAUDE.md
+.claude_history
 
-# Ignore environment variables file (contains API keys)
-.env
-*.env
-!.env.example
+# ==============================================================================
+# Embedded Git Repositories
+# ==============================================================================
+TreeRL/
+evol-sampling-experiment/
 
-# Ignore plan files
+# ==============================================================================
+# Documents & Plans 
+# ==============================================================================
+*.pdf
 REEVO_PLAN.md
-# Private docs
 docs/EVALUATION_ARCHITECTURE.md
 docs/DAYTONA_EVALUATION.md
+docs/ZIH_SETUP.md
 
+# ==============================================================================
+# Experiments
+# ==============================================================================
+# Ignore all experiments except experiment1
+src/experiments/experiment*/
+!src/experiments/experiment1/
+
+# Experiment-specific ignores
+src/experiments/experiment1/exp1.sh
+src/experiments/experiment1/attach_evaluators_zih.sh
+src/experiments/experiment1/exp1_alpha_zih.sh
+
+# ==============================================================================
+# Analysis (generated/private files)
+# ==============================================================================
+analysis/Checkpoints_*
+analysis/checkpoint_full.txt
+analysis/analysis_*
 analysis/config_overlap_heatmap.png
 analysis/graph_ablation_analysis.py
 analysis/throughput_sweep_analysis.ipynb
-docs/ZIH_SETUP.md
 
-src/experiments/experiment1/attach_evaluators_zih.sh
-src/experiments/experiment1/exp1_alpha_zih.sh
+# ==============================================================================
+# Legacy / Deprecated
+# ==============================================================================
+src/baselines/
+src/graphs/KaMIS/
+
+# Legacy implementation directory
+implementation/sandboxstorage/
+implementation/__pycache__/
+implementation/ChachingFace/
+implementation/Checkpoints_*

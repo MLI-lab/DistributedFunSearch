@@ -13,16 +13,21 @@ import shutil
 # Define the main container path
 CONTAINER_MAIN = (pathlib.Path(__file__).parent / "container" / "container_main.py").absolute()
 
+
 def ensure_dir_exists(path: pathlib.Path) -> pathlib.Path:
     """Ensure the directory exists."""
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
     return path
 
-def cleanup_orphaned_sandbox_processes(logger=None):
-    """
-    Kill any orphaned container_main.py processes that are running without a parent evaluator.
-    This is a safety mechanism to prevent zombie processes from consuming resources.
+
+def cleanup_orphaned_sandbox_processes(logger=None, max_age_seconds=300):
+    """Kill orphaned container_main.py processes.
+
+    Args:
+        logger: Optional logger for status messages
+        max_age_seconds: Only kill processes older than this (default 300s).
+                         Set to 0 or None to kill all sandbox processes regardless of age.
 
     Returns the number of processes killed.
     """
@@ -36,13 +41,15 @@ def cleanup_orphaned_sandbox_processes(logger=None):
 
                 # Check if this is a container_main.py process
                 if 'container_main.py' in ' '.join(cmdline):
-                    # Check if it's been running for more than 5 minutes (likely orphaned)
-                    uptime = time.time() - proc.info['create_time']
-                    if uptime > 300:  # 5 minutes
+                    # Check age if max_age_seconds is set
+                    if max_age_seconds:
+                        uptime = time.time() - proc.info['create_time']
+                        if uptime <= max_age_seconds:
+                            continue
                         if logger:
                             logger.warning(f"Killing orphaned sandbox process PID {proc.info['pid']} (uptime: {uptime:.0f}s)")
-                        proc.kill()
-                        killed_count += 1
+                    proc.kill()
+                    killed_count += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     except Exception as e:
@@ -51,32 +58,63 @@ def cleanup_orphaned_sandbox_processes(logger=None):
 
     return killed_count
 
-class DummySandbox:
-    """Base class for Sandboxes that execute generated code contained in a string,
-    and call a function defined in that code with specific input.
+
+def _kill_process_tree(process):
+    """Kill a process and its entire process group.
+
+    Attempts to kill via process group first, then falls back to direct kill.
     """
-    # Cache for compiled base namespace (spec without priority) - per-process
+    if process is None:
+        return
+
+    try:
+        os.killpg(os.getpgid(process.pid), 9)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+    try:
+        process.kill()
+        process.wait(timeout=1)
+    except Exception:
+        pass
+
+
+class ExternalProcessSandbox:
+    """Sandbox that executes generated code in a separate Python process.
+
+    Uses subprocess isolation with process groups for proper cleanup on timeout.
+    Caches compiled base namespace (imports, helpers) and only recompiles
+    the priority function for each evaluation.
+    """
+
+    # Cache for compiled base namespace (spec without priority), per process
     _cached_namespace = None
     _cached_base_hash = None
 
-    def __init__(self, **kwargs):
-        pass
-
-    def run(
+    def __init__(
         self,
-        program: str,
-        function_to_run: str,
-        test_input,
-        timeout_seconds: int,
-        count,
-    ) -> tuple[Any, bool]:
-        """Returns `function_to_run(test_input)` and whether execution succeeded."""
-        namespace = DummySandbox.compile_code(program)
-        return namespace[function_to_run](test_input)
+        base_path: pathlib.Path,
+        timeout_secs: int = 30,
+        python_path: str = "python",
+        local_id=None,
+        graph_dir=None,
+        memory_limit_gb: float = 1.0,
+    ):
+        self.local_id = local_id
+        self.output_path = ensure_dir_exists(pathlib.Path(base_path) / f"sandbox{self.local_id}")
+        self.timeout_secs = timeout_secs
+        self.python_path = python_path
+        self.graph_dir = graph_dir
+        self.memory_limit_gb = memory_limit_gb
+        self.input_path = ensure_dir_exists(self.output_path / "inputs")
 
     @staticmethod
     def compile_code(program: str):
-        """Compile program with caching - only recompiles priority function."""
+        """Compile program with caching. Only recompiles priority function.
+
+        Separates the program into base (imports, helpers) and priority function.
+        The base is cached and reused across evaluations.
+        """
         tree = ast.parse(program)
 
         # Separate priority from rest of program
@@ -92,40 +130,28 @@ class DummySandbox:
         base_tree = ast.Module(body=base_nodes, type_ignores=[])
         base_hash = hash(ast.dump(base_tree))
 
-        if DummySandbox._cached_base_hash != base_hash:
-            DummySandbox._cached_namespace = {}
-            exec(compile(base_tree, '<ast>', 'exec'), DummySandbox._cached_namespace)
-            DummySandbox._cached_base_hash = base_hash
+        if ExternalProcessSandbox._cached_base_hash != base_hash:
+            ExternalProcessSandbox._cached_namespace = {}
+            exec(compile(base_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
+            ExternalProcessSandbox._cached_base_hash = base_hash
 
         # Always compile and inject new priority into cached namespace
         if priority_node:
             priority_tree = ast.Module(body=[priority_node], type_ignores=[])
-            exec(compile(priority_tree, '<ast>', 'exec'), DummySandbox._cached_namespace)
+            exec(compile(priority_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
 
-        return DummySandbox._cached_namespace
-
-class ExternalProcessSandbox(DummySandbox):
-    """Sandbox that executes the code in a separate Python process on the same host."""
-    def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", local_id=None, graph_dir=None, memory_limit_gb: float = 1.0):
-        super().__init__()
-        self.local_id = local_id
-        self.output_path = ensure_dir_exists(pathlib.Path(base_path) / f"sandbox{self.local_id}")
-        self.timeout_secs = timeout_secs
-        self.python_path = python_path
-        self.graph_dir = graph_dir  # Store graph_dir to pass to subprocess
-        self.memory_limit_gb = memory_limit_gb  # Memory limit per sandbox process
-        self.input_path = ensure_dir_exists(self.output_path / "inputs")
+        return ExternalProcessSandbox._cached_namespace
 
     def _exec(self, call_data_path: pathlib.Path, input_path: pathlib.Path, error_file_path: pathlib.Path) -> bool:
-        """
-        Use subprocess.Popen() to execute the Python container with proper process group management.
-        The container (CONTAINER_MAIN) will execute the LLM-generated method from prog.pickle using input.pickle as input,
-        writing the output to output.pickle.
+        """Execute the Python container in a subprocess.
 
-        Process group management ensures that if this process dies - all child processes are killed.
+        The container (CONTAINER_MAIN) executes the LLM generated method from prog.pickle
+        using input.pickle as input, writing the output to output.pickle.
+
+        Process group management ensures that if this process dies, all child processes are killed.
         """
-        prog_path = call_data_path / "prog.pickle"   # Serialized Python function
-        output_file = call_data_path / "output.pickle"  # Where output will be written
+        prog_path = call_data_path / "prog.pickle"
+        output_file = call_data_path / "output.pickle"
 
         # Ensure directories exist
         ensure_dir_exists(call_data_path)
@@ -149,60 +175,40 @@ class ExternalProcessSandbox(DummySandbox):
                 env['GRAPH_DIR'] = str(self.graph_dir)
             env['SANDBOX_MEMORY_LIMIT_GB'] = str(self.memory_limit_gb)
 
-            # Use Popen with start_new_session=True to create a new process group
-            # This allows us to kill the entire process tree if needed
+            # Use Popen with start_new_session to create a new process group.
+            # This allows killing the entire process tree if needed.
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=os.getcwd(),
-                env=env,  # Pass environment variables including GRAPH_DIR
-                start_new_session=True  # Creates new process group
+                env=env,
+                start_new_session=True
             )
 
             # Wait for process with timeout
             stdout, stderr = process.communicate(timeout=self.timeout_secs)
 
-            # Always write stderr output to error_file (includes debug info like graph file paths)
+            # Write stderr output to error file (includes debug info like graph file paths)
             if stderr:
                 with open(error_file_path, "wb") as ef:
                     ef.write(stderr)
 
-            return (process.returncode == 0)
+            return process.returncode == 0
 
         except subprocess.TimeoutExpired:
-            # Kill the entire process group on timeout
-            if process:
-                try:
-                    # Kill the process group (negative PID kills the entire group)
-                    os.killpg(os.getpgid(process.pid), 9)
-                except (ProcessLookupError, PermissionError):
-                    pass  # Process already dead
-                try:
-                    process.kill()  # Fallback
-                    process.wait(timeout=1)
-                except Exception:
-                    pass
+            _kill_process_tree(process)
             return False
 
         except Exception:
-            # Clean up on any error
             if process and process.poll() is None:
-                try:
-                    os.killpg(os.getpgid(process.pid), 9)
-                except (ProcessLookupError, PermissionError):
-                    pass
-                try:
-                    process.kill()
-                    process.wait(timeout=1)
-                except Exception:
-                    pass
+                _kill_process_tree(process)
             return False
 
     def _hash_input(self, test_input) -> str:
-        """
-        Use SHA-256 to hash the serialized input.
-        This is more stable than Python's built-in hash().
+        """Hash the serialized input using SHA256.
+
+        This is more stable than Python's built in hash().
         """
         serialized = cloudpickle.dumps(test_input)
         hash_obj = hashlib.sha256(serialized)
@@ -215,32 +221,32 @@ class ExternalProcessSandbox(DummySandbox):
         test_input,
         timeout_seconds: int,
         count: int
-    ) -> tuple[Any, bool, pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
-        """
-        Executes the function in a sandboxed environment.
+    ) -> tuple[Any, bool, float, pathlib.Path, pathlib.Path, pathlib.Path]:
+        """Execute the function in a sandboxed environment.
+
         Returns:
-            - The function result,
-            - A boolean indicating success,
-            - CPU time measured in the sandbox,
-            - Path to the output directory,
-            - Path to the input file,
-            - Path to the error file.
+            result: The function result, or None if execution failed.
+            success: Boolean indicating whether execution succeeded.
+            cpu_time: CPU time measured in the sandbox.
+            output_path: Path to the output directory.
+            input_file: Path to the input file.
+            error_file: Path to the error file.
         """
         call_data_folder = ensure_dir_exists((self.output_path / f"call{count}").absolute())
 
-        # Create an input filename using SHA-256 hash
+        # Create an input filename using SHA256 hash
         input_hash = self._hash_input(test_input)
         input_file = (self.input_path / f"{input_hash}.pickle").absolute()
         ensure_dir_exists(self.input_path)
 
-        # Create the input file if it doesn't exist
+        # Create the input file if it does not exist
         if not input_file.exists():
             with open(input_file, "wb") as f:
                 cloudpickle.dump(test_input, f)
 
         error_file = self.output_path / f"stderr_{count}.log"
         try:
-            namespace = DummySandbox.compile_code(program)
+            namespace = ExternalProcessSandbox.compile_code(program)
             prog_file = (call_data_folder / "prog.pickle").absolute()
             with open(prog_file, "wb+") as f:
                 cloudpickle.dump(namespace[function_to_run], f)
@@ -259,30 +265,27 @@ class ExternalProcessSandbox(DummySandbox):
             return None, False, 0.0, self.output_path, input_file, error_file
 
     def cleanup_call_directories(self, count: int):
-        """
-        Clean up call directory after evaluation to save disk space.
+        """Clean up call directory after evaluation to save disk space.
+
         Removes the call{count} directory including prog.pickle and output.pickle.
         Keeps stderr logs and input files (inputs are reused).
-
-        Args:
-            count: The call number to clean up
         """
         try:
             call_data_folder = self.output_path / f"call{count}"
             if call_data_folder.exists():
                 shutil.rmtree(call_data_folder, ignore_errors=True)
         except Exception:
-            # Don't fail evaluation if cleanup fails, just log it
+            # Do not fail evaluation if cleanup fails
             pass
 
     def cleanup_all(self):
-        """
-        Clean up the entire sandbox directory for this evaluator.
+        """Clean up the entire sandbox directory for this evaluator.
+
         Call this during evaluator shutdown.
         """
         try:
             if self.output_path.exists():
                 shutil.rmtree(self.output_path, ignore_errors=True)
         except Exception:
-            # Don't fail if cleanup fails
+            # Do not fail if cleanup fails
             pass

@@ -1,0 +1,19 @@
+{user_generator}
+
+[Worse code]
+```python
+{worse_code}
+```
+
+[Better code]
+```python
+{better_code}
+```
+
+Available imports:
+{imports}
+
+[Reflection]
+{reflection}
+
+Please write an improved function `priority_v2`, according to the reflection. Output code only and enclose your code with: ```python ... ```.
