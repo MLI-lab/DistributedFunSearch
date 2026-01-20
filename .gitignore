@@ -68,13 +68,15 @@ TreeRL/
 evol-sampling-experiment/
 
 # ==============================================================================
-# Documents & Plans 
+# Documents 
 # ==============================================================================
 *.pdf
 REEVO_PLAN.md
 docs/EVALUATION_ARCHITECTURE.md
 docs/DAYTONA_EVALUATION.md
 docs/ZIH_SETUP.md
+fig/
+plots/
 
 # ==============================================================================
 # Experiments
@@ -97,15 +99,12 @@ analysis/analysis_*
 analysis/config_overlap_heatmap.png
 analysis/graph_ablation_analysis.py
 analysis/throughput_sweep_analysis.ipynb
+analysis/
+src/disfun/specifications/Enc_Dec/
+src/disfun/specifications/IDS/
 
 # ==============================================================================
-# Legacy / Deprecated
+# Deprecated
 # ==============================================================================
 src/baselines/
-src/graphs/KaMIS/
 
-# Legacy implementation directory
-implementation/sandboxstorage/
-implementation/__pycache__/
-implementation/ChachingFace/
-implementation/Checkpoints_*
