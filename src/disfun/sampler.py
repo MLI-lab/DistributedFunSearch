@@ -21,7 +21,7 @@ Key features:
 * Dynamic temperature adjustment based on stored program count
 * Token tracking for both input and output
 * Time tracking (GPU time for local models, API latency for cloud models)
-* vLLM backend support for faster local inference vs HuggingFace transformers
+* vLLM support for local inference
 """
 
 import gc
@@ -82,6 +82,9 @@ class LLM_model:
             random_seed: Optional[int] = None,  # Random seed for reproducible generation
             gpu_memory_utilization: float = 0.95,  # Fraction of GPU memory for vLLM
             use_local_vllm: bool = True,  # True=local vLLM, False=LiteLLM API
+            use_chat_api: bool = False,  # True=vLLM chat(), False=vLLM generate()
+            enable_thinking: Optional[bool] = None,  # Qwen3 thinking mode control
+            cost_model: Optional[str] = None,  # LiteLLM model name for pricing lookup
     ) -> None:
         self.inference_time = 0.0
         self._samples_per_prompt = samples_per_prompt
@@ -110,6 +113,9 @@ class LLM_model:
 
         # Local vLLM or LiteLLM API mode
         self.use_local_vllm = use_local_vllm
+        self.use_chat_api = use_chat_api
+        self.enable_thinking = enable_thinking
+        self.cost_model = cost_model
 
         if self.use_local_vllm:
             if not VLLM_AVAILABLE:
@@ -167,8 +173,10 @@ class LLM_model:
             # Log retry configuration for API models
             logger.info(f"API retry configuration: max_retries={self.max_retries} (exponential backoff)")
 
-        logger.info(f"Model initialized: mode={'LOCAL_VLLM' if self.use_local_vllm else 'API'}, "
-                   f"temp={temperature}, top_p={top_p}, max_tokens={max_new_tokens}")
+        mode_str = 'LOCAL_VLLM' if self.use_local_vllm else 'API'
+        if self.use_local_vllm and self.use_chat_api:
+            mode_str += f"_CHAT (enable_thinking={self.enable_thinking})"
+        logger.info(f"Model initialized: mode={mode_str}, temp={temperature}, top_p={top_p}, max_tokens={max_new_tokens}")
 
     def adjust_temperature(self, total_registered_programs: int, temperature_period: int):
         """Dynamically adjust temperature based on stored program count."""
@@ -187,6 +195,21 @@ class LLM_model:
                 f"Adjusted temperature to {new_temp} "
                 f"based on {total_registered_programs} registered programs."
             )
+
+    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Calculate cost using LiteLLM pricing for the configured cost_model."""
+        if not self.cost_model:
+            return 0.0
+        try:
+            prompt_cost, completion_cost = litellm.cost_per_token(
+                model=self.cost_model,
+                prompt_tokens=input_tokens,
+                completion_tokens=output_tokens
+            )
+            return prompt_cost + completion_cost
+        except Exception as e:
+            logger.warning(f"Could not calculate cost for {self.cost_model}: {e}")
+            return 0.0
 
     async def draw_batch_samples(
             self,
@@ -220,6 +243,8 @@ class LLM_model:
         n = samples_per_prompt if samples_per_prompt is not None else self._samples_per_prompt
 
         if self.use_local_vllm:
+            if self.use_chat_api:
+                return await self._draw_batch_vllm_chat(prompts, n, system_message=system_message)
             return await self._draw_batch_vllm(prompts, n)
         else:
             return await self._draw_batch_api(prompts, n, system_message=system_message)
@@ -291,10 +316,127 @@ class LLM_model:
             self.inference_time = end_time - start_time
             logger.debug(f"vLLM inference time: {self.inference_time:.2f} sec")
 
+            # Calculate cost using LiteLLM pricing if cost_model is configured
+            if self.cost_model:
+                total_input = sum(input_token_counts)
+                total_output = sum(sum(ot) for ot in all_output_token_counts)
+                cost = self._calculate_cost(total_input, total_output)
+                self.total_cost += cost
+                self.total_input_tokens += total_input
+                self.total_output_tokens += total_output
+                self.request_count += 1
+                logger.info(f"vLLM: Request #{self.request_count} cost: ${cost:.6f} "
+                          f"({total_input} in + {total_output} out) | "
+                          f"Session total: ${self.total_cost:.4f}")
+                cost_logger.info(f"[PID {os.getpid()}] model={self.cost_model}, req={self.request_count}, "
+                               f"cost=${cost:.6f}, in={total_input}, out={total_output}, "
+                               f"session_total=${self.total_cost:.6f}")
+
             return all_samples, input_token_counts, all_output_token_counts
 
         except Exception as e:
             logger.error(f"vLLM error, restarting sampler: {e}")
+            self.cleanup()
+            sys.exit(1)
+
+    async def _draw_batch_vllm_chat(self, prompts: List[str], n: int, system_message: str | None = None) -> tuple[List[List[str]], List[int], List[List[int]]]:
+        """Generate samples using vLLM chat() API with chat_template_kwargs support.
+
+        Required for models like Qwen3 where thinking mode is controlled via chat template.
+        Uses llm.chat() instead of llm.generate() to apply the chat template.
+        """
+        try:
+            start_time = time.time()
+
+            logger.info(f"vLLM chat: Processing batch of {len(prompts)} prompts (n={n})")
+
+            # Log first prompt
+            if prompts:
+                if not self._logged_first_generation:
+                    logger.info(f"vLLM chat: First prompt:\n{'='*80}\n{prompts[0]}\n{'='*80}")
+                else:
+                    logger.debug(f"vLLM chat: First prompt in batch:\n{'='*80}\n{prompts[0]}\n{'='*80}")
+
+            # Build messages for each prompt
+            messages_batch = []
+            for prompt in prompts:
+                messages = []
+                if system_message:
+                    messages.append({"role": "system", "content": system_message})
+                messages.append({"role": "user", "content": prompt})
+                messages_batch.append(messages)
+
+            # Create sampling params
+            sampling_params = SamplingParams(
+                temperature=self.sampling_params.temperature,
+                top_p=self.sampling_params.top_p,
+                max_tokens=self.max_new_tokens,
+                repetition_penalty=self.repetition_penalty,
+                n=n,
+            )
+            if self.random_seed is not None:
+                sampling_params.seed = self.random_seed + self.generation_counter
+                self.generation_counter += 1
+
+            # Build chat_template_kwargs for thinking mode control
+            chat_template_kwargs = {}
+            if self.enable_thinking is not None:
+                chat_template_kwargs["enable_thinking"] = self.enable_thinking
+
+            # vLLM chat generation, run in thread pool to avoid blocking event loop
+            outputs = await asyncio.to_thread(
+                self.vllm_engine.chat,
+                messages_batch,
+                sampling_params,
+                chat_template_kwargs=chat_template_kwargs if chat_template_kwargs else None,
+            )
+
+            all_samples = []
+            input_token_counts = []
+            all_output_token_counts = []
+
+            for idx, output in enumerate(outputs):
+                samples = [o.text for o in output.outputs]
+                all_samples.append(samples)
+
+                # Log first output
+                if idx == 0 and samples:
+                    if not self._logged_first_generation:
+                        logger.info(f"vLLM chat: First model output:\n{'='*80}\n{samples[0]}\n{'='*80}")
+                        self._logged_first_generation = True
+                    else:
+                        logger.debug(f"vLLM chat: First model output:\n{'='*80}\n{samples[0]}\n{'='*80}")
+
+                input_tokens = len(output.prompt_token_ids)
+                output_tokens = [len(o.token_ids) for o in output.outputs]
+
+                input_token_counts.append(input_tokens)
+                all_output_token_counts.append(output_tokens)
+
+            end_time = time.time()
+            self.inference_time = end_time - start_time
+            logger.debug(f"vLLM chat inference time: {self.inference_time:.2f} sec")
+
+            # Calculate cost using LiteLLM pricing if cost_model is configured
+            if self.cost_model:
+                total_input = sum(input_token_counts)
+                total_output = sum(sum(ot) for ot in all_output_token_counts)
+                cost = self._calculate_cost(total_input, total_output)
+                self.total_cost += cost
+                self.total_input_tokens += total_input
+                self.total_output_tokens += total_output
+                self.request_count += 1
+                logger.info(f"vLLM chat: Request #{self.request_count} cost: ${cost:.6f} "
+                          f"({total_input} in + {total_output} out) | "
+                          f"Session total: ${self.total_cost:.4f}")
+                cost_logger.info(f"[PID {os.getpid()}] model={self.cost_model}, req={self.request_count}, "
+                               f"cost=${cost:.6f}, in={total_input}, out={total_output}, "
+                               f"session_total=${self.total_cost:.6f}")
+
+            return all_samples, input_token_counts, all_output_token_counts
+
+        except Exception as e:
+            logger.error(f"vLLM chat error, restarting sampler: {e}")
             self.cleanup()
             sys.exit(1)
 
@@ -469,6 +611,9 @@ class Sampler:
                 random_seed=random_seed,
                 gpu_memory_utilization=getattr(self._config, 'gpu_memory_utilization', 0.95),
                 use_local_vllm=self._config.use_local_vllm,
+                use_chat_api=getattr(self._config, 'use_chat_api', False),
+                enable_thinking=getattr(self._config, 'enable_thinking', None),
+                cost_model=getattr(self._config, 'cost_model', None),
             )
             mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")

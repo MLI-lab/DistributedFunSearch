@@ -1,0 +1,47 @@
+import math
+import itertools
+from collections import Counter
+
+
+def lcs_length(s1, s2):
+    """Compute longest common subsequence length."""
+    m, n = len(s1), len(s2)
+    prev = [0] * (n + 1)
+    curr = [0] * (n + 1)
+
+    for i in range(1, m + 1):
+        curr[0] = 0
+        for j in range(1, n + 1):
+            if s1[i-1] == s2[j-1]:
+                curr[j] = prev[j-1] + 1
+            else:
+                curr[j] = max(prev[j], curr[j-1])
+        prev, curr = curr, prev
+
+    return prev[n]
+
+
+def are_neighbors(node1, node2, n, s):
+    """Check if two nodes share a subsequence of length >= n-s."""
+    return lcs_length(node1, node2) >= n - s
+
+
+def solve(n, s, q):
+    """Find a large independent set using greedy algorithm."""
+    nodes = [''.join(seq) for seq in itertools.product(map(str, range(q)), repeat=n)]
+
+    priorities = {node: priority(node, n, s, q) for node in nodes}
+    nodes_sorted = sorted(nodes, key=lambda x: (-priorities[x], x))
+
+    independent_set = set()
+    removed = set()
+    for node in nodes_sorted:
+        if node in removed:
+            continue
+        independent_set.add(node)
+        removed.add(node)
+        for other in nodes:
+            if other not in removed and are_neighbors(node, other, n, s):
+                removed.add(other)
+
+    return independent_set

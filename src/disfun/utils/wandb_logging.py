@@ -406,10 +406,11 @@ def compute_wandb_metrics(database) -> dict:
     metrics["resources/cumulative_cpu_time"] = database.cumulative_evaluator_cpu_time
     metrics["resources/cumulative_gpu_time"] = database.cumulative_sampler_gpu_time
 
-    # 4. Token counts
+    # 4. Token counts and cost
     metrics["tokens/cumulative_input"] = database.cumulative_input_tokens
     metrics["tokens/cumulative_output"] = database.cumulative_output_tokens
     metrics["tokens/cumulative_total"] = database.cumulative_input_tokens + database.cumulative_output_tokens
+    metrics["cost/cumulative_usd"] = database.cumulative_cost
 
     # 4b. FLOP estimation (2N FLOPs per token, where N = model parameters)
     # This approximation comes from the forward pass requiring ~2N multiply-adds per token
@@ -458,7 +459,6 @@ def compute_wandb_metrics(database) -> dict:
     metrics["evolution/total_resets"] = database._total_resets
 
     # 10. Parallel vs sequential prompts (did DB change between consecutive prompts?)
-    metrics["parallelism/database_version"] = database.database_version
     metrics["parallelism/parallel_prompts"] = database.parallel_prompts
     metrics["parallelism/sequential_prompts"] = database.sequential_prompts
     total_prompts = database.parallel_prompts + database.sequential_prompts

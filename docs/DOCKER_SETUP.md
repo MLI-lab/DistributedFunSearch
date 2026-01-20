@@ -45,24 +45,6 @@ If using local models with vLLM, install gcc/g++ (required for Triton to compile
 conda install -c conda-forge gcc_linux-64 gxx_linux-64 -y
 ```
 
-Skip this step if using API models only.
-
-**Install graph-tool (required for graph-based evaluation):**
-
-```bash
-conda install -c conda-forge graph-tool -y
-```
-
-**Model caching (local models only):**
-
-vLLM automatically downloads models to `~/.cache/huggingface/` on first use. To change the cache location, set the environment variable before running:
-
-```bash
-export HF_HOME=/your/custom/cache/path
-# or
-export TRANSFORMERS_CACHE=/your/custom/cache/path
-```
-
 Before running the experiment, update your config to use the Docker RabbitMQ service name:
 
 ```bash
@@ -124,6 +106,18 @@ python -m disfun
 
 **Worker node setup:**
 
+**Requirement:** Worker nodes must be able to reach the main node on port 5672 (RabbitMQ).
+
+Get the main node's IP (run on main node):
+```bash
+hostname -I | awk '{print $1}'
+```
+
+Test connectivity (run on worker node):
+```bash
+python -c "import socket; s=socket.socket(); s.connect(('<main-node-ip>', 5672)); print('OK'); s.close()"
+```
+
 Start the external devcontainer which uses `network_mode: "host"` to share the host's network:
 
 ```bash
@@ -132,13 +126,12 @@ docker compose up --build -d
 docker exec -it disfun-main bash
 ```
 
-Inside the worker container, follow the installation steps above (conda env, PyTorch, DistributedFunSearch). In `config.py`, set the RabbitMQ host to the main node's actual hostname or IP address:
+Inside the worker container, follow the installation steps above (conda env, PyTorch, DistributedFunSearch). Update the RabbitMQ host to point to the main node:
 
-```python
-rabbitmq=RabbitMQConfig(
-    host='main-node-hostname',  # e.g., 'node1.cluster.com' or '192.168.1.10'
-    port=5672,
-)
+```bash
+# Edit src/experiments/experiment1/config.py
+# Change: host='localhost'
+# To:     host='192.168.1.10'  # Main node's IP or hostname
 ```
 
 Then attach only samplers and evaluators (don't run the full experiment, which would create a duplicate ProgramsDatabase):
@@ -147,10 +140,8 @@ Then attach only samplers and evaluators (don't run the full experiment, which w
 cd src/experiments/experiment1
 
 # Attach evaluators only
-python -m disfun.attach_evaluators
+python -m disfun --attach evaluators
 
 # Or attach samplers only
-python -m disfun.attach_samplers
-
-# Or run both in separate terminals
+python -m disfun --attach samplers
 ```

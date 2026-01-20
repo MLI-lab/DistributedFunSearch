@@ -1,12 +1,12 @@
-# Deletion-Correcting Codes Specification
+# Deletion Correcting Codes Specification
 
-Find large codes where codewords have no common subsequence of length ≥ n-s.
+Find large codes where codewords have no common subsequence of length ≥ n minus s.
 
 ## Problem
 
 - **Nodes:** Binary strings of length n
-- **Edges:** Two nodes connected if `LCS(node1, node2) ≥ n - s`
-- **Goal:** Find maximum independent set (valid deletion-correcting code)
+- **Edges:** Two nodes connected if `LCS(node1, node2) ≥ n minus s`
+- **Goal:** Find maximum independent set (valid deletion correcting code)
 
 ## Directory Structure
 
@@ -70,6 +70,49 @@ Deletions/
         └── reflector.txt           # System prompt for reflection
 ```
 
+## Evaluation Script Requirements
+
+The system is hardcoded to evolve a function named `priority` and call an `evaluate` function. Any custom evaluation script must follow this structure:
+
+```python
+def evaluate(params, graph_dir):
+    """Called by the evaluator with problem parameters.
+
+    Args:
+        params: Tuple of problem parameters (e.g., (n, s, q))
+        graph_dir: Path to precomputed graphs (can be None)
+
+    Returns:
+        Tuple of (score, hash_value) where:
+        - score: Numeric score (higher is better)
+        - hash_value: String hash for deduplication (functions with same hash are duplicates)
+    """
+    n, s, q = params
+    solution, hash_value = solve(n, s, q, graph_dir)
+    return (len(solution), hash_value)
+
+def solve(n, s, q, graph_dir):
+    """Uses the priority function to construct a solution."""
+    # Compute priorities for candidate items
+    priorities = {item: priority(item, ...) for item in candidates}
+    # Use priorities to build solution (e.g., greedy selection)
+    ...
+    return solution, hash_value
+
+def priority(node, G, n, s) -> float:
+    """Placeholder - replaced at runtime with LLM-generated code.
+
+    The function body is replaced, but the signature must match
+    what your solve() function calls.
+    """
+    return 0.0
+```
+
+The `priority` function acts as a placeholder. At runtime, the evaluator:
+1. Parses the LLM output to extract the new `priority` function body
+2. Replaces the placeholder `priority` function in the evaluation script
+3. Executes `evaluate(params, graph_dir)` to get the score
+
 ## How Prompt Building Works
 
 Prompt building works by selecting a template and dynamically filling its placeholders with content sampled from the program database. Each strategy has a different approach:
@@ -107,8 +150,8 @@ Function docstrings are loaded from template files in `docstrings/`:
 | `score_label_relative.txt` | Label for relative scores | `Relative to baseline...:` |
 
 **Placeholders in docstring templates:**
-- `{score}` - Replaced with formatted scores when `show_scores=True`, or removed when `show_scores=False`.
-- `{version}` - Replaced with the previous version number (0, 1, 2, etc.). Used consistently across all strategies.
+- `{score}`: Replaced with formatted scores when `show_scores=True`, or removed when `show_scores=False`.
+- `{version}`: Replaced with the previous version number (0, 1, 2, etc.). Used consistently across all strategies.
 
 **Score format** depends on `score_display_mode`:
 - `"absolute"`: `Scores (format...): {(6, 1, 2): 10, (7, 1, 2): 16}`

@@ -1,0 +1,21 @@
+import networkx as nx
+import math
+import itertools
+from collections import Counter
+
+
+def solve(n, s, q, G):
+    """Find a large independent set using greedy algorithm."""
+    priorities = {node: priority(node, G, n, s) for node in G.nodes}
+    nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))
+
+    independent_set = set()
+    removed = set()
+    for node in nodes_sorted:
+        if node in removed:
+            continue
+        independent_set.add(node)
+        removed.add(node)
+        removed.update(G.neighbors(node))
+
+    return independent_set

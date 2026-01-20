@@ -1,7 +1,5 @@
 {problem_description}
-{evaluation_preamble}
 {evaluation_script}
-{imports}
 {fewshot_examples}
 
 {function_header}

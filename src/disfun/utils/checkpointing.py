@@ -42,8 +42,7 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
     database.duplicates_discarded = checkpoint_data.get("duplicates_discarded", 0)
 
     # Restore parallel vs sequential prompt metrics
-    database.database_version = checkpoint_data.get("database_version", 0)
-    database.last_prompt_version = checkpoint_data.get("last_prompt_version", 0)
+    database.last_stored_count = checkpoint_data.get("last_stored_count", checkpoint_data.get("last_prompt_version", 0))
     database.parallel_prompts = checkpoint_data.get("parallel_prompts", 0)
     database.sequential_prompts = checkpoint_data.get("sequential_prompts", 0)
 
@@ -179,8 +178,7 @@ def serialize_checkpoint(database) -> dict:
         "version_mismatch_discarded": database.version_mismatch_discarded,
         "duplicates_discarded": database.duplicates_discarded,
         # Parallel vs sequential prompt metrics
-        "database_version": database.database_version,
-        "last_prompt_version": database.last_prompt_version,
+        "last_stored_count": database.last_stored_count,
         "parallel_prompts": database.parallel_prompts,
         "sequential_prompts": database.sequential_prompts,
         "found_optimal_solution": database.found_optimal_solution,

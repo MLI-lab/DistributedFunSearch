@@ -68,13 +68,15 @@ TreeRL/
 evol-sampling-experiment/
 
 # ==============================================================================
-# Documents 
+# Documents
 # ==============================================================================
 *.pdf
 REEVO_PLAN.md
 docs/EVALUATION_ARCHITECTURE.md
 docs/DAYTONA_EVALUATION.md
 docs/ZIH_SETUP.md
+docs/SHUTDOWN.md
+docs/CODE_QUALITY.md
 plots/
 
 # ==============================================================================

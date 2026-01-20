@@ -61,8 +61,11 @@ class SamplerConfig:
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "bigcode/starcoder2-15b"
+    model: str = "bigcode/starcoder2-15b"  # See https://docs.vllm.ai/en/latest/models/supported_models.html
+    cost_model: str = None  # LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
+    use_chat_api: bool = False  # True to use vLLM chat() instead of generate(), required for Qwen3 thinking mode
+    enable_thinking: bool = None  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
     model_params_billions: float = 15.0  # For FLOP estimation, None to disable
     api_base: str = None
     api_key: str = None  # None loads from .env
@@ -102,7 +105,6 @@ class PromptConfig:
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
-    fewshot_include_thinking: bool = False  # Include <thinking> tags in few-shot examples (if template requests thinking output)
     fewshot_include_thought: bool = False  # Include <thought> tags in few-shot examples (if template requests thought output)
 
     # EoH
@@ -195,7 +197,9 @@ class ScalingConfig:
 @dataclasses.dataclass(frozen=True)
 class TerminationConfig:
     """Experiment termination conditions."""
-    iteration_limit: int = 400_000
+    termination_mode: str = "iterations"  # "iterations" or "cost"
+    iteration_limit: int = 400_000  # Used when termination_mode="iterations"
+    cost_limit: float = None  # Max cost in USD, used when termination_mode="cost"
     stop_on_optimal: bool = False  # If True, stop early after finding optimal solution
     optimal_solution_programs: int = 20_000  # Extra iterations after optimal found (only if stop_on_optimal=True)
     target_solutions: dict = dataclasses.field(default_factory=lambda: {

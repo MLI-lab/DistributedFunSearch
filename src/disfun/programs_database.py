@@ -44,6 +44,7 @@ from disfun.utils import prompt_builder
 from disfun.utils.profiling import async_time_execution
 from disfun.utils import rabbitmq
 import json
+import litellm
 
 # Wandb import (optional)
 try:
@@ -209,13 +210,15 @@ class ProgramsDatabase:
         self._total_resets = 0
         self.save_checkpoints_path = save_checkpoints_path
         self.termination_config = termination_config
+        self.termination_mode = termination_config.termination_mode if termination_config else "iterations"
         self.iteration_limit = termination_config.iteration_limit if termination_config else 400_000
+        self.cost_limit = termination_config.cost_limit if termination_config else None
         self.found_optimal_solution = False
         self.stop_on_optimal = termination_config.stop_on_optimal if termination_config else True
         self.optimal_solution_programs = termination_config.optimal_solution_programs if termination_config else 20_000
         self.prompts_since_optimal = 0
         self.target_signatures = termination_config.target_solutions if termination_config else None
-        self._iteration_limit_reached = False
+        self._termination_limit_reached = False
 
         self.best_known_solutions = best_known_solutions or {}
 
@@ -224,6 +227,8 @@ class ProgramsDatabase:
 
         self.cumulative_input_tokens  = 0
         self.cumulative_output_tokens = 0
+        self.cumulative_cost = 0.0
+        self.cost_model = sampler_config.cost_model if sampler_config and hasattr(sampler_config, 'cost_model') else None
 
         # Model parameters for FLOP estimation (2N FLOPs per token where N = params)
         self.model_params_billions = sampler_config.model_params_billions if sampler_config and hasattr(sampler_config, 'model_params_billions') else None
@@ -237,10 +242,7 @@ class ProgramsDatabase:
         self.next_sampler_id = 0        # Unique ID for each sampler, used as random seed for reproducibility
 
         # Parallel vs sequential: tracks if database changed between consecutive prompt generations
-        # - Parallel: same version as previous prompt, no new data, prompts use same few-shot examples
-        # - Sequential: version increased, new programs stored, prompt benefits from recent results
-        self.database_version = 0       # Increments on each program store
-        self.last_prompt_version = 0    # Version when previous prompt was generated
+        self.last_stored_count = 0      # total_stored_programs when previous prompt was generated
         self.parallel_prompts = 0       # Prompts generated from same database state as previous
         self.sequential_prompts = 0     # Prompts that benefited from new stored programs
 
@@ -376,6 +378,18 @@ class ProgramsDatabase:
                 self.cumulative_input_tokens += input_tokens
                 self.cumulative_output_tokens += output_tokens
 
+                # Calculate cost using LiteLLM pricing
+                if self.cost_model and (input_tokens > 0 or output_tokens > 0):
+                    try:
+                        prompt_cost, completion_cost = litellm.cost_per_token(
+                            model=self.cost_model,
+                            prompt_tokens=input_tokens,
+                            completion_tokens=output_tokens
+                        )
+                        self.cumulative_cost += prompt_cost + completion_cost
+                    except Exception as e:
+                        logger.debug(f"Could not calculate cost: {e}")
+
                 # Accumulate ReEvo reflections
                 reflection_output = data.get("reflection_output")
                 if reflection_output:
@@ -475,7 +489,6 @@ class ProgramsDatabase:
         Logs to self.lineage_log if lineage tracking is enabled.
         """
         self.total_stored_programs += 1
-        self.database_version += 1  # Track state changes for parallel vs sequential analysis
         island = self._islands[island_id]
         clusters = island['clusters']
         signature = self._get_signature(scores_per_test)
@@ -619,17 +632,23 @@ class ProgramsDatabase:
             self.prompts_since_optimal += 1  # Track additional programs after the optimal solution
             logger.info(f"Functions processed since optimal: {self.prompts_since_optimal}")
 
-        elif self.iterations >= self.iteration_limit:
-            if not self._iteration_limit_reached:
-                self._iteration_limit_reached = True
+        # Check termination based on mode (iterations or cost)
+        elif self.termination_mode == "cost" and self.cost_limit is not None:
+            if self.cumulative_cost >= self.cost_limit:
+                if not self._termination_limit_reached:
+                    self._termination_limit_reached = True
+                    self._save_and_shutdown(f"Reached cost limit: ${self.cumulative_cost:.4f} >= ${self.cost_limit:.4f}")
+        elif self.termination_mode == "iterations" and self.iterations >= self.iteration_limit:
+            if not self._termination_limit_reached:
+                self._termination_limit_reached = True
                 self._save_and_shutdown(f"Reached {self.iteration_limit} iterations.")
 
         # Track parallel vs sequential: did database change since last prompt?
-        if self.database_version == self.last_prompt_version:
+        if self.total_stored_programs == self.last_stored_count:
             self.parallel_prompts += 1
         else:
             self.sequential_prompts += 1
-            self.last_prompt_version = self.database_version
+            self.last_stored_count = self.total_stored_programs
 
         island_id = np.random.randint(len(self._islands))
         island = self._islands[island_id]

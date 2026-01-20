@@ -9,7 +9,9 @@ Below are example priority functions:
 {fewshot_examples}
 
 Improve on these functions.
+First, compare the two functions above and explain why the second outperforms the first.
 The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
 
 Use this format:
+<thought>Your insight</thought>
 <code>Your implementation</code>
