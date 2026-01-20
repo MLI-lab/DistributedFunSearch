@@ -1,1 +1,1 @@
-Relative to best known (format (n, s, q): improvement%):
+Gap to best known (format (n, s): %, negative = below)

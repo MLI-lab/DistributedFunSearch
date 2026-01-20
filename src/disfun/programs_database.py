@@ -211,6 +211,7 @@ class ProgramsDatabase:
         self.termination_config = termination_config
         self.iteration_limit = termination_config.iteration_limit if termination_config else 400_000
         self.found_optimal_solution = False
+        self.stop_on_optimal = termination_config.stop_on_optimal if termination_config else True
         self.optimal_solution_programs = termination_config.optimal_solution_programs if termination_config else 20_000
         self.prompts_since_optimal = 0
         self.target_signatures = termination_config.target_solutions if termination_config else None
@@ -610,7 +611,7 @@ class ProgramsDatabase:
 
     async def get_prompt(self) -> None:
 
-        if self.found_optimal_solution:
+        if self.found_optimal_solution and self.stop_on_optimal:
             logger.info(f"In self.found_optimal_solution: with it being equal to {self.found_optimal_solution:}")
             if self.prompts_since_optimal >= self.optimal_solution_programs:
                 logger.info(f"Found an optimal solution and processed {self.optimal_solution_programs} additional programs. Stopping further publishing.")

@@ -1,84 +1,43 @@
-"""Evaluation script for no_graph variant, priority function receives only node - n - s.
+"""Evaluation script for no_graph variant, priority function receives only node, n and s.
 
-This variant computes neighbors on-the-fly without loading pre-computed graphs from disk.
+This variant computes neighbors on the fly without loading precomputed graphs from disk.
 Useful when graph loading is slow or graph files are not available.
 """
 
-import sys
-import itertools
 import hashlib
+
+# Imports available to priority function (must match imports/no_graph.txt)
 import math
-
-#import re
-#import random
-#import time
-#import binascii
-#import collections
-#import pandas as pd
-#from itertools import groupby, combinations, permutations, product
-#from functools import reduce, lru_cache
-#from typing import Dict, List, Set, Tuple, Optional
-#from collections import Counter, defaultdict
-#from binascii import hexlify
-#from math import log, log2, sqrt, exp, ceil, floor, factorial, gcd
-#from numpy import zeros, ones, array
-
-# Python 2 compatibility
-#xrange = range
-
-# Binary string helpers
-#def str2int(s): return int(s, 2)
-#def int2str(n, length): return format(n, f'0{length}b')
-#def hamming_distance(s1, s2): return sum(c1 != c2 for c1, c2 in zip(s1, s2))
-
-# Aliases for common LLM naming variations
-#HammingDistance = hamming_distance
-#Hamming_Distance = hamming_distance
-#hammingDistance = hamming_distance
-
-# Common variable aliases LLMs might reference
-#inf = float('inf')
-#INF = float('inf')
-#pi = math.pi
-#PI = math.pi
-#e = math.e
-#E = math.e
+import itertools
+from collections import Counter
 
 
-#Actual Eval starts here####
 def lcs_length(s1, s2):
     """Compute longest common subsequence length using dynamic programming."""
     m, n = len(s1), len(s2)
-    # Use only two rows for space optimization
     prev = [0] * (n + 1)
     curr = [0] * (n + 1)
 
     for i in range(1, m + 1):
-        curr[0] = 0  # Reset first column for this row (base case)
+        curr[0] = 0
         for j in range(1, n + 1):
             if s1[i-1] == s2[j-1]:
                 curr[j] = prev[j-1] + 1
             else:
                 curr[j] = max(prev[j], curr[j-1])
-        prev, curr = curr, prev  # Swap rows
+        prev, curr = curr, prev
 
     return prev[n]
 
 
 def are_neighbors(node1, node2, n, s):
-    """Check if two nodes are neighbors (share subsequence of length >= n-s)."""
+    """Check if two nodes are neighbors (share subsequence of length >= n minus s)."""
     return lcs_length(node1, node2) >= n - s
 
 
-def priority(node, n, s, q) -> float:
-    pass
-
-
-def hash_priority_mapping(priorities, sequences):
-    """Generate a hash based on the mapping of sequences to their priority scores."""
-    mapping = [(seq, priorities[seq]) for seq in sequences]
-    mapping_sorted = sorted(mapping, key=lambda x: x[0])
-    mapping_str = ','.join(f'{seq}:{score}' for seq, score in mapping_sorted)
+def hash_priority_mapping(priorities, nodes):
+    """Generate a hash based on the mapping of nodes to their priority scores."""
+    mapping_str = ','.join(f'{node}:{priorities[node]}' for node in sorted(nodes))
     return hashlib.sha256(mapping_str.encode()).hexdigest()
 
 
@@ -89,40 +48,37 @@ def evaluate(params, graph_dir):
 
 
 def solve(n, s, q, graph_dir):
-    """Find a large independent set, computes neighbors on-the-fly without loading graph files."""
-    print(f"Computing independent set on-the-fly for n={n}, s={s} (no graph loading)", file=sys.stderr)
-
-    # Generate all q-ary strings of length n
+    """Find a large independent set, computes neighbors on the fly without loading graph files."""
+    # Generate all q ary strings of length n
     nodes = [''.join(seq) for seq in itertools.product(map(str, range(q)), repeat=n)]
 
     # Calculate priorities based only on node string properties (no graph passed)
     priorities = {node: priority(node, n, s, q) for node in nodes}
 
-    # Sort nodes by priority (descending), Lexicographic tie-breaking (the second element x is the node string)
+    # Sort nodes by priority (descending), lexicographic tie breaking
     nodes_sorted = sorted(nodes, key=lambda x: (-priorities[x], x))
 
-    # Greedy algorithm: build independent set by checking neighbors on-the-fly
+    # Greedy independent set construction
     independent_set = set()
-    removed_nodes = set()
-
+    removed = set()
     for node in nodes_sorted:
-        if node in removed_nodes:
+        if node in removed:
             continue
-
-        # Add node to independent set
         independent_set.add(node)
-        removed_nodes.add(node)
+        removed.add(node)
+        # Remove all neighbors (computed on the fly)
+        for other in nodes:
+            if other not in removed and are_neighbors(node, other, n, s):
+                removed.add(other)
 
-        # Remove all neighbors (computed on-the-fly)
-        for other_node in nodes:
-            if other_node not in removed_nodes:
-                if are_neighbors(node, other_node, n, s):
-                    removed_nodes.add(other_node)
-
-    # Compute hash for deduplication (only for start_n)
-    # Note: "n == start_n" gets replaced with actual value (e.g. "n == 7") at runtime by __main__.py
+    # Compute hash for deduplication (only for smallest n)
+    # Note: "n == start_n" gets replaced with actual value (e.g. "n == 6") at runtime by __main__.py
     hash_value = None
     if n == start_n:
         hash_value = hash_priority_mapping(priorities, nodes)
 
     return independent_set, hash_value
+
+
+def priority(node, n, s, q) -> float:
+    pass

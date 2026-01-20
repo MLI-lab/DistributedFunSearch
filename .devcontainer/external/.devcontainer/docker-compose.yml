@@ -13,6 +13,7 @@ services:
     volumes:
       - ~/.ssh:/root/.ssh  # Maps SSH folder (works across different users)
       - ../../../:/workspace/DistributedFunSearch  
+      -  /mnt/hdd_pool_zion/users/franziska:/mnt/
       - /media/:/media/
       - /srv/:/srv/
     network_mode: "host"  # Use host network mode

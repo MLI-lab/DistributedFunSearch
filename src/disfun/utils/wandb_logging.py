@@ -5,19 +5,239 @@ This is intentional. They are extensions of ProgramsDatabase, not independent mo
 """
 
 import os
+import socket
 import logging
 import asyncio
+import time
 import numpy as np
 
 # Wandb import (optional)
 try:
     import wandb
-    WANDB_AVAILABLE = True
+    _wandb_available = True
 except ImportError:
-    WANDB_AVAILABLE = False
+    _wandb_available = False
     wandb = None
 
+# Resource monitoring imports (optional, graceful degradation if unavailable)
+try:
+    import psutil
+    _psutil_available = True
+except ImportError:
+    _psutil_available = False
+    psutil = None
+
+try:
+    import pynvml
+    _pynvml_available = True
+except ImportError:
+    _pynvml_available = False
+    pynvml = None
+
 logger = logging.getLogger('main_logger')
+
+
+# Store for aggregating resource stats from remote nodes
+_remote_resource_stats = {}  # hostname to {metrics dict, timestamp}
+_remote_stats_lock = asyncio.Lock()
+_remote_stats_ttl = 120  # Seconds before remote stats are considered stale
+
+# NVML initialization state
+_nvml_initialized = False
+
+
+def _ensure_nvml_initialized():
+    """Initialize NVML for GPU monitoring (idempotent)."""
+    global _nvml_initialized
+    if not _pynvml_available or _nvml_initialized:
+        return _nvml_initialized
+    try:
+        pynvml.nvmlInit()
+        _nvml_initialized = True
+        return True
+    except Exception as e:
+        logger.debug(f"Failed to initialize NVML: {e}")
+        return False
+
+
+async def _collect_resource_stats_raw() -> dict:
+    """Collect resource stats without hostname prefix.
+
+    This is the core collection function used by both local logging
+    and RabbitMQ publishing to avoid code duplication.
+
+    Returns:
+        Dictionary with raw metric names (no hostname prefix).
+    """
+    if not _psutil_available:
+        return {}
+
+    stats = {}
+
+    try:
+        # CPU
+        stats['cpu_percent'] = await asyncio.to_thread(psutil.cpu_percent, interval=1)
+
+        # Per core CPU (count active cores)
+        cpu_per_core = await asyncio.to_thread(psutil.cpu_percent, interval=0, percpu=True)
+        if cpu_per_core:
+            stats['cpu_cores_active'] = sum(1 for c in cpu_per_core if c > 10)
+
+        # Memory
+        mem = await asyncio.to_thread(psutil.virtual_memory)
+        stats['memory_percent'] = mem.percent
+        stats['memory_used_gib'] = mem.used / (1024**3)
+        stats['memory_available_gib'] = mem.available / (1024**3)
+
+        # Swap
+        swap = await asyncio.to_thread(psutil.swap_memory)
+        stats['swap_percent'] = swap.percent
+
+        # Load average (Unix only)
+        try:
+            load_avg = await asyncio.to_thread(os.getloadavg)
+            cpu_count = os.cpu_count() or 1
+            stats['load_1min'] = load_avg[0]
+            stats['load_5min'] = load_avg[1]
+            stats['load_15min'] = load_avg[2]
+            stats['load_per_core'] = load_avg[0] / cpu_count
+        except (OSError, AttributeError):
+            pass  # Windows does not have getloadavg
+
+        # I/O wait (indicates disk bottleneck)
+        try:
+            cpu_times = await asyncio.to_thread(lambda: psutil.cpu_times_percent(interval=0))
+            if hasattr(cpu_times, 'iowait'):
+                stats['io_wait_percent'] = cpu_times.iowait
+        except Exception:
+            pass
+
+        # Disk I/O (cumulative, useful for rate calculation)
+        try:
+            disk_io = await asyncio.to_thread(psutil.disk_io_counters)
+            if disk_io:
+                stats['disk_read_mb'] = disk_io.read_bytes / (1024**2)
+                stats['disk_write_mb'] = disk_io.write_bytes / (1024**2)
+        except Exception:
+            pass
+
+        # Network I/O (useful for distributed setups)
+        try:
+            net_io = await asyncio.to_thread(psutil.net_io_counters)
+            if net_io:
+                stats['net_sent_mb'] = net_io.bytes_sent / (1024**2)
+                stats['net_recv_mb'] = net_io.bytes_recv / (1024**2)
+        except Exception:
+            pass
+
+        # GPU metrics (if available)
+        if _pynvml_available and _ensure_nvml_initialized():
+            try:
+                device_count = await asyncio.to_thread(pynvml.nvmlDeviceGetCount)
+                for gpu_idx in range(device_count):
+                    try:
+                        handle = await asyncio.to_thread(pynvml.nvmlDeviceGetHandleByIndex, gpu_idx)
+
+                        # GPU utilization
+                        util = await asyncio.to_thread(pynvml.nvmlDeviceGetUtilizationRates, handle)
+                        stats[f'gpu_{gpu_idx}_utilization'] = util.gpu
+                        stats[f'gpu_{gpu_idx}_memory_util'] = util.memory
+
+                        # GPU memory
+                        mem_info = await asyncio.to_thread(pynvml.nvmlDeviceGetMemoryInfo, handle)
+                        stats[f'gpu_{gpu_idx}_memory_used_gib'] = mem_info.used / (1024**3)
+                        stats[f'gpu_{gpu_idx}_memory_free_gib'] = mem_info.free / (1024**3)
+                        stats[f'gpu_{gpu_idx}_memory_total_gib'] = mem_info.total / (1024**3)
+
+                        # GPU temperature
+                        try:
+                            temp = await asyncio.to_thread(
+                                pynvml.nvmlDeviceGetTemperature, handle, pynvml.NVML_TEMPERATURE_GPU
+                            )
+                            stats[f'gpu_{gpu_idx}_temperature_c'] = temp
+                        except Exception:
+                            pass
+
+                        # GPU power
+                        try:
+                            power = await asyncio.to_thread(pynvml.nvmlDeviceGetPowerUsage, handle)
+                            stats[f'gpu_{gpu_idx}_power_w'] = power / 1000  # mW to W
+                        except Exception:
+                            pass
+
+                    except Exception as e:
+                        logger.debug(f"Failed to get GPU {gpu_idx} metrics: {e}")
+
+            except Exception as e:
+                logger.debug(f"Failed to enumerate GPUs: {e}")
+
+    except Exception as e:
+        logger.warning(f"Error collecting resource stats: {e}")
+
+    return stats
+
+
+async def collect_local_resource_stats() -> dict:
+    """Collect resource statistics for the current node.
+
+    Returns:
+        Dictionary with resource metrics prefixed by hostname.
+    """
+    raw_stats = await _collect_resource_stats_raw()
+    if not raw_stats:
+        return {}
+
+    # Add hostname prefix to all metrics
+    hostname = socket.gethostname()
+    return {f"resources/{hostname}/{k}": v for k, v in raw_stats.items()}
+
+
+async def update_remote_resource_stats(hostname: str, stats: dict):
+    """Update cached resource stats from a remote node.
+
+    Called when receiving stats via RabbitMQ from attach nodes.
+
+    Args:
+        hostname: The remote node's hostname
+        stats: Dictionary of resource metrics (without hostname prefix)
+    """
+    async with _remote_stats_lock:
+        # Add hostname prefix to all metrics
+        prefixed_stats = {
+            f"resources/{hostname}/{k}": v for k, v in stats.items()
+        }
+        _remote_resource_stats[hostname] = {
+            'metrics': prefixed_stats,
+            'timestamp': time.time()
+        }
+
+
+async def get_all_resource_stats() -> dict:
+    """Get resource stats from local node and all known remote nodes.
+
+    Returns:
+        Combined dictionary of all resource metrics.
+    """
+    # Collect local stats
+    metrics = await collect_local_resource_stats()
+
+    # Add remote stats (if not stale)
+    async with _remote_stats_lock:
+        now = time.time()
+        stale_hosts = []
+
+        for hostname, data in _remote_resource_stats.items():
+            if now - data['timestamp'] > _remote_stats_ttl:
+                stale_hosts.append(hostname)
+                continue
+            metrics.update(data['metrics'])
+
+        # Clean up stale entries
+        for hostname in stale_hosts:
+            del _remote_resource_stats[hostname]
+            logger.debug(f"Removed stale resource stats from {hostname}")
+
+    return metrics
 
 
 def convert_tuple_keys(obj):
@@ -64,6 +284,7 @@ def build_wandb_init_config(
         "q": evaluator_config.q if evaluator_config else None,
         # Termination config
         "iteration_limit": termination_config.iteration_limit if termination_config else None,
+        "stop_on_optimal": termination_config.stop_on_optimal if termination_config else None,
         "optimal_solution_programs": termination_config.optimal_solution_programs if termination_config else None,
         "target_signatures": str(termination_config.target_solutions) if termination_config and termination_config.target_solutions else None,
     }
@@ -574,7 +795,7 @@ def log_top_programs_table(database):
     Args:
         database: ProgramsDatabase instance
     """
-    if not database.wandb_enabled or not WANDB_AVAILABLE:
+    if not database.wandb_enabled or not _wandb_available:
         return
 
     table_data = []
@@ -670,7 +891,7 @@ async def initialize_wandb(database):
     if not database.wandb_config or not database.wandb_config.enabled:
         return
 
-    if not WANDB_AVAILABLE:
+    if not _wandb_available:
         logger.warning("W&B logging enabled but wandb not installed. Run: pip install wandb")
         return
 
@@ -820,8 +1041,12 @@ async def periodic_wandb_logging(database, rabbitmq_manager=None):
                 rmq_metrics = await compute_rabbitmq_metrics(rabbitmq_manager)
                 metrics.update(rmq_metrics)
 
+                # Get resource stats from local and remote nodes
+                resource_metrics = await get_all_resource_stats()
+                metrics.update(resource_metrics)
+
                 wandb.log(metrics)
-                logger.debug(f"Logged {len(metrics)} metrics to W&B")
+                logger.debug(f"Logged {len(metrics)} metrics to W&B (including {len(resource_metrics)} resource metrics)")
 
                 # Log top programs table with lineage
                 log_top_programs_table(database)
@@ -852,3 +1077,134 @@ def finish_wandb_run(database):
             logger.info("W&B run finished successfully")
         except Exception as e:
             logger.error(f"Error finishing W&B run: {e}")
+
+
+# Resource stats queue name for multi-node reporting
+_resource_stats_queue = "resource_stats_queue"
+
+
+async def publish_resource_stats_periodically(config, interval: int = 60):
+    """Periodically publish local resource stats to RabbitMQ for aggregation by main node.
+
+    This should be called by attach nodes (samplers/evaluators on remote machines).
+
+    Args:
+        config: Configuration object with rabbitmq settings
+        interval: Seconds between stats publications (default 60)
+    """
+    try:
+        import aio_pika
+        import json
+    except ImportError:
+        logger.warning("aio_pika not available, cannot publish resource stats")
+        return
+
+    hostname = socket.gethostname()
+    logger.info(f"Starting resource stats publisher for {hostname}")
+
+    connection = None
+    channel = None
+
+    while True:
+        try:
+            # Ensure connection
+            if connection is None or connection.is_closed:
+                from disfun.utils.rabbitmq import create_connection
+                connection = await create_connection(config)
+                channel = await connection.channel()
+                await channel.declare_queue(
+                    _resource_stats_queue,
+                    durable=False,
+                    auto_delete=True,
+                    arguments={'x-message-ttl': 120000}  # Messages expire after 2 minutes
+                )
+                logger.info(f"Connected to RabbitMQ for resource stats publishing")
+
+            # Collect stats (without hostname prefix, will be added by receiver)
+            stats = await _collect_resource_stats_raw()
+
+            # Publish
+            message = aio_pika.Message(
+                body=json.dumps({
+                    'hostname': hostname,
+                    'timestamp': time.time(),
+                    'stats': stats
+                }).encode(),
+                content_type='application/json'
+            )
+            await channel.default_exchange.publish(
+                message,
+                routing_key=_resource_stats_queue
+            )
+            logger.debug(f"Published {len(stats)} resource stats to queue")
+
+        except Exception as e:
+            logger.warning(f"Error publishing resource stats: {e}")
+            # Reset connection on error
+            connection = None
+            channel = None
+
+        await asyncio.sleep(interval)
+
+
+async def consume_resource_stats(config):
+    """Consume resource stats from remote nodes via RabbitMQ.
+
+    This should be called by the main node (ProgramsDatabase) to aggregate
+    stats from attach nodes.
+
+    Args:
+        config: Configuration object with rabbitmq settings
+    """
+    try:
+        import aio_pika
+        import json
+    except ImportError:
+        logger.warning("aio_pika not available, cannot consume resource stats")
+        return
+
+    hostname = socket.gethostname()
+    logger.info(f"Starting resource stats consumer on {hostname}")
+
+    connection = None
+
+    while True:
+        try:
+            if connection is None or connection.is_closed:
+                from disfun.utils.rabbitmq import create_connection
+                connection = await create_connection(config)
+                channel = await connection.channel()
+                queue = await channel.declare_queue(
+                    _resource_stats_queue,
+                    durable=False,
+                    auto_delete=True,
+                    arguments={'x-message-ttl': 120000}
+                )
+                logger.info(f"Listening for resource stats on {_resource_stats_queue}")
+
+                async for message in queue:
+                    async with message.process():
+                        try:
+                            data = json.loads(message.body.decode())
+                            remote_hostname = data.get('hostname', 'unknown')
+                            stats = data.get('stats', {})
+
+                            # Skip stats from our own node (we collect those directly)
+                            if remote_hostname == hostname:
+                                continue
+
+                            await update_remote_resource_stats(remote_hostname, stats)
+                            logger.debug(f"Received {len(stats)} resource stats from {remote_hostname}")
+
+                        except Exception as e:
+                            logger.warning(f"Error processing resource stats message: {e}")
+
+        except asyncio.CancelledError:
+            logger.info("Resource stats consumer cancelled")
+            if connection and not connection.is_closed:
+                await connection.close()
+            raise
+        except Exception as e:
+            logger.warning(f"Resource stats consumer error: {e}")
+            connection = None
+            await asyncio.sleep(5)  # Wait before reconnecting

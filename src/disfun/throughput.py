@@ -151,12 +151,12 @@ class ThroughputRunner:
         # Load prompt specification
         prompt_spec = prompt_builder.load_prompt_spec_from_config(modified_config)
 
-        # Create termination config with unlimited values for throughput mode
+        # Create termination config for throughput mode (time-based, not iteration-based)
         throughput_termination = dataclasses.replace(
             modified_config.termination,
-            iteration_limit=999_999_999,
-            optimal_solution_programs=999_999_999,
-            target_solutions=None
+            iteration_limit=999_999_999,  # High value to prevent iteration-based termination
+            stop_on_optimal=False,  # Disable early stopping on optimal
+            target_solutions=None  # Disable target-based termination
         )
 
         # Create connection manager for ProgramsDatabase
@@ -186,8 +186,8 @@ class ThroughputRunner:
         db_task = asyncio.create_task(self.database.consume_and_process())
         self._start_processes(modified_config)
 
-        # Start resource monitoring task
-        resource_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically(interval=60))
+        # Start resource monitoring task (interval from scaling_config.resource_log_interval)
+        resource_task = asyncio.create_task(self.resource_manager.log_resource_stats_periodically())
 
         # Wait for sampler connection
         self.logger.info("Waiting for samplers to connect...")
@@ -384,13 +384,30 @@ class ThroughputRunner:
 
     async def cleanup(self):
         """Clean up processes and queues."""
+        import psutil
         self.logger.info("Starting cleanup...")
         all_procs = self.sampler_processes + self.evaluator_processes
+
+        # Collect all descendant PIDs before terminating (multiprocessing spawns helpers)
+        all_pids = set()
+        for p in all_procs:
+            try:
+                if p.pid:
+                    all_pids.add(p.pid)
+                    # Get all children recursively
+                    try:
+                        parent = psutil.Process(p.pid)
+                        for child in parent.children(recursive=True):
+                            all_pids.add(child.pid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except Exception:
+                pass
 
         # Terminate processes
         alive_count = sum(1 for p in all_procs if p.is_alive())
         if alive_count:
-            self.logger.info(f"Terminating {alive_count} processes...")
+            self.logger.info(f"Terminating {alive_count} processes ({len(all_pids)} total PIDs including children)...")
         for p in all_procs:
             if p.is_alive():
                 p.terminate()
@@ -399,7 +416,7 @@ class ThroughputRunner:
         while any(p.is_alive() for p in all_procs) and time.time() < deadline:
             await asyncio.sleep(0.5)
 
-        # Force kill remaining
+        # Force kill remaining tracked processes
         still_alive = [p for p in all_procs if p.is_alive()]
         if still_alive:
             self.logger.warning(f"Force killing {len(still_alive)} processes")
@@ -410,6 +427,17 @@ class ThroughputRunner:
             try:
                 p.join(timeout=1)
             except Exception:
+                pass
+
+        # Kill any orphaned child processes that weren't terminated
+        for pid in all_pids:
+            try:
+                proc = psutil.Process(pid)
+                if proc.is_running():
+                    self.logger.info(f"Killing orphaned process {pid}")
+                    proc.kill()
+                    proc.wait(timeout=5)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
                 pass
 
         # Close connections

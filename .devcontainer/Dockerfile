@@ -1,4 +1,4 @@
-# Download the official PyTorch image with CUDA 11.8 and cuDNN 8 from Docker Hub
+# Download the official PyTorch image from Docker Hub
 FROM pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime
 
 # Set to interactive mode so when installing packages with apt-get, the process doesn’t prompt for any user input 

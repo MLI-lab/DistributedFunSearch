@@ -62,7 +62,8 @@ def extract_evaluation_result(test_output, problem_instance):
     Returns:
         tuple: (score_key, score_value, hash_value)
     """
-    score_key = problem_instance 
+    # Use (n, s) as score key, stripping q since it's constant per run
+    score_key = (problem_instance[0], problem_instance[1])
     score_value = test_output[0]
     hash_value = test_output[1] if test_output[1] is not None else None
     return score_key, score_value, hash_value

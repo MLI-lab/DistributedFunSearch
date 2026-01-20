@@ -1,14 +1,14 @@
 # Copyright 2023 DeepMind Technologies Limited
 #
-# Licensed under the Apache License - Version 2.0 (the "License");
+# Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #    http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing - software
+# Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND - either express or implied.
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
@@ -42,7 +42,7 @@ class ProgramsDatabaseConfig:
     no_deduplication: bool = False
     save_lineage: bool = False  # Track parent/child relationships
     initial_program_copies: int = 100
-    batch_size: int = 10
+    batch_size: int = 1
     batch_timeout: float = 0.01
 
 
@@ -79,9 +79,9 @@ class EvaluatorConfig:
     s_values: List[int] = dataclasses.field(default_factory=lambda: [1])  # Deletions to correct 
     start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Shortest code length to evaluate
     end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Longest code length to evaluate
-    mode: str = "relative_difference"  # last, average, weighted, relative_difference
+    mode: str = "last"  # last, average, weighted, relative_difference
     timeout: int = 30
-    max_workers: int = 3  # Parallel CPU processes per evaluator
+    max_workers: int = 2  # Parallel CPU processes per evaluator
     q: int = 2  # Alphabet size (2 for binary, 4 for DNA)
     graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
     prefetch_count: int = 15
@@ -96,12 +96,14 @@ class PromptConfig:
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/template.txt"
-    funsearch_problem_desc: str = "funsearch/problem_descriptions/baseline.txt"
+    funsearch_template: str = "funsearch/templates/completion.txt"
+    funsearch_problem_desc: str = "funsearch/problem_descriptions/completion.txt"
     funsearch_system_message: str | None = None
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
+    fewshot_include_thinking: bool = False  # Include <thinking> tags in few-shot examples (if template requests thinking output)
+    fewshot_include_thought: bool = False  # Include <thought> tags in few-shot examples (if template requests thought output)
 
     # EoH
     eoh_styles_dir: str = "eoh/styles"
@@ -119,14 +121,14 @@ class PromptConfig:
 
     # Score display
     show_scores: bool = False
-    score_display_mode: str = "relative"  # absolute, relative
+    score_display_mode: str = "absolute"  # absolute, relative
     best_known_solutions: dict = dataclasses.field(default_factory=lambda: {  # Best known or upper bound scores
-        (6, 1, 2): 10,
-        (7, 1, 2): 16,
-        (8, 1, 2): 30,
-        (9, 1, 2): 52,
-        (10, 1, 2): 94,
-        (11, 1, 2): 172
+        (6, 1): 10,   # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (7, 1): 16,
+        (8, 1): 30,
+        (9, 1): 52,
+        (10, 1): 94,
+        (11, 1): 172
     })
 
     # Docstring templates for priority functions in few-shot examples (paths relative to spec_dir)
@@ -140,10 +142,10 @@ class PromptConfig:
 class WandbConfig:
     """Weights & Biases settings."""
     enabled: bool = True
-    project: str = "disfun"
+    project: str = "disfun_new"
     entity: str = "franziweindel-technical-university-of-munich"
     run_name: str = None  # None for auto-generated
-    run_name_tag: str = "relative_difference_seed_13"
+    run_name_tag: str = "graph_seed13"
     log_interval: int = 300  # Seconds
     tags: List[str] = dataclasses.field(default_factory=list)
     checkpoints_base_path: str = "/mnt/disfun/checkpoints"
@@ -162,37 +164,47 @@ class PathsConfig:
 class ScalingConfig:
     """Dynamic scaling settings."""
     enabled: bool = False
+
+    # Resource logging (monitoring only, doesn't affect scaling)
+    resource_log_interval: int = 60  # Seconds between resource log entries
+
+    # General scaling (applies to both samplers and evaluators)
     check_interval: int = 60  # Seconds between scaling checks
     max_samplers: int = 1000
     max_evaluators: int = 200
-    sampler_scale_up_threshold: int = 50  # Queue depth to trigger scale-up
-    evaluator_scale_up_threshold: int = 10
+    idle_checks_before_scale_down: int = 2  # Queue must be empty this many checks before scale-down
+    min_process_lifetime: int = 60  # Min seconds before process eligible for termination
+    min_system_memory_gib: int = 30  # Min free system RAM to spawn any process
+
+    # Sampler scaling (GPU processes)
+    sampler_scale_up_threshold: int = 50  # sampler_queue depth to trigger scale-up
     min_gpu_memory_gib: int = 35  # Min free GPU memory to start sampler
-    max_gpu_utilization: int = 50  # Max GPU util % to start sampler
-    min_system_memory_gib: int = 30
-    cpu_usage_threshold: int = 99  # Max CPU % for evaluator scale-up
-    normalized_load_threshold: float = 0.99  # Max load/cores for evaluator scale-up
-    idle_checks_before_scale_down: int = 2
-    min_process_lifetime: int = 60  # Min seconds before process eligible for scale down
-    termination_timeout: int = 30  # Seconds to wait for graceful shutdown (evaluators)
-    sampler_termination_timeout: int = 45  # Longer timeout for samplers (vLLM GPU cleanup)
-    resource_log_interval: int = 60  # Seconds between resource log entries
-    sample_count: int = 10  # Samples to average for logging and scaling decisions
-    sample_interval: int = 1  # Seconds between samples
+    max_gpu_utilization: int = 50  # Max GPU util % to allow sampler scale-up
+    min_gpu_util_for_scale_down: int = 80  # Skip scale-down if selected sampler's GPU util exceeds this
+    sampler_termination_timeout: int = 45  # Seconds to wait for graceful shutdown (vLLM GPU cleanup)
+
+    # Evaluator scaling (CPU processes)
+    evaluator_scale_up_threshold: int = 10  # evaluator_queue depth to trigger scale-up
+    cpu_usage_threshold: int = 99  # Max avg CPU % to allow evaluator scale-up
+    normalized_load_threshold: float = 0.99  # Max load/cores to allow evaluator scale-up
+    sample_count: int = 10  # CPU samples to average (smooths spiky readings)
+    sample_interval: int = 1  # Seconds between CPU samples
+    termination_timeout: int = 30  # Seconds to wait for graceful evaluator shutdown
 
 
 @dataclasses.dataclass(frozen=True)
 class TerminationConfig:
     """Experiment termination conditions."""
     iteration_limit: int = 400_000
-    optimal_solution_programs: int = 20_000  # Extra iterations after optimal found
+    stop_on_optimal: bool = False  # If True, stop early after finding optimal solution
+    optimal_solution_programs: int = 20_000  # Extra iterations after optimal found (only if stop_on_optimal=True)
     target_solutions: dict = dataclasses.field(default_factory=lambda: {
-        (6, 1, 2): 10,   # (n, s, q): target_score
-        (7, 1, 2): 16,
-        (8, 1, 2): 30,
-        (9, 1, 2): 52,
-        (10, 1, 2): 94,
-        (11, 1, 2): 172
+        (6, 1): 10,   # (n, s): target_score, q is constant per run
+        (7, 1): 16,
+        (8, 1): 30,
+        (9, 1): 52,
+        (10, 1): 94,
+        (11, 1): 172
     })
 
 
@@ -200,10 +212,23 @@ class TerminationConfig:
 class ThroughputConfig:
     """Throughput measurement settings."""
     enabled: bool = False
-    run_duration_minutes: int = 80
-    window_duration_minutes: int = 20
-    warmup_minutes: int = 15
+    run_duration_minutes: int = 3 # excluding warmup
+    window_duration_minutes: int = 1
+    warmup_minutes: int = 3
+    cooldown_seconds: int = 10  # Wait between sweep configs for cleanup
     output_file: str = "throughput_results.json"
+
+
+@dataclasses.dataclass(frozen=True)
+class SweepConfig:
+    """Parameter sweep settings for throughput measurement. Only used when running throughput sweeps (multiple configurations).
+    For single-config throughput runs, set all fields to None.
+    All combinations will be evaluated (Cartesian product).
+    """
+    evaluator_prefetch: List[int] = dataclasses.field(default_factory=lambda: [15])  # Evaluator prefetch_count values
+    max_workers: List[int] = dataclasses.field(default_factory=lambda: [3])  # Evaluator max_workers values
+    prompts_per_batch: List[int] = dataclasses.field(default_factory=lambda: [100])  # Sampler batch size values
+    sampler_prefetch_multiplier: List[int] = dataclasses.field(default_factory=lambda: [2])  # Sampler prefetch multiplier values
 
 
 @dataclasses.dataclass
@@ -219,7 +244,8 @@ class Config:
     paths: PathsConfig = dataclasses.field(default_factory=PathsConfig)
     termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
-    num_samplers: int = 2
-    num_evaluators: int = 40
+    sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
+    num_samplers: int = 3
+    num_evaluators: int = 60
     num_pdb: int = 1
     random_seed: int = 13  # None for non-deterministic

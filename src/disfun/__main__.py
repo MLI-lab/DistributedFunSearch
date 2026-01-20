@@ -153,6 +153,12 @@ def parse_args():
         "--target_solutions", type=str,
         default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',
         help="JSON dict of (n, s) target solutions for early termination.")
+    parser.add_argument(
+        "--stop_on_optimal", action="store_true", dest="stop_on_optimal", default=None,
+        help="Stop early after finding optimal solution.")
+    parser.add_argument(
+        "--no_stop_on_optimal", action="store_false", dest="stop_on_optimal",
+        help="Continue running even after finding optimal solution.")
 
     # Attach mode
     parser.add_argument(
@@ -177,6 +183,7 @@ def merge_config_with_args(args, config):
     # Termination values
     iteration_limit = args.iteration_limit if args.iteration_limit != 400_000_000 else config.termination.iteration_limit
     optimal_solution_programs = args.optimal_solution_programs if args.optimal_solution_programs != 200_000 else config.termination.optimal_solution_programs
+    stop_on_optimal = args.stop_on_optimal if args.stop_on_optimal is not None else config.termination.stop_on_optimal
 
     # Target solutions
     default_targets = '{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}'
@@ -192,6 +199,7 @@ def merge_config_with_args(args, config):
     termination_config = dataclasses.replace(
         config.termination,
         iteration_limit=iteration_limit,
+        stop_on_optimal=stop_on_optimal,
         optimal_solution_programs=optimal_solution_programs,
         target_solutions=target_signatures
     )
@@ -524,6 +532,12 @@ class TaskManager:
 
         self.tasks = [asyncio.create_task(self.resource_manager.log_resource_stats_periodically())]
 
+        # Publish resource stats to main node for W&B logging
+        resource_stats_interval = getattr(self.config.scaling, 'resource_log_interval', 60)
+        self.tasks.append(asyncio.create_task(
+            wandb_logging.publish_resource_stats_periodically(self.config, resource_stats_interval)
+        ))
+
         if enable_scaling:
             scaling_ctx = self._create_scaling_context(evaluator_queue, sampler_queue, for_attach_mode=True)
             self.tasks.append(asyncio.create_task(self.resource_manager.run_scaling_loop(scaling_ctx)))
@@ -609,6 +623,8 @@ class TaskManager:
             database_task, checkpoint_task, wandb_logging_task,
             asyncio.create_task(self.resource_manager.log_resource_stats_periodically()),
             asyncio.create_task(self.monitor_sampler_health(check_interval=60)),
+            # Consume resource stats from remote attach nodes for W&B aggregation
+            asyncio.create_task(wandb_logging.consume_resource_stats(self.config)),
         ]
 
         if enable_scaling:

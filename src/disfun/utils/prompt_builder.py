@@ -9,10 +9,23 @@ Placeholders:
     Filled once in load_specification() (static content from spec files):
         {imports}, {problem_description}, {problem_desc}, {func_desc}, {user_generator}
 
-    Filled each iteration in build_prompt() (from sampled programs):
-        FunSearch:  {fewshot_examples}, {function_header}
-        EoH/ReEvo:  {worse_code}, {better_code}, {thought}
-        ReEvo:      {reflection}, {prior_reflection}, {new_reflections}, {initial_reflection}
+    Filled each iteration in build_prompt() (from sampled programs).
+    All program placeholders are available to all strategies, usage depends on template:
+        {fewshot_examples}   All programs as versioned functions (v0, v1, ...)
+        {worse_code}         First program as v0 (when 2 programs provided)
+        {better_code}        Last program (v0 or v1 depending on count)
+        {function_header}    Next function header for code completion
+        {version}            Next version number
+
+    Note: {fewshot_examples}, {worse_code}, {better_code} include <code> tags when detected
+    in template. <thinking> and <thought> tags are included only if both detected in template
+    AND enabled via fewshot_include_thinking/fewshot_include_thought config options.
+
+    ReEvo only (reflection state):
+        {reflection}         Filled by sampler with first LLM output, not here
+        {prior_reflection}   Previous long term reflection
+        {new_reflections}    New short term reflections from crossover phase
+        {initial_reflection} Starting reflection from spec
 """
 
 import copy
@@ -37,7 +50,6 @@ class PromptStrategy(Enum):
 class TemplateRequirements:
     """Requirements for a template/phase."""
     num_programs: int          # 1 if only {better_code}, 2 if also {worse_code}
-    needs_thought: bool        # True if {thought} in template
     needs_reflection: bool     # True if {reflection} in template
     samples_per_prompt: int | None = None  # LLM outputs per prompt (None = use sampler default)
 
@@ -55,19 +67,21 @@ class PromptSpec:
     system_message: str | None = None
 
     # Templates
-    templates: dict[str, str] = field(default_factory=dict)  # template_name -> content
+    templates: dict[str, str] = field(default_factory=dict)  # template_name to content
     template_requirements: dict[str, TemplateRequirements] = field(default_factory=dict)
 
-    # FunSearch-specific
+    # FunSearch specific
     fewshot_num_examples: int = 2
+    fewshot_include_thinking: bool = True  # Include <thinking> in few-shot examples
+    fewshot_include_thought: bool = True  # Include <thought> in few-shot examples
     evaluation_preamble: str = ""
     evaluation_script: str = ""
     function_to_evolve: str = "priority"
     function_args: str = ""
     return_type: str = "float"
 
-    # ReEvo-specific
-    user_generator: str = ""  # Pre-built from user_generator.txt
+    # ReEvo specific
+    user_generator: str = ""  # Prebuilt from user_generator.txt
     reflector_system_message: str | None = None  # Separate system message for reflector
     initial_reflection: str = ""  # Initial hints for initialization (can be empty)
 
@@ -106,7 +120,6 @@ def _load_directory(path: Path) -> dict[str, str]:
 def _infer_requirements(template: str) -> TemplateRequirements:
     """Infer template requirements from placeholders used."""
     has_worse_code = "{worse_code}" in template
-    has_thought = "{thought}" in template
     has_reflection = "{reflection}" in template or "{prior_reflection}" in template
 
     # If template uses {worse_code}, it needs 2 programs
@@ -115,7 +128,6 @@ def _infer_requirements(template: str) -> TemplateRequirements:
 
     return TemplateRequirements(
         num_programs=num_programs,
-        needs_thought=has_thought,
         needs_reflection=has_reflection,
     )
 
@@ -149,12 +161,12 @@ def _format_scores(scores: dict, spec: PromptSpec) -> str:
     """Format scores as absolute or relative string.
 
     Args:
-        scores: Dict mapping (n, s, q) or string keys to score values.
+        scores: Dict mapping (n, s) or string keys to score values.
         spec: PromptSpec with score display settings.
 
     Returns:
-        Formatted string like "Scores: {(6,1,2): 8, (7,1,2): 14}" or
-        "Relative to baseline: {(6,1,2): +0.0%, (7,1,2): +7.1%}".
+        Formatted string like "Scores: {(6, 1): 8, (7, 1): 14}" or
+        "Relative to baseline: {(6, 1): +0.0%, (7, 1): +7.1%}".
         Returns empty string if show_scores is False or scores is empty.
     """
     if not spec.show_scores or not scores:
@@ -198,6 +210,8 @@ def load_specification(
     funsearch_evaluation_preamble: str | None = None,
     funsearch_evaluation_script: str | None = None,
     fewshot_num_examples: int = 2,
+    fewshot_include_thinking: bool = True,
+    fewshot_include_thought: bool = True,
     initial_functions_dir: str = "initial_functions/graph_networkx",
     # EoH options
     eoh_styles_dir: str = "eoh/styles",
@@ -227,7 +241,7 @@ def load_specification(
         strategy: Which prompt strategy to use
         spec_dir: Base directory for specification files
         imports_file: Path to imports file (relative to spec_dir)
-        ... (strategy-specific options)
+        ... (strategy specific options)
 
     Returns:
         PromptSpec with all content loaded
@@ -292,7 +306,7 @@ def load_specification(
         if reevo_initial_reflection:
             initial_reflection = _load_file(base / reevo_initial_reflection).strip()
 
-        # Pre-build user_generator (used in multiple templates)
+        # Prebuild user_generator
         user_gen_template = templates.get("user_generator", "")
         if user_gen_template:
             user_generator = user_gen_template.replace("{problem_desc}", problem_desc)
@@ -310,7 +324,7 @@ def load_specification(
     # Note: samples_per_prompt for specific templates (e.g., mutation) can be set
     # after loading via: spec.template_requirements["mutation"].samples_per_prompt = N
 
-    # Pre-fill static placeholders in templates (these never change)
+    # Prefill static placeholders in templates
     for name in templates:
         templates[name] = templates[name].replace("{imports}", imports)
         templates[name] = templates[name].replace("{problem_description}", problem_description)
@@ -336,6 +350,8 @@ def load_specification(
         templates=templates,
         template_requirements=template_requirements,
         fewshot_num_examples=fewshot_num_examples,
+        fewshot_include_thinking=fewshot_include_thinking,
+        fewshot_include_thought=fewshot_include_thought,
         evaluation_preamble=evaluation_preamble,
         evaluation_script=evaluation_script,
         function_to_evolve="priority",
@@ -388,6 +404,8 @@ def load_prompt_spec_from_config(config) -> PromptSpec:
         funsearch_evaluation_preamble=config.prompt.funsearch_evaluation_preamble,
         funsearch_evaluation_script=config.prompt.funsearch_evaluation_script,
         fewshot_num_examples=config.prompt.fewshot_num_examples,
+        fewshot_include_thinking=config.prompt.fewshot_include_thinking,
+        fewshot_include_thought=config.prompt.fewshot_include_thought,
         initial_functions_dir=initial_functions_dir,
         eoh_styles_dir=config.prompt.eoh_styles_dir,
         eoh_problem_desc=config.prompt.eoh_problem_desc,
@@ -399,6 +417,15 @@ def load_prompt_spec_from_config(config) -> PromptSpec:
         reevo_generator_system=config.prompt.reevo_generator_system,
         reevo_reflector_system=config.prompt.reevo_reflector_system,
         reevo_initial_reflection=config.prompt.reevo_initial_reflection,
+        # Score display options
+        show_scores=config.prompt.show_scores,
+        score_display_mode=config.prompt.score_display_mode,
+        best_known_solutions=config.prompt.best_known_solutions,
+        # Docstring templates
+        docstring_baseline=config.prompt.docstring_baseline,
+        docstring_improved=config.prompt.docstring_improved,
+        score_label_absolute=config.prompt.score_label_absolute,
+        score_label_relative=config.prompt.score_label_relative,
     )
 
     # Set samples_per_prompt for ReEvo mutation phase if configured
@@ -433,7 +460,7 @@ def select_template(
         return template_name, num_programs
 
     elif spec.strategy == PromptStrategy.REEVO:
-        # Phase-based selection
+        # Phase based selection
         phase = _get_reevo_phase(state)
         num_programs = spec.template_requirements[phase].num_programs
         return phase, num_programs
@@ -472,6 +499,8 @@ def _format_function_code(
     version: int | None = None,
     include_def: bool = True,
     include_thought_tags: bool = False,
+    include_thinking_tags: bool = False,
+    include_code_tags: bool = False,
 ) -> str:
     """Format a Function object as code string, with docstring template and scores.
 
@@ -482,7 +511,9 @@ def _format_function_code(
         docstring_template: Docstring template with {score} and {version} placeholders.
         version: Version number to replace {version} with (e.g., 0 for "priority_v0").
         include_def: Whether to include 'def name(args):' line.
-        include_thought_tags: Whether to wrap output with <thought> and <code> tags.
+        include_thought_tags: Whether to wrap with <thought> tags (implies include_code_tags).
+        include_thinking_tags: Whether to include <thinking> tags before thought/code.
+        include_code_tags: Whether to wrap code with <code> tags.
 
     Returns:
         Formatted function code with placeholders replaced.
@@ -511,7 +542,7 @@ def _format_function_code(
         # Clean up and format docstring
         docstring_content = docstring_content.strip()
         if docstring_content:
-            # Handle multi-line docstrings (e.g., with scores)
+            # Handle multiline docstrings
             if '\n' in docstring_content:
                 lines = docstring_content.split('\n')
                 # Opening """ on own line, all content indented, closing """ on own line
@@ -525,10 +556,18 @@ def _format_function_code(
     else:
         code = func.body
 
-    # Wrap with thought and code tags if requested
-    if include_thought_tags:
-        thought = getattr(func, 'thought', "") or ""
-        return f"<thought>{thought}</thought>\n<code>{code}</code>"
+    # Wrap with tags if requested
+    if include_thought_tags or include_thinking_tags or include_code_tags:
+        parts = []
+        if include_thinking_tags:
+            thinking = getattr(func, 'thinking', "") or ""
+            parts.append(f"<thinking>{thinking}</thinking>")
+        if include_thought_tags:
+            thought = getattr(func, 'thought', "") or ""
+            parts.append(f"<thought>{thought}</thought>")
+        if include_thought_tags or include_code_tags:
+            parts.append(f"<code>{code}</code>")
+            return "\n".join(parts)
     return code
 
 
@@ -558,27 +597,12 @@ def build_prompt(
     # Now fill dynamic placeholders from sampled programs
     prompt = template
 
-    # Strategy-specific placeholders
-    if spec.strategy == PromptStrategy.FUNSEARCH:
-        # FunSearch: {fewshot_examples} + {function_header} for code completion
-        prompt = _fill_code_completion_placeholders(prompt, spec, programs)
-    else:
-        # EoH/ReEvo: {worse_code} + {better_code} for instruction-based prompts
-        prompt = _fill_instruction_placeholders(prompt, spec, programs)
+    # Fill program placeholders (unified for all strategies)
+    prompt = _fill_program_placeholders(prompt, spec, programs)
 
-    # ReEvo reflection placeholders (always fill, use spec defaults if not in state)
+    # Fill reflection placeholders (ReEvo, does nothing for other strategies)
     state = state or {}
-    prompt = prompt.replace("{reflection}", state.get("reflection", ""))
-    prompt = prompt.replace("{prior_reflection}", state.get("prior_reflection", ""))
-
-    # new_reflections can be a list (from Database) or string. Convert list to formatted string.
-    new_reflections = state.get("new_reflections", "")
-    if isinstance(new_reflections, list):
-        new_reflections = "\n- ".join(new_reflections) if new_reflections else ""
-    prompt = prompt.replace("{new_reflections}", new_reflections)
-
-    # Use spec.initial_reflection as default (can be empty or contain hints)
-    prompt = prompt.replace("{initial_reflection}", state.get("initial_reflection", spec.initial_reflection))
+    prompt = _fill_reflection_placeholders(prompt, spec, state, fill_reflection=True)
 
     # Clean up empty placeholders and extra whitespace
     prompt = re.sub(r'\n{3,}', '\n\n', prompt)
@@ -586,77 +610,108 @@ def build_prompt(
     return prompt.strip()
 
 
-def _fill_instruction_placeholders(
+def _fill_reflection_placeholders(
     prompt: str,
     spec: PromptSpec,
-    programs: list,
+    state: dict,
+    fill_reflection: bool = True,
 ) -> str:
-    """Fill placeholders for instruction-based models (EoH/ReEvo).
+    """Fill reflection-related placeholders.
 
-    Builds:
-        {worse_code}: priority_v0 (baseline docstring)
-        {better_code}: priority_v1 (improved docstring)
-        {thought}: from better function
+    Args:
+        prompt: Template with placeholders
+        spec: Loaded prompt specification
+        state: State dict with reflection values
+        fill_reflection: Whether to fill {reflection} (False for two stage ReEvo
+                         where sampler fills it with Stage 1 output)
+
+    Returns:
+        Prompt with reflection placeholders filled.
     """
-    worse_func, worse_scores = None, {}
-    better_func, better_scores = None, {}
+    if fill_reflection:
+        prompt = prompt.replace("{reflection}", state.get("reflection", ""))
 
-    # Version the function names: worse=v0, better=v1 (or single=v0)
-    if len(programs) >= 1:
-        func, scores = programs[-1]
-        better_func = copy.copy(func)
-        better_scores = scores
-        better_func.name = f"{spec.function_to_evolve}_v0" if len(programs) == 1 else f"{spec.function_to_evolve}_v1"
+    prompt = prompt.replace("{prior_reflection}", state.get("prior_reflection", ""))
 
-    if len(programs) >= 2:
-        func, scores = programs[0]
-        worse_func = copy.copy(func)
-        worse_scores = scores
-        worse_func.name = f"{spec.function_to_evolve}_v0"
+    # new_reflections can be a list (from Database) or string
+    new_reflections = state.get("new_reflections", "")
+    if isinstance(new_reflections, list):
+        new_reflections = "\n- ".join(new_reflections) if new_reflections else ""
+    prompt = prompt.replace("{new_reflections}", new_reflections)
 
-    # EoH uses <thought>/<code> tags to demonstrate expected output format
-    use_tags = spec.strategy == PromptStrategy.EOH
-
-    # Format code with docstrings
-    if len(programs) == 1:
-        better_code = _format_function_code(better_func, better_scores, spec, spec.docstring_baseline, include_thought_tags=use_tags)
-    else:
-        better_code = _format_function_code(better_func, better_scores, spec, spec.docstring_improved, version=0, include_thought_tags=use_tags)
-
-    worse_code = _format_function_code(worse_func, worse_scores, spec, spec.docstring_baseline, include_thought_tags=use_tags) if worse_func else ""
-    thought = getattr(better_func, 'thought', "") or "" if better_func else ""
-
-    prompt = prompt.replace("{worse_code}", worse_code)
-    prompt = prompt.replace("{better_code}", better_code)
-    prompt = prompt.replace("{thought}", thought)
+    prompt = prompt.replace("{initial_reflection}", state.get("initial_reflection", spec.initial_reflection))
 
     return prompt
 
 
-def _fill_code_completion_placeholders(
+def _fill_program_placeholders(
     prompt: str,
     spec: PromptSpec,
     programs: list,
 ) -> str:
-    """Fill placeholders for code completion models (FunSearch).
+    """Fill all program-related placeholders (unified for FunSearch/EoH/ReEvo).
 
-    Builds:
-        {fewshot_examples}: priority_v0, priority_v1, ... (all examples combined)
-        {function_header}: def priority_vN(...): for model to complete
+    Detects tag format from template (<thinking>, <thought>, <code>) and formats
+    programs accordingly. Whether to include thinking/thought in few-shot examples
+    is controlled by spec.fewshot_include_thinking and spec.fewshot_include_thought.
+
+    Fills:
+        {fewshot_examples}   All programs as versioned functions (v0, v1, ...)
+        {worse_code}         First program as v0 (for EoH/ReEvo with 2 programs)
+        {better_code}        Last program as v1 (for EoH/ReEvo)
+        {function_header}    Next function header for completion
+        {version}            Next version number
+        {evaluation_preamble}, {evaluation_script}   FunSearch evaluation context
     """
-    # Build fewshot examples with versioned function names
+    # Detect tag format from template, but respect config for thinking/thought in few-shots
+    include_thinking_tags = "<thinking>" in prompt and spec.fewshot_include_thinking
+    include_thought_tags = "<thought>" in prompt and spec.fewshot_include_thought
+    include_code_tags = "<code>" in prompt
+
+    # Build {fewshot_examples}
     fewshot_parts = []
     for i, (func, scores) in enumerate(programs):
         func_copy = copy.deepcopy(func)
         func_copy.name = f"{spec.function_to_evolve}_v{i}"
-        # First version uses baseline docstring, subsequent use improved (referencing previous version)
         docstring_template = spec.docstring_baseline if i == 0 else spec.docstring_improved
         prev_version = i - 1 if i > 0 else None
-        fewshot_parts.append(_format_function_code(func_copy, scores, spec, docstring_template, prev_version))
-
+        fewshot_parts.append(_format_function_code(
+            func_copy, scores, spec, docstring_template, prev_version,
+            include_thinking_tags=include_thinking_tags,
+            include_thought_tags=include_thought_tags,
+            include_code_tags=include_code_tags,
+        ))
     fewshot_examples = "\n\n".join(fewshot_parts)
 
-    # Build function header for next version (for code completion)
+    # Build {worse_code} and {better_code}
+    worse_code = ""
+    better_code = ""
+
+    if len(programs) >= 1:
+        func, scores = programs[-1]
+        better_func = copy.deepcopy(func)
+        better_func.name = f"{spec.function_to_evolve}_v0" if len(programs) == 1 else f"{spec.function_to_evolve}_v1"
+        docstring = spec.docstring_baseline if len(programs) == 1 else spec.docstring_improved
+        version = None if len(programs) == 1 else 0
+        better_code = _format_function_code(
+            better_func, scores, spec, docstring, version,
+            include_thinking_tags=include_thinking_tags,
+            include_thought_tags=include_thought_tags,
+            include_code_tags=include_code_tags,
+        )
+
+    if len(programs) >= 2:
+        func, scores = programs[0]
+        worse_func = copy.deepcopy(func)
+        worse_func.name = f"{spec.function_to_evolve}_v0"
+        worse_code = _format_function_code(
+            worse_func, scores, spec, spec.docstring_baseline, None,
+            include_thinking_tags=include_thinking_tags,
+            include_thought_tags=include_thought_tags,
+            include_code_tags=include_code_tags,
+        )
+
+    # Build {function_header}
     next_version = len(programs)
     header_docstring = spec.docstring_improved.replace("{version}", str(next_version - 1))
     header_docstring = header_docstring.replace("\n{score}", "").replace("{score}", "").strip()
@@ -665,8 +720,10 @@ def _fill_code_completion_placeholders(
         f'    """{header_docstring}"""'
     )
 
-    # Fill FunSearch-specific placeholders
+    # Fill all placeholders
     prompt = prompt.replace("{fewshot_examples}", fewshot_examples)
+    prompt = prompt.replace("{worse_code}", worse_code)
+    prompt = prompt.replace("{better_code}", better_code)
     prompt = prompt.replace("{function_header}", function_header)
     prompt = prompt.replace("{version}", str(next_version))
     prompt = prompt.replace("{evaluation_preamble}", spec.evaluation_preamble)
@@ -727,11 +784,11 @@ def build_reevo_prompts(
         )
         return (None, generation_prompt)
 
-    # Crossover phase: short-term reflection + crossover generation
+    # Crossover phase, short term reflection and crossover generation
     if phase == "crossover":
         reflection_template_name = "reflect_st"
         generation_template_name = "crossover"
-    # Mutation phase: long-term reflection + mutation generation
+    # Mutation phase, long term reflection and mutation generation
     else:  # mutation
         reflection_template_name = "reflect_lt"
         generation_template_name = "mutation"
@@ -771,18 +828,10 @@ def _fill_reevo_placeholders(
     prompt = template
 
     # Fill code placeholders
-    prompt = _fill_instruction_placeholders(prompt, spec, programs)
+    prompt = _fill_program_placeholders(prompt, spec, programs)
 
-    # Fill reflection state placeholders
-    prompt = prompt.replace("{prior_reflection}", state.get("prior_reflection", ""))
-
-    # new_reflections can be a list (from Database) or string. Convert list to formatted string.
-    new_reflections = state.get("new_reflections", "")
-    if isinstance(new_reflections, list):
-        new_reflections = "\n- ".join(new_reflections) if new_reflections else ""
-    prompt = prompt.replace("{new_reflections}", new_reflections)
-
-    prompt = prompt.replace("{initial_reflection}", state.get("initial_reflection", spec.initial_reflection))
+    # Fill reflection placeholders (but not {reflection}, sampler fills that)
+    prompt = _fill_reflection_placeholders(prompt, spec, state, fill_reflection=False)
 
     # Clean up empty placeholders and extra whitespace
     prompt = re.sub(r'\n{3,}', '\n\n', prompt)

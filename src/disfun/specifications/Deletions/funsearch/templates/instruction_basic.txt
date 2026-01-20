@@ -1,0 +1,11 @@
+{problem_description}
+
+{imports}
+
+{fewshot_examples}
+
+Improve on the previous functions. Implement it in Python as a function named priority.
+The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
+
+Use this format:
+<code>Your implementation</code>

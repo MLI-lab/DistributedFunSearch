@@ -147,9 +147,9 @@ class ResourceManager:
             return statistics.mean(s[key] for s in samples)
 
         msg = (
-            f"Avg CPU: {avg('cpu'):.2f}%, Load: {avg('load'):.2f}, I/O Wait: {avg('io_wait'):.2f}%, "
-            f"Ctx Switches: {avg('ctx_switches'):.0f}, Disk R/W: {avg('disk_read'):.2f}/{avg('disk_write'):.2f} MB, "
-            f"Mem: {avg('mem'):.2f}%, Swap: {avg('swap'):.2f}%, D-State: {avg('d_state'):.0f}"
+            f"Avg CPU: {avg('cpu'):.2f}%, Load: {avg('load'):.2f}, IO Wait: {avg('io_wait'):.2f}%, "
+            f"Ctx Switches: {avg('ctx_switches'):.0f}, Disk Read/Write: {avg('disk_read'):.2f}/{avg('disk_write'):.2f} MB, "
+            f"Mem: {avg('mem'):.2f}%, Swap: {avg('swap'):.2f}%, D State: {avg('d_state'):.0f}"
         )
 
         # Add GPU stats if available
@@ -182,7 +182,7 @@ class ResourceManager:
             except Exception as e:
                 self.resource_logger.error(f"Error logging resource stats: {e}")
 
-            await asyncio.sleep(interval)
+            await asyncio.sleep(log_interval)
 
     async def async_get_cpu_usage(self):
         """Retrieves CPU usage asynchronously."""
@@ -262,8 +262,23 @@ class ResourceManager:
         if message_count == 0 and len(processes) > min_count:
             idle_checks += 1
             if idle_checks >= required_idle_checks:
+                # Select candidate for termination
+                idx, gpu_util = self._select_process_to_terminate(processes, process_type)
+                if idx is None:
+                    self.resource_logger.info(f"No {process_type} eligible for termination (all too young)")
+                    return False, idle_checks
+
+                # For samplers, skip if the selected GPU is still busy (likely finishing work)
+                if process_type == "Sampler" and gpu_util is not None:
+                    threshold = self.scaling_config.min_gpu_util_for_scale_down
+                    if gpu_util > threshold:
+                        self.resource_logger.info(
+                            f"Skipping Sampler scale-down: selected GPU util {gpu_util:.1f}% > {threshold}%"
+                        )
+                        return False, idle_checks  # Keep idle_checks, retry next interval
+
                 self.resource_logger.info(f"{process_type} queue empty for {idle_checks} checks, terminating")
-                await self.terminate_process(processes, process_type)
+                await self.terminate_process(processes, process_type, idx=idx)
                 return True, 0
             return False, idle_checks
         return False, 0  # Reset idle checks on non-empty queue
@@ -471,7 +486,12 @@ class ResourceManager:
 
 
     def _select_process_to_terminate(self, processes, process_name):
-        """Select best process to terminate: lowest GPU utilization, respecting minimum lifetime."""
+        """Select best process to terminate: lowest GPU utilization, respecting minimum lifetime.
+
+        Returns:
+            tuple: (index, gpu_util) where gpu_util is the utilization % of the selected
+                   sampler's GPU, or None for evaluators/CPU-only mode.
+        """
         min_lifetime = self.scaling_config.min_process_lifetime
         now = time.time()
         eligible = []
@@ -484,7 +504,7 @@ class ResourceManager:
             eligible.append((i, proc))
 
         if not eligible:
-            return None
+            return None, None
 
         # For samplers with GPUs, prefer terminating the one on lowest-utilization GPU
         if process_name == "Sampler" and not self.cpu_only:
@@ -505,10 +525,10 @@ class ResourceManager:
                         pass
 
             if best_idx is not None:
-                return best_idx
+                return best_idx, lowest_util
 
-        # Fallback: return oldest eligible process
-        return eligible[0][0]
+        # Fallback: return oldest eligible process (no GPU util for evaluators)
+        return eligible[0][0], None
 
     def cleanup(self):
         """Clean up ResourceManager state (call during shutdown)."""
@@ -522,15 +542,22 @@ class ResourceManager:
                 pass
         self.resource_logger.info("ResourceManager: Cleanup complete")
 
-    async def terminate_process(self, processes, process_name):
-        """Terminates a process and its children (vLLM may spawn subprocesses holding GPU memory)."""
+    async def terminate_process(self, processes, process_name, idx=None):
+        """Terminates a process and its children (vLLM may spawn subprocesses holding GPU memory).
+
+        Args:
+            processes: List of processes to select from
+            process_name: "Sampler" or "Evaluator" for logging
+            idx: Optional index to terminate. If None, selects automatically.
+        """
         if not processes:
             return
 
-        idx = self._select_process_to_terminate(processes, process_name)
         if idx is None:
-            self.resource_logger.info(f"No {process_name} eligible for termination (all too young)")
-            return
+            idx, _ = self._select_process_to_terminate(processes, process_name)
+            if idx is None:
+                self.resource_logger.info(f"No {process_name} eligible for termination (all too young)")
+                return
 
         proc = processes.pop(idx)
         pid = proc.pid

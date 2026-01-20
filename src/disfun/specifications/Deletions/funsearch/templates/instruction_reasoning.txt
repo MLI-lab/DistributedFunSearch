@@ -1,0 +1,13 @@
+{problem_description}
+
+{imports}
+
+{fewshot_examples}
+
+Improve on the previous functions. First, reason step-by-step about your approach (under 200 words). Then, describe it in one sentence. Finally, implement it in Python as a function named priority.
+The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
+
+Use this format:
+<thinking>Your step-by-step reasoning</thinking>
+<thought>Your approach in one sentence</thought>
+<code>Your implementation</code>
