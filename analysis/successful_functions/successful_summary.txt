@@ -1,8 +1,0 @@
-Extraction Summary
-============================================================
-
-Total unique functions: 1
-Total duplicates removed: 13
-
-Distribution by duplicate count:
-  14 duplicates: 1 functions

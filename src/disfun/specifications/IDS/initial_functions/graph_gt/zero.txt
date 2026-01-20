@@ -1,8 +1,0 @@
-<thought>
-Baseline implementation that assigns equal priority to all nodes.
-</thought>
-
-<code>
-def priority(node, G, node_to_vertex, vertex_to_node, n, s) -> float:
-    return 0.0
-</code>

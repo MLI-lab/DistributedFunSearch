@@ -75,7 +75,6 @@ REEVO_PLAN.md
 docs/EVALUATION_ARCHITECTURE.md
 docs/DAYTONA_EVALUATION.md
 docs/ZIH_SETUP.md
-fig/
 plots/
 
 # ==============================================================================
@@ -108,3 +107,7 @@ src/disfun/specifications/IDS/
 # ==============================================================================
 src/baselines/
 
+
+# macOS
+.DS_Store
+**/.DS_Store

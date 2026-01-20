@@ -1,5 +1,0 @@
-{problem_description}
-{fewshot_preamble}
-{fewshot_examples}
-{prompt_style}
-{inout_spec}

@@ -1,9 +1,0 @@
-"""
-Finds a large independent set in graph G where nodes are q-ary strings of length n.
-Nodes in G are connected if their edit distance < 2s + 1, where s = 1.
-The priority function must return a numeric value (int or float). Higher priority nodes are added first.
-
-For a code to correct s errors (insertions, deletions, or substitutions),
-all codewords must have pairwise edit distance >= 2s + 1.
-{prompt_style}
-"""
