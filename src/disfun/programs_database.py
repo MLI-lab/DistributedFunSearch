@@ -877,8 +877,20 @@ class ProgramsDatabase:
         return programs[sampled_index]
 
     def _save_and_shutdown(self, reason: str):
-        """Save checkpoint and trigger graceful shutdown."""
+        """Save checkpoint, log final state to wandb, and trigger graceful shutdown."""
         logger.info(f"{reason} Saving checkpoint and shutting down...")
+
+        # Log final state to wandb before shutdown
+        if self.wandb_enabled and self._wandb_initialized and wandb and wandb.run:
+            try:
+                logger.info("Logging final state to W&B before shutdown...")
+                metrics = wandb_logging.compute_wandb_metrics(self)
+                wandb.log(metrics)
+                wandb_logging.log_top_programs_table(self)
+                logger.info("Final W&B logging complete")
+            except Exception as e:
+                logger.error(f"Error logging final state to W&B: {e}")
+
         checkpoint_module.save_checkpoint(self)
         os.kill(os.getpid(), signal.SIGTERM)
 
