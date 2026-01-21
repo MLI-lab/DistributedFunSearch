@@ -1,6 +1,6 @@
-<thought>
+<description>
 Baseline implementation that assigns equal priority to all nodes.
-</thought>
+</description>
 
 <code>
 def priority(node, n, s, q) -> float:

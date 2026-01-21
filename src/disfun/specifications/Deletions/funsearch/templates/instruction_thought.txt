@@ -13,5 +13,5 @@ First, describe your approach in one sentence.
 The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
 
 Use this format:
-<thought>Your approach</thought>
+<description>Your approach</description>
 <code>Your implementation</code>

@@ -7,7 +7,7 @@ Available imports:
 {imports}
 
 Use this format:
-<thought>Your analysis and simplification strategy</thought>
+<description>Your analysis and simplification strategy</description>
 <code>Your implementation</code>
 
 Do not give additional explanations.

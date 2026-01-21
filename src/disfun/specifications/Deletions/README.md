@@ -136,7 +136,7 @@ The function to be evolved is always named `priority` (hardcoded in templates, n
 |-------------|-------------|
 | `{better_code}` | Higher-scoring / single / seed function. |
 | `{worse_code}` | Lower-scoring function for comparison. |
-| `{thought}` | Sampled thought (the `<thought>` from a previously generated function). Used in eoh m1/m2. |
+| `{description}` | Sampled description (the `<description>` from a previously generated function). Used in eoh m1/m2. |
 
 ### Docstring Templates
 
@@ -196,6 +196,6 @@ def priority(node, G, n, s) -> float:
 | Strategy | Template Selection | Fewshot | Output Format |
 |----------|-------------------|---------|---------------|
 | **funsearch** | Fixed template | 2  | Code only (completion) |
-| **eoh** | Random from styles/ | i1: 1, e1/e2: 2, m1/m2/m3: 1 | `<thought>...</thought><code>...</code>` |
+| **eoh** | Random from styles/ | i1: 1, e1/e2: 2, m1/m2/m3: 1 | `<description>...</description><code>...</code>` |
 | **reevo** | Phase-based | crossover: 2, mutation: 1, seed: 1 | ` ```python ... ``` ` |
 

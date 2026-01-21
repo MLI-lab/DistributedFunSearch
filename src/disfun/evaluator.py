@@ -109,123 +109,209 @@ def _parse_code(code: str, max_deletions: int = 20) -> tuple[ast.Module | None, 
   return tree, code
 
 
-def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
+def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
   """
   Parse raw LLM output and extract a valid Python function body.
 
   Pipeline:
-  1. Extract metadata (<thinking>, <thought> tags)
-  2. Extract code (from <code> tags if present, otherwise use full text)
-  3. Strip markdown fences (```python...``` if present)
-  4. Parse with AST (delete invalid lines until it compiles)
-  5. Extract function body (remove def line if present, keep just the body)
+  1. Extract and strip <description> tags
+  2. Extract code: <code> tags > last markdown fence > raw text
+  3. Strip any nested markdown fences
+  4. Detect structure: has def priority() -> extract body, else treat all as body
+  5. Parse with AST (delete invalid lines until it compiles)
 
   Returns:
-      (function_body, thought, thinking)
+      (function_body, description)
   """
   if not raw_output:
-    return '', None, None
+    return '', None
 
-  # Extract metadata from XML tags 
-  thinking_match = re.search(r'<thinking>(.*?)</thinking>', raw_output, re.DOTALL)
-  thought_match = re.search(r'<thought>(.*?)</thought>', raw_output, re.DOTALL)
-  thinking = thinking_match.group(1).strip() if thinking_match else None
-  thought = thought_match.group(1).strip() if thought_match else None
+  # ============================================================
+  # STEP 1: Extract description and clean input
+  # ============================================================
+  description_match = re.search(r'<description>(.*?)</description>', raw_output, re.DOTALL)
+  description = description_match.group(1).strip() if description_match else None
 
-  # Extract code from <code> tags or use full text 
-  code_match = re.search(r'<code>(.*?)</code>', raw_output, re.DOTALL)
+  # Remove description tags from text we'll search
+  text = re.sub(r'<description>.*?</description>\s*', '', raw_output, flags=re.DOTALL)
+
+  # ============================================================
+  # STEP 2: Extract code (3-tier priority)
+  # ============================================================
+
+  # Tier 1: <code> tags (highest priority)
+  code_match = re.search(r'<code>(.*?)</code>', text, re.DOTALL)
   if code_match:
-    code = code_match.group(1).lstrip('\n').rstrip()
+    code = code_match.group(1)
     logger.debug(f"Extracted code from <code> tags ({len(code)} chars)")
   else:
-    code = raw_output
-    if thought_match or thinking_match:
-      code = re.sub(r'<thinking>.*?</thinking>\s*', '', code, flags=re.DOTALL)
-      code = re.sub(r'<thought>.*?</thought>\s*', '', code, flags=re.DOTALL)
-    code = code.lstrip('\n').rstrip()
+    # Tier 2: Last markdown fence (most likely final answer)
+    # Handles: ```python, ```py, ```Python, ```python3, or plain ```
+    fence_matches = list(re.finditer(r'```(?:python|py|python3)?\s*\n(.*?)```', text, re.DOTALL | re.IGNORECASE))
+    if fence_matches:
+      code = fence_matches[-1].group(1)  # Take LAST match
+      logger.debug(f"Extracted code from markdown fence {len(fence_matches)} of {len(fence_matches)} ({len(code)} chars)")
+    else:
+      # Tier 3: Use cleaned text directly
+      code = text
+      logger.debug(f"Using raw text as code ({len(code)} chars)")
 
-  # Strip markdown fences if present 
-  if code.strip().startswith('```'):
-    lines = code.strip().split('\n')
-    if lines[0].startswith('```'):
-      lines = lines[1:]
-    if lines and lines[-1].strip() == '```':
-      lines = lines[:-1]
-    code = '\n'.join(lines).lstrip('\n').rstrip()
-    logger.debug(f"Stripped markdown fences ({len(code)} chars remaining)")
+  # Cleanup: strip any fences that might be nested inside (e.g., inside <code> tags)
+  fence_in_code = re.search(r'```(?:python|py|python3)?\s*\n(.*?)```', code, re.DOTALL | re.IGNORECASE)
+  if fence_in_code:
+    code = fence_in_code.group(1)
 
-  if not code:
-    return '', thought, thinking
-
-  # Parse with AST and extract function body
+  # Strip trailing whitespace and leading newlines, but PRESERVE leading indentation
+  # (strip() would break indented body code by removing indent from first line only)
   code = code.lstrip('\n').rstrip()
+  if not code:
+    return '', description
 
-  # First try to extract body only code (code before any function definition)
-  # Only if all code is functions, then extract priority function body
+  # ============================================================
+  # STEP 3: Determine if this is body-only or full function
+  # ============================================================
 
-  # Check if there is code before any function definition
-  first_func_match = re.search(r'^def\s+\w+\s*\(', code, re.MULTILINE)
-  body_before_func = code[:first_func_match.start()].rstrip() if first_func_match else code.rstrip()
-  # Remove leading empty lines but preserve indentation
-  body_before_func = body_before_func.lstrip('\n')
+  # Look for def priority(...) anywhere
+  priority_match = re.search(r'^\s*def\s+(priority(?:_v\d+)?)\s*\(', code, re.MULTILINE)
 
-  if body_before_func and (not first_func_match or first_func_match.start() > 0):
-    # There is body code before any function definition, use it
-    logger.debug("Found body code before function definitions, using as body")
-    body_code = body_before_func
+  if priority_match:
+    # ---------------------------------------------------------
+    # CASE A: Full function output, extract priority body
+    # ---------------------------------------------------------
+    function_name = priority_match.group(1)
+    logger.debug(f"Found {function_name} definition, extracting body")
 
-    # Add indentation only if code has no indentation at all
-    if body_code and not body_code[0].isspace():
-      body_code = '    ' + body_code.replace('\n', '\n    ')
-
-    wrapped = 'def fake_function_header():\n' + body_code
-    tree, parsed_code = _parse_code(wrapped)
+    tree, parsed_code = _parse_code(code)
     if tree is None:
-      return '', thought, thinking
+      return '', description
 
-    _, end_line = _find_function_lines(tree, 'fake_function_header')
-    body_lines = parsed_code.splitlines()[1:end_line]
+    parsed_lines = parsed_code.splitlines()
+
+    # Collect module level imports to move inside function body
+    imports = []
+    for node in tree.body:
+      if isinstance(node, (ast.Import, ast.ImportFrom)):
+        imports.append(parsed_lines[node.lineno - 1])
+      elif isinstance(node, ast.FunctionDef):
+        break
+
+    # Collect helper functions (any function that is not priority)
+    # Skip common test/utility function names
+    skip_functions = {function_name, 'main', 'evaluate', 'test', 'unused'}
+    helper_lines = []
+    for node in tree.body:
+      if isinstance(node, ast.FunctionDef) and node.name not in skip_functions:
+        # Extract the full function source and add 4 spaces to each line
+        func_start = node.lineno - 1
+        func_end = node.end_lineno
+        func_lines = parsed_lines[func_start:func_end]
+        # Add 4 spaces to each line to make it a nested function
+        indented_func = ['    ' + line for line in func_lines]
+        helper_lines.extend(indented_func)
+        helper_lines.append('')  # blank line after helper
+        logger.debug(f"Including helper function '{node.name}' as nested function")
+
+    # Extract priority body lines (everything after the def line)
+    start_line, end_line = _find_function_lines(tree, function_name)
+    body_lines = parsed_lines[start_line:end_line]
+
+    # Prepend imports and helpers inside function body
+    prefix_lines = []
+    if imports:
+      logger.debug(f"Moving {len(imports)} import(s) inside function body")
+      prefix_lines.extend(['    ' + imp for imp in imports])
+    if helper_lines:
+      prefix_lines.extend(helper_lines)
+
+    if prefix_lines:
+      body_lines = prefix_lines + body_lines
+
     body = '\n'.join(body_lines) + '\n\n'
 
   else:
-    # All code is functions, look for priority function
-    priority_match = re.search(r'^\s*def\s+(priority(?:_v\d+)?)\s*\(', code, re.MULTILINE)
+    # ---------------------------------------------------------
+    # CASE B: Completion output, entire code is the body
+    # ---------------------------------------------------------
+    logger.debug("No priority function found, treating as body code")
 
-    if priority_match:
-      # Extract priority function body
-      function_name = priority_match.group(1)
-      logger.debug(f"Found {function_name} definition, extracting body")
+    code_lines = code.splitlines()
+    skip_functions = {'main', 'evaluate', 'test', 'unused', '_fake_', 'priority'}
 
-      tree, parsed_code = _parse_code(code)
-      if tree is None:
-        return '', thought, thinking
+    # Separate module level items (imports, functions at column 0) from body code (indented)
+    import_lines = []
+    helper_lines = []
+    body_code_lines = []
 
-      # Collect module level imports to move inside function body
-      imports = []
-      for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-          imports.append(parsed_code.splitlines()[node.lineno - 1])
-        elif isinstance(node, ast.FunctionDef):
-          break
+    i = 0
+    while i < len(code_lines):
+      line = code_lines[i]
 
-      # Extract body lines (everything after the def line)
-      start_line, end_line = _find_function_lines(tree, function_name)
-      body_lines = parsed_code.splitlines()[start_line:end_line]
+      # Skip empty lines at module level
+      if not line.strip():
+        i += 1
+        continue
 
-      # Prepend imports inside function body if they were at module level
-      if imports:
-        logger.debug(f"Moving {len(imports)} import(s) inside function body")
-        body_lines = ['    ' + imp for imp in imports] + body_lines
+      # Import at column 0
+      if re.match(r'^(import |from \w+ import )', line):
+        import_lines.append('    ' + line)
+        i += 1
+        continue
 
-      body = '\n'.join(body_lines) + '\n\n'
+      # Function at column 0
+      func_match = re.match(r'^def\s+(\w+)\s*\(', line)
+      if func_match:
+        func_name = func_match.group(1)
+        # Find end of function (next line at column 0 or end of code)
+        func_start = i
+        i += 1
+        while i < len(code_lines) and (not code_lines[i].strip() or code_lines[i][0].isspace()):
+          i += 1
+        func_end = i
 
-    else:
-      # No body code and no priority function found
-      logger.warning("No body code or priority function found")
-      return '', thought, thinking
+        if func_name not in skip_functions:
+          func_lines = code_lines[func_start:func_end]
+          indented_func = ['    ' + fl for fl in func_lines]
+          helper_lines.extend(indented_func)
+          helper_lines.append('')
+          logger.debug(f"Including helper function '{func_name}' as nested function")
+        continue
 
-  logger.debug(f"Parsed LLM output: {len(body)} chars, thought={'yes' if thought else 'no'}, thinking={'yes' if thinking else 'no'}")
-  return body, thought, thinking
+      # Indented code (body) or non indented body
+      # Collect all remaining lines until we hit a module level item
+      while i < len(code_lines):
+        line = code_lines[i]
+        if line.strip() and not line[0].isspace():
+          # Check if it's a module level item
+          if re.match(r'^(import |from \w+ import |def\s+\w+\s*\()', line):
+            break
+        body_code_lines.append(line)
+        i += 1
+
+    body_code = '\n'.join(body_code_lines)
+
+    # Add indentation if code has none
+    if body_code and body_code.strip() and not body_code.lstrip('\n')[0].isspace():
+      body_code = '    ' + body_code.replace('\n', '\n    ')
+
+    # Validate by wrapping in fake function and parsing
+    wrapped = 'def _fake_():\n' + body_code
+    tree, parsed_code = _parse_code(wrapped)
+    if tree is None:
+      return '', description
+
+    # Extract validated body
+    _, end_line = _find_function_lines(tree, '_fake_')
+    body_lines = parsed_code.splitlines()[1:end_line]
+
+    # Prepend imports and helpers to body
+    prefix_lines = import_lines + helper_lines
+    if prefix_lines:
+      body_lines = prefix_lines + body_lines
+
+    body = '\n'.join(body_lines) + '\n\n'
+
+  logger.debug(f"Parsed LLM output: {len(body)} chars, description={'yes' if description else 'no'}")
+  return body, description
 
 
 def _sample_to_program(
@@ -234,14 +320,14 @@ def _sample_to_program(
     template: code_manipulation.Program,
     # function_to_evolve is set to priority
     function_to_evolve: str,
-) -> tuple[code_manipulation.Function, str, str | None, str | None]:
+) -> tuple[code_manipulation.Function, str, str | None]:
   """Integrates a generated code as string into a larger program template.
 
   Returns:
-      tuple: (evolved_function, program_str (Complete runnable script as string), thought, thinking)
+      tuple: (evolved_function, program_str (Complete runnable script as string), description)
   """
   # Parse LLM output: extract from XML tags, strip markdown, validate with AST
-  body, thought, thinking = parse_llm_output(generated_code)
+  body, description = parse_llm_output(generated_code)
   if version_generated is not None:
 
     body = code_manipulation.rename_function_calls(
@@ -252,9 +338,8 @@ def _sample_to_program(
   evolved_function = program.get_function(function_to_evolve)
 
   evolved_function.body = body
-  evolved_function.thinking = thinking
-  evolved_function.thought = thought
-  return evolved_function, str(program), thought, thinking
+  evolved_function.description = description
+  return evolved_function, str(program), description
 
 
 def run_evaluation(sandbox, program, function_to_run, input, timeout_seconds, call_count, call_count_lock):
@@ -369,7 +454,7 @@ class Evaluator:
             reflection_output = data.get("reflection_output")  # ReEvo reflection
 
             # Parse LLM output and integrate into evaluation template
-            new_function, program, thought, thinking = _sample_to_program(
+            new_function, program, description = _sample_to_program(
                 data["sample"], data.get("version_generated"), self.template, self.function_to_evolve
             )
 
@@ -377,12 +462,16 @@ class Evaluator:
             def make_result(func, scores, found_optimal=False):
                 return (func, data['island_id'], scores, data['expected_version'],
                         self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens,
-                        found_optimal, parent_ids, thought, thinking, reflection_output)
+                        found_optimal, parent_ids, description, reflection_output)
 
             # Early exit if parsing failed
             if not new_function.body:
+                logger.warning(f"Evaluator: Parsing failed, empty body. Island {data['island_id']}")
                 await self.publish_to_database(make_result("return", {}), None)
                 return
+
+            # Log parsed function body
+            logger.info(f"Evaluator: Parsed function for island {data['island_id']}:\n{new_function.body}")
 
             # Submit evaluation tasks to ProcessPoolExecutor (one per test input)
             tasks = {
@@ -438,7 +527,7 @@ class Evaluator:
 
     async def publish_to_database(self, result, hash_value):
         try:
-            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids, thought, thinking, reflection_output = result
+            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids, description, reflection_output = result
 
             serialized_result = {
                 "new_function": function.serialize() if hasattr(function, 'serialize') else str(function),
@@ -452,8 +541,7 @@ class Evaluator:
                 "output_tokens": output_tokens,
                 "found_optimal_solution": found_optimal_solution,
                 "parent_ids": parent_ids,
-                "thought": thought,
-                "thinking": thinking,
+                "description": description,
                 "reflection_output": reflection_output,
             }
 

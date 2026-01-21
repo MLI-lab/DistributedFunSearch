@@ -147,7 +147,7 @@ def load_initial_programs(initial_functions_dir, strip_tags=True, logger=None):
 
     Args:
         initial_functions_dir: Path to directory containing .txt files with initial functions
-        strip_tags: If True, remove thinking/thought/code tags from function bodies
+        strip_tags: If True, remove description/code tags from function bodies
         logger: Optional logger for status messages
 
     Returns:
@@ -165,8 +165,7 @@ def load_initial_programs(initial_functions_dir, strip_tags=True, logger=None):
             function_body = txt_file.read_text().strip()
 
             if strip_tags:
-                function_body = re.sub(r'<thinking>.*?</thinking>\s*', '', function_body, flags=re.DOTALL)
-                function_body = re.sub(r'<thought>.*?</thought>\s*', '', function_body, flags=re.DOTALL)
+                function_body = re.sub(r'<description>.*?</description>\s*', '', function_body, flags=re.DOTALL)
                 function_body = re.sub(r'<code>(.*?)</code>', r'\1', function_body, flags=re.DOTALL)
                 function_body = function_body.strip()
 

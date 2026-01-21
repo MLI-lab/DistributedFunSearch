@@ -6,20 +6,11 @@ Usage:
     cd src/disfun
     python -m tests.test_parse_llm_output
 
-Parsing behaviors:
-    Function signature is always taken from the evaluation template, never from LLM output.
-    Indentation must be correct from the LLM, parser does not fix incorrect indentation.
-    Exception: if body has no indentation at all, parser adds 4 space indent to each line.
-
-Tests:
-1. Simple function
-2. Function with multiple indentation levels
-3. Function with helper function inside
-4. LLM output with multiple functions (extracts priority)
-5. Body before functions (body first priority)
-6. Markdown fences (```python)
-7. XML tags (<code>, <thinking>, <thought>)
-8. Template integration (body replaces into template)
+Test groups:
+    1. Raw code (no wrapper, fallback tier)
+    2. <code> tags (tier 1 extraction)
+    3. Markdown fences (tier 2 extraction)
+    4. Template integration
 """
 
 import sys
@@ -40,11 +31,10 @@ def print_test(name: str, raw_input: str):
     for i, line in enumerate(raw_input.split('\n'), 1):
         print(f"{i:3}: {line}")
 
-    body, thought, thinking = parse_llm_output(raw_input)
+    body, description = parse_llm_output(raw_input)
 
     print(f"\nPARSED OUTPUT:")
-    print(f"thought: {thought}")
-    print(f"thinking: {thinking[:50] + '...' if thinking and len(thinking) > 50 else thinking}")
+    print(f"description: {description}")
     print(f"\nbody ({len(body)} chars):")
     if body:
         for i, line in enumerate(body.rstrip('\n').split('\n'), 1):
@@ -53,17 +43,28 @@ def print_test(name: str, raw_input: str):
         print("  (empty)")
 
 
-def test_simple_function():
-    """Simple function with basic logic."""
+def print_section(title: str):
+    """Print a section header."""
+    print(f"\n\n{'#'*60}")
+    print(f"# {title}")
+    print(f"{'#'*60}")
+
+
+# ============================================================
+# GROUP 1: Raw code (no wrapper, fallback tier)
+# ============================================================
+
+def test_raw_simple_function():
+    """Simple function with basic logic, no wrapper."""
     raw = """def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     v = node_to_vertex[node]
     degree = G_gt.vertex(v).out_degree()
     return degree + len(node)"""
-    print_test("Simple Function", raw)
+    print_test("Raw: Simple Function", raw)
 
 
-def test_nested_indentation():
-    """Function with multiple indentation levels (for loop with if/else)."""
+def test_raw_nested_indentation():
+    """Function with multiple indentation levels."""
     raw = """def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     v = node_to_vertex[node]
     total = 0
@@ -73,10 +74,10 @@ def test_nested_indentation():
         else:
             total -= 1
     return total"""
-    print_test("Nested Indentation (for + if/else)", raw)
+    print_test("Raw: Nested Indentation", raw)
 
 
-def test_helper_function_inside():
+def test_raw_helper_inside():
     """Function with helper function defined inside."""
     raw = """def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     def hamming_weight(s):
@@ -85,11 +86,74 @@ def test_helper_function_inside():
     v = node_to_vertex[node]
     degree = G_gt.vertex(v).out_degree()
     return degree * hamming_weight(node)"""
-    print_test("Helper Function Inside", raw)
+    print_test("Raw: Helper Inside Function", raw)
 
 
-def test_llm_multiple_functions():
-    """LLM output with multiple functions, should extract priority."""
+def test_raw_imports_with_priority():
+    """Imports at module level with priority function."""
+    raw = """import numpy as np
+from collections import defaultdict
+
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
+    v = node_to_vertex[node]
+    return np.sqrt(v)"""
+    print_test("Raw: Imports with Priority", raw)
+
+
+def test_raw_body_indented():
+    """Body code already indented (completion style)."""
+    raw = """    v = node_to_vertex[node]
+    degree = G_gt.vertex(v).out_degree()
+    return degree * 2"""
+    print_test("Raw: Indented Body Code", raw)
+
+
+def test_raw_body_with_helper():
+    """Indented body followed by module level helper."""
+    raw = """    v = node_to_vertex[node]
+    degree = G_gt.vertex(v).out_degree()
+    return degree * helper(v)
+
+def helper(x):
+    return x * 2"""
+    print_test("Raw: Body with Helper", raw)
+
+
+def test_raw_body_with_imports():
+    """Imports at module level with indented body code."""
+    raw = """import numpy as np
+
+    v = node_to_vertex[node]
+    return np.sqrt(v)"""
+    print_test("Raw: Imports with Body", raw)
+
+
+def test_raw_body_with_nested_helper():
+    """Body code with indented helper (already nested)."""
+    raw = """    def helper(x):
+        return x * 2
+
+    v = node_to_vertex[node]
+    return helper(v.out_degree())"""
+    print_test("Raw: Body with Nested Helper", raw)
+
+
+# ============================================================
+# GROUP 2: <code> tags (tier 1 extraction)
+# ============================================================
+
+def test_code_tags_simple():
+    """Simple function wrapped in code tags."""
+    raw = """<code>
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
+    v = node_to_vertex[node]
+    return G_gt.vertex(v).out_degree()
+</code>"""
+    print_test("Code Tags: Simple Function", raw)
+
+
+def test_code_tags_multiple_functions():
+    """Multiple functions, should extract priority and helper."""
     raw = """<code>
 def helper(x):
     return x * 2
@@ -102,11 +166,11 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
 def unused():
     pass
 </code>"""
-    print_test("LLM Output with Multiple Functions (<code> tags)", raw)
+    print_test("Code Tags: Multiple Functions", raw)
 
 
-def test_body_before_functions():
-    """Body code before function definitions, should use body first."""
+def test_code_tags_body_before_func():
+    """Body code before function definitions."""
     raw = """<code>
     v = node_to_vertex[node]
     degree = G_gt.vertex(v).out_degree()
@@ -115,29 +179,14 @@ def test_body_before_functions():
 def helper(x):
     return x * 2
 </code>"""
-    print_test("Body Before Functions (body first priority)", raw)
+    print_test("Code Tags: Body Before Functions", raw)
 
 
-def test_markdown_fences():
-    """Code wrapped in markdown fences."""
-    raw = """```python
-def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
-    v = node_to_vertex[node]
-    return G_gt.vertex(v).out_degree()
-```"""
-    print_test("Markdown Fences (```python)", raw)
-
-
-def test_thinking_thought_tags():
-    """LLM output with <thinking> and <thought> tags."""
-    raw = """<thinking>
-I need to consider node degree and string weight.
-Lower degree nodes should get higher priority.
-</thinking>
-
-<thought>
+def test_code_tags_with_description():
+    """Code tags with description tags."""
+    raw = """<description>
 Using inverse degree combined with hamming weight.
-</thought>
+</description>
 
 <code>
 def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
@@ -146,16 +195,85 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     weight = sum(1 for c in node if c == '1')
     return -degree + weight
 </code>"""
-    print_test("With <thinking> and <thought> tags", raw)
+    print_test("Code Tags: With Description", raw)
 
+
+def test_code_tags_with_nested_fence():
+    """Markdown fence nested inside code tags."""
+    raw = """<code>
+```python
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
+    v = node_to_vertex[node]
+    return G_gt.vertex(v).out_degree()
+```
+</code>"""
+    print_test("Code Tags: Nested Fence Inside", raw)
+
+
+# ============================================================
+# GROUP 3: Markdown fences (tier 2 extraction)
+# ============================================================
+
+def test_fence_simple():
+    """Simple function in markdown fence."""
+    raw = """```python
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
+    v = node_to_vertex[node]
+    return G_gt.vertex(v).out_degree()
+```"""
+    print_test("Fence: Simple Function", raw)
+
+
+def test_fence_multiple_blocks():
+    """Multiple code blocks, should take the LAST one."""
+    raw = """Here's a bad approach:
+```python
+return 0  # wrong
+```
+
+Here's the correct solution:
+```python
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
+    v = node_to_vertex[node]
+    return G_gt.vertex(v).out_degree()
+```"""
+    print_test("Fence: Multiple Blocks (takes last)", raw)
+
+
+def test_fence_with_think_block():
+    """Content before fence (like Qwen3 think blocks)."""
+    raw = """<think>
+Let me analyze this problem. The key insight is that we should
+prioritize nodes with higher degree because they have more connections.
+</think>
+
+```python
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
+    v = node_to_vertex[node]
+    return G_gt.vertex(v).out_degree()
+```"""
+    print_test("Fence: Think Block Before", raw)
+
+
+def test_fence_plain_no_language():
+    """Plain fence without language specifier."""
+    raw = """```
+def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
+    v = node_to_vertex[node]
+    return G_gt.vertex(v).out_degree()
+```"""
+    print_test("Fence: Plain (no language)", raw)
+
+
+# ============================================================
+# GROUP 4: Template integration
+# ============================================================
 
 def test_template_integration():
     """Test that parsed body integrates correctly into a template."""
     from evaluator import _sample_to_program
     from disfun.utils.code_manipulation import text_to_program
 
-    # Simple template with priority function
-    # note function signature comes from template only the bodies get swapped
     template_code = """import graph_tool
 from graph_tool import Graph
 
@@ -167,7 +285,6 @@ def evaluate(n, s):
 """
     template = text_to_program(template_code)
 
-    # LLM generates new priority body
     llm_output = """<code>
 def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     v = node_to_vertex[node]
@@ -175,7 +292,7 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     return -degree + len(node)
 </code>"""
 
-    evolved_function, program_str, thought, thinking = _sample_to_program(
+    evolved_function, program_str, description = _sample_to_program(
         llm_output, None, template, 'priority'
     )
 
@@ -195,16 +312,39 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
 
 def main():
     print("\n# parse_llm_output Test Suite\n")
-    test_simple_function()
-    test_nested_indentation()
-    test_helper_function_inside()
-    test_llm_multiple_functions()
-    test_body_before_functions()
-    test_markdown_fences()
-    test_thinking_thought_tags()
+
+    # Group 1: Raw code
+    print_section("GROUP 1: Raw Code (no wrapper)")
+    test_raw_simple_function()
+    test_raw_nested_indentation()
+    test_raw_helper_inside()
+    test_raw_imports_with_priority()
+    test_raw_body_indented()
+    test_raw_body_with_helper()
+    test_raw_body_with_imports()
+    test_raw_body_with_nested_helper()
+
+    # Group 2: <code> tags
+    print_section("GROUP 2: <code> Tags")
+    test_code_tags_simple()
+    test_code_tags_multiple_functions()
+    test_code_tags_body_before_func()
+    test_code_tags_with_description()
+    test_code_tags_with_nested_fence()
+
+    # Group 3: Markdown fences
+    print_section("GROUP 3: Markdown Fences")
+    test_fence_simple()
+    test_fence_multiple_blocks()
+    test_fence_with_think_block()
+    test_fence_plain_no_language()
+
+    # Group 4: Template integration
+    print_section("GROUP 4: Template Integration")
     test_template_integration()
+
     print(f"\n{'='*60}")
-    print("Completed 8 tests")
+    print("Completed 18 tests")
     print(f"{'='*60}\n")
 
 

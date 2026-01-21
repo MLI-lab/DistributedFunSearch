@@ -47,9 +47,8 @@ class Function:
     parent_ids: list[int] | None = None  # IDs of programs in the prompt that generated this
     generation: int = 0  # Generation number (0 for baseline, increments for offspring)
     timestamp: float | None = None  # When this program was created
-    # Three-tier reasoning
-    thinking: str | None = None  # Full chain-of-thought reasoning (extended_eoh)
-    thought: str | None = None   # One-sentence algorithm description (eoh)
+    # Algorithm description
+    description: str | None = None  # One-sentence algorithm description
 
 
     def __str__(self) -> str:
@@ -76,8 +75,7 @@ class Function:
             "return_type": self.return_type,
             "docstring": self.docstring,
             "hash_value": self.hash_value,
-            "thinking": self.thinking,
-            "thought": self.thought
+            "description": self.description
         }
 
     @staticmethod
@@ -94,8 +92,7 @@ class Function:
             "return_type": self.return_type,
             "docstring": self.docstring,
             "hash_value": self.hash_value,
-            "thinking": self.thinking,
-            "thought": self.thought
+            "description": self.description
         }
 
     @staticmethod
@@ -107,8 +104,7 @@ class Function:
             return_type=data.get("return_type", None),
             docstring=data.get("docstring", None),
             hash_value=data.get("hash_value", None),
-            thinking=data.get("thinking", None),
-            thought=data.get("thought", None)
+            description=data.get("description", None)
         )
 
     @staticmethod

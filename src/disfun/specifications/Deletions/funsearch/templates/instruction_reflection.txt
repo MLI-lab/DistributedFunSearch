@@ -13,5 +13,5 @@ First, compare the two functions above and explain why the second outperforms th
 The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
 
 Use this format:
-<thought>Your insight</thought>
+<description>Your insight</description>
 <code>Your implementation</code>

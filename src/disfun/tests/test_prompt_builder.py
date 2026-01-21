@@ -28,31 +28,31 @@ class MockFunction:
     return_type: str = "float"
     body: str = "    return 1.0"
     docstring: str = ""
-    thought: str = ""
+    description: str = ""
 
 
 # Graph signature (node, G, n, s)
 WORSE_FUNC = MockFunction(
     body='    return len(node)',
-    thought="I tried using string length as a simple heuristic.",
+    description="I tried using string length as a simple heuristic.",
 )
 
 BETTER_FUNC = MockFunction(
     body='    ones = node.count("1")\n    degree = G.degree(node)\n    return ones * 10 - degree',
-    thought="Counting ones and penalizing high degree nodes should help.",
+    description="Counting ones and penalizing high degree nodes should help.",
 )
 
 # No-graph signature (node, n, s, q)
 WORSE_FUNC_NO_GRAPH = MockFunction(
     args="node, n, s, q",
     body='    return len(node)',
-    thought="I tried using string length as a simple heuristic.",
+    description="I tried using string length as a simple heuristic.",
 )
 
 BETTER_FUNC_NO_GRAPH = MockFunction(
     args="node, n, s, q",
     body='    ones = node.count("1")\n    return ones * 10',
-    thought="Counting ones should help find nodes with fewer common subsequences.",
+    description="Counting ones should help find nodes with fewer common subsequences.",
 )
 
 WORSE_SCORES = {"(6, 1)": 8, "(7, 1)": 12, "(8, 1)": 20}
@@ -82,7 +82,7 @@ def load_spec(strategy: PromptStrategy, **kwargs) -> PromptSpec:
         "imports_file": "imports/networkx.txt",
         "initial_functions_dir": "initial_functions/graph_networkx",
         "fewshot_num_examples": 2,
-        "fewshot_include_thought": True,
+        "fewshot_include_description": True,
         "funsearch_template": "funsearch/templates/completion.txt",
         "funsearch_problem_desc": "funsearch/problem_descriptions/completion.txt",
         "show_scores": False,
@@ -142,11 +142,11 @@ def test_funsearch():
     # 4. Instruction templates
     templates = [
         ("instruction_basic", False),
-        ("instruction_thought", True),
+        ("instruction_thought", True),  # Uses <description> tags
         ("instruction_reflection", True),
     ]
 
-    for name, has_thought in templates:
+    for name, has_description in templates:
         print(f"\n--- 4. Instruction: {name} ---")
         spec = load_spec(
             PromptStrategy.FUNSEARCH,
@@ -157,32 +157,32 @@ def test_funsearch():
         prompt = prompt_builder.build_prompt(spec, "funsearch", PROGRAMS)
         fewshot = prompt.split("Improve on")[0]
 
-        print(f"Has <thought>: {has_thought}")
+        print(f"Has <description>: {has_description}")
         print(f"System message: {spec.system_message[:50]}..." if spec.system_message else "None")
 
         assert "<code>" in prompt and fewshot.count("<code>") >= 2
-        if has_thought:
-            assert "<thought>" in prompt and fewshot.count("<thought>") >= 2
+        if has_description:
+            assert "<description>" in prompt and fewshot.count("<description>") >= 2
         print_prompt(prompt)
 
-    # 5. fewshot_include_thought=False (thought tags only in format instruction, not in examples)
-    print("\n--- 5. fewshot_include_thought=False ---")
+    # 5. fewshot_include_description=False (description tags only in format instruction, not in examples)
+    print("\n--- 5. fewshot_include_description=False ---")
     spec = load_spec(
         PromptStrategy.FUNSEARCH,
         funsearch_template="funsearch/templates/instruction_thought.txt",
         funsearch_problem_desc="funsearch/problem_descriptions/instruction.txt",
-        fewshot_include_thought=False,
+        fewshot_include_description=False,
     )
     prompt = prompt_builder.build_prompt(spec, "funsearch", PROGRAMS)
     fewshot = prompt.split("Improve on")[0]
     format_section = prompt.split("Improve on")[1]
 
-    print(f"Fewshot <thought> count: {fewshot.count('<thought>')} (should be 0)")
-    print(f"Format has <thought>: {'<thought>' in format_section}")
+    print(f"Fewshot <description> count: {fewshot.count('<description>')} (should be 0)")
+    print(f"Format has <description>: {'<description>' in format_section}")
 
-    assert fewshot.count("<thought>") == 0, "Fewshots should not have <thought>"
+    assert fewshot.count("<description>") == 0, "Fewshots should not have <description>"
     assert fewshot.count("<code>") >= 2, "Fewshots should have <code>"
-    assert "<thought>" in format_section, "Format should still request <thought>"
+    assert "<description>" in format_section, "Format should still request <description>"
     print_prompt(prompt)
 
     print("\nFunSearch tests passed!")

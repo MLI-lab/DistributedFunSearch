@@ -10,7 +10,7 @@ First, describe your new algorithm and main steps in one sentence. Next, impleme
 {func_desc}
 
 Use this format:
-<thought>Your algorithm description in one sentence</thought>
+<description>Your algorithm description in one sentence</description>
 <code>Your implementation</code>
 
 Do not give additional explanations.

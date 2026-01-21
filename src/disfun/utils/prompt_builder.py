@@ -18,8 +18,8 @@ Placeholders:
         {version}            Next version number
 
     Note: {fewshot_examples}, {worse_code}, {better_code} include <code> tags when detected
-    in template. <thought> tags are included only if detected in template AND enabled via
-    fewshot_include_thought config option.
+    in template. <description> tags are included only if detected in template AND enabled via
+    fewshot_include_description config option.
 
     ReEvo only (reflection state):
         {reflection}         Filled by sampler with first LLM output, not here
@@ -72,7 +72,7 @@ class PromptSpec:
 
     # FunSearch specific
     fewshot_num_examples: int = 2
-    fewshot_include_thought: bool = True  # Include <thought> in few-shot examples
+    fewshot_include_description: bool = True  # Include <description> in few-shot examples
     evaluation_preamble: str = ""
     evaluation_script: str = ""
     function_to_evolve: str = "priority"
@@ -209,7 +209,7 @@ def load_specification(
     funsearch_evaluation_preamble: str | None = None,
     funsearch_evaluation_script: str | None = None,
     fewshot_num_examples: int = 2,
-    fewshot_include_thought: bool = True,
+    fewshot_include_description: bool = True,
     initial_functions_dir: str = "initial_functions/graph_networkx",
     # EoH options
     eoh_styles_dir: str = "eoh/styles",
@@ -348,7 +348,7 @@ def load_specification(
         templates=templates,
         template_requirements=template_requirements,
         fewshot_num_examples=fewshot_num_examples,
-        fewshot_include_thought=fewshot_include_thought,
+        fewshot_include_description=fewshot_include_description,
         evaluation_preamble=evaluation_preamble,
         evaluation_script=evaluation_script,
         function_to_evolve="priority",
@@ -401,7 +401,7 @@ def load_prompt_spec_from_config(config) -> PromptSpec:
         funsearch_evaluation_preamble=config.prompt.funsearch_evaluation_preamble,
         funsearch_evaluation_script=config.prompt.funsearch_evaluation_script,
         fewshot_num_examples=config.prompt.fewshot_num_examples,
-        fewshot_include_thought=config.prompt.fewshot_include_thought,
+        fewshot_include_description=config.prompt.fewshot_include_description,
         initial_functions_dir=initial_functions_dir,
         eoh_styles_dir=config.prompt.eoh_styles_dir,
         eoh_problem_desc=config.prompt.eoh_problem_desc,
@@ -494,7 +494,7 @@ def _format_function_code(
     docstring_template: str | None = None,
     version: int | None = None,
     include_def: bool = True,
-    include_thought_tags: bool = False,
+    include_description_tags: bool = False,
     include_code_tags: bool = False,
 ) -> str:
     """Format a Function object as code string, with docstring template and scores.
@@ -506,7 +506,7 @@ def _format_function_code(
         docstring_template: Docstring template with {score} and {version} placeholders.
         version: Version number to replace {version} with (e.g., 0 for "priority_v0").
         include_def: Whether to include 'def name(args):' line.
-        include_thought_tags: Whether to wrap with <thought> tags (implies include_code_tags).
+        include_description_tags: Whether to wrap with <description> tags (implies include_code_tags).
         include_code_tags: Whether to wrap code with <code> tags.
 
     Returns:
@@ -551,12 +551,12 @@ def _format_function_code(
         code = func.body
 
     # Wrap with tags if requested
-    if include_thought_tags or include_code_tags:
+    if include_description_tags or include_code_tags:
         parts = []
-        if include_thought_tags:
-            thought = getattr(func, 'thought', "") or ""
-            parts.append(f"<thought>{thought}</thought>")
-        if include_thought_tags or include_code_tags:
+        if include_description_tags:
+            description = getattr(func, 'description', "") or ""
+            parts.append(f"<description>{description}</description>")
+        if include_description_tags or include_code_tags:
             parts.append(f"<code>{code}</code>")
             return "\n".join(parts)
     return code
@@ -642,9 +642,9 @@ def _fill_program_placeholders(
 ) -> str:
     """Fill all program-related placeholders (unified for FunSearch/EoH/ReEvo).
 
-    Detects tag format from template (<thought>, <code>) and formats programs
-    accordingly. Whether to include thought in few-shot examples is controlled
-    by spec.fewshot_include_thought.
+    Detects tag format from template (<description>, <code>) and formats programs
+    accordingly. Whether to include description in few-shot examples is controlled
+    by spec.fewshot_include_description.
 
     Fills:
         {fewshot_examples}   All programs as versioned functions (v0, v1, ...)
@@ -654,8 +654,8 @@ def _fill_program_placeholders(
         {version}            Next version number
         {evaluation_preamble}, {evaluation_script}   FunSearch evaluation context
     """
-    # Detect tag format from template, but respect config for thought in few-shots
-    include_thought_tags = "<thought>" in prompt and spec.fewshot_include_thought
+    # Detect tag format from template, but respect config for description in few-shots
+    include_description_tags = "<description>" in prompt and spec.fewshot_include_description
     include_code_tags = "<code>" in prompt
 
     # Build {fewshot_examples}
@@ -667,7 +667,7 @@ def _fill_program_placeholders(
         prev_version = i - 1 if i > 0 else None
         fewshot_parts.append(_format_function_code(
             func_copy, scores, spec, docstring_template, prev_version,
-            include_thought_tags=include_thought_tags,
+            include_description_tags=include_description_tags,
             include_code_tags=include_code_tags,
         ))
     fewshot_examples = "\n\n".join(fewshot_parts)
@@ -684,7 +684,7 @@ def _fill_program_placeholders(
         version = None if len(programs) == 1 else 0
         better_code = _format_function_code(
             better_func, scores, spec, docstring, version,
-            include_thought_tags=include_thought_tags,
+            include_description_tags=include_description_tags,
             include_code_tags=include_code_tags,
         )
 
@@ -694,7 +694,7 @@ def _fill_program_placeholders(
         worse_func.name = f"{spec.function_to_evolve}_v0"
         worse_code = _format_function_code(
             worse_func, scores, spec, spec.docstring_baseline, None,
-            include_thought_tags=include_thought_tags,
+            include_description_tags=include_description_tags,
             include_code_tags=include_code_tags,
         )
 
