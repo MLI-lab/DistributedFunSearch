@@ -36,6 +36,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.helpers import are_neighbors
+from utils.graph_paths import get_graph_path
 
 
 # Global variables for multiprocessing (initialized per worker)
@@ -376,11 +377,9 @@ def main():
 
         # Load or build graph
         if args.graph_dir:
-            graph_path = os.path.join(args.graph_dir, f"n{n}_s{args.s}")
-            if not os.path.exists(graph_path):
-                graph_path = os.path.join(args.graph_dir, f"graph_d_s{args.s}_n{n}_q{args.q}.lmdb")
+            graph_path = get_graph_path("deletion", args.s, n, args.q, graph_dir=args.graph_dir)
 
-            if os.path.exists(graph_path):
+            if graph_path:
                 if use_lmdb_mode:
                     # Memory-efficient: only load node names, not full graph
                     print(f"Using LMDB-backed mode (memory efficient): {graph_path}")

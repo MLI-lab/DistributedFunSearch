@@ -10,6 +10,7 @@ import hashlib
 import math
 import itertools
 from collections import Counter
+import numpy as np
 
 
 def lcs_length(s1, s2):

@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Set, Optional, Union
 
+from .graph_paths import get_mapping_path
+
 
 def load_kamis_result(result_file: str, mapping_file: str) -> Set[str]:
     """
@@ -117,6 +119,8 @@ def load_json_codebook(json_file: str, n: Optional[int] = None) -> Union[Set[str
 
 def find_mapping_file(result_file: str) -> Optional[str]:
     """Find the corresponding .mapping file for a KAMIS .result file."""
+    import re
+
     # Try same directory with .mapping extension
     base = result_file.rsplit('.', 1)[0]
 
@@ -140,6 +144,16 @@ def find_mapping_file(result_file: str) -> Optional[str]:
         candidate = os.path.join(parent_dir, sibling, graph_name + '.mapping')
         if os.path.exists(candidate):
             return candidate
+
+    # Try using centralized graph paths
+    # Parse graph parameters from filename (e.g., graph_d_s1_n10_q2)
+    match = re.search(r'graph_(d|ids)_s(\d+)_n(\d+)_q(\d+)', graph_name)
+    if match:
+        graph_type = "deletion" if match.group(1) == "d" else "ids"
+        s, n, q = int(match.group(2)), int(match.group(3)), int(match.group(4))
+        mapping_path = get_mapping_path(graph_type, s, n, q)
+        if os.path.exists(mapping_path):
+            return mapping_path
 
     return None
 

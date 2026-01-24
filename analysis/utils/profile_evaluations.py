@@ -29,8 +29,9 @@ import networkx as nx
 import psutil
 
 from utils.helpers import lcs_length, are_neighbors
+from utils.graph_paths import get_graph_path, DEFAULT_GRAPH_DIR
 
-GRAPH_DIR = "/workspace/DistributedFunSearch/src/graphs"
+GRAPH_DIR = DEFAULT_GRAPH_DIR
 
 
 # =============================================================================
@@ -173,13 +174,14 @@ def main():
     print("=" * 80)
     print("Evaluation Profiling (with CPU Utilization)")
     print("=" * 80)
+    print(f"Graph directory: {GRAPH_DIR}")
 
     for n in [6, 7, 8, 9, 10, 11]:
         s, q = 1, 2
-        path = os.path.join(GRAPH_DIR, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+        path = get_graph_path("deletion", s, n, q)
 
-        if not os.path.exists(path):
-            print(f"n={n}: Graph not found at {path}")
+        if not path:
+            print(f"n={n}: Graph not found")
             continue
 
         # Time graph loading

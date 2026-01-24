@@ -1,144 +1,154 @@
 # Graph Construction Scripts
 
-This directory contains standalone scripts for constructing graphs used in DistributedFunSearch experiments.
+Scripts for constructing graphs used in DistributedFunSearch experiments.
+
+---
 
 ## Deletion-Correcting Code Graphs
 
-### construct_deletions_graphs.py
+**Script:** `construct_deletions_graphs.py`
 
 Constructs graphs for finding codes that can correct deletions.
 
-**Graph structure:**
-- Nodes: q-ary strings of length n (q=2 for binary, q=4 for DNA)
-- Edges: Two nodes are connected if they share a common subsequence of length >= n-s
-- An independent set in this graph represents a valid deletion-correcting code
+### Graph Structure
 
-**Usage:**
+| Property | Description |
+|----------|-------------|
+| Nodes | q-ary strings of length n (q=2 for binary, q=4 for DNA) |
+| Edges | Two nodes connected if they share a common subsequence of length >= n-s |
+| Solution | An independent set represents a valid deletion-correcting code |
 
-1. Install required dependencies:
-   ```bash
-   pip install tqdm
-   ```
+### Usage
 
-2. Edit the `params` list and `q` value in the `__main__` block to specify which (n, s) pairs and alphabet size you want:
-   ```python
-   q = 4  # 2 for binary, 4 for DNA (quaternary)
-   params = [
-       (6, 1),  # n=6, s=1 (single deletion correction)
-       (7, 1),
-       # ... add more as needed
-   ]
-   ```
+1. Edit the `params` list and `q` value in `__main__`:
 
-3. Run the script:
-   ```bash
-   cd src/construct_graphs
-   python construct_deletions_graphs.py
-   ```
+```python
+q = 4  # 2 for binary, 4 for DNA (quaternary)
+params = [
+    (6, 1),  # n=6, s=1 (single deletion correction)
+    (7, 1),
+    # ... add more as needed
+]
+```
 
-4. Graphs will be saved to `src/graphs/` as LMDB databases with naming format:
-   ```
-   graph_d_s{s}_n{n}_q{q}.lmdb
-   ```
+2. Run the script:
 
-**Example output:**
-- `graph_d_s1_n6_q2.lmdb`: Binary code with n=6, s=1
-- `graph_d_s1_n7_q4.lmdb`: DNA code with n=7, s=1
+```bash
+cd src/construct_graphs
+python construct_deletions_graphs.py
+```
 
-**Note:** Graph construction can be slow for large n or q values due to computing pairwise longest common subsequences (LCS) for all q^n sequences.
+### Output
+
+Graphs saved to `src/graphs/` as LMDB databases:
+- Format: `graph_d_s{s}_n{n}_q{q}.lmdb`
+- Example: `graph_d_s1_n7_q4.lmdb` (DNA code, n=7, s=1)
+
+**Changing output directory:** For large graphs (n >= 10), you may want to save to a different location with more storage. Edit `OUTPUT_DIR` in `__main__`:
+
+```python
+# Default: saves to src/graphs/
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
+
+# Custom: save to external storage
+OUTPUT_DIR = "/mnt/large_storage/graphs"
+```
+
+> **Note:** Construction can be slow for large n or q due to computing pairwise LCS for all q^n sequences. 
+
+---
 
 ## IDS (Insertion/Deletion/Substitution) Code Graphs
 
-### construct_ids_graphs.py
+**Script:** `construct_ids_graphs.py`
 
 Constructs graphs for finding codes that can correct insertions, deletions, and substitutions.
 
-**Graph structure:**
-- Nodes: q-ary strings of length n (q=2 for binary, q=4 for DNA)
-- Edges: Two nodes are connected if `edit_distance(node1, node2) < 2s + 1`
-- An independent set in this graph represents a valid code with minimum distance `>= 2s + 1`
+### Graph Structure
 
-**Usage:**
+| Property | Description |
+|----------|-------------|
+| Nodes | q-ary strings of length n (q=2 for binary, q=4 for DNA) |
+| Edges | Two nodes connected if `edit_distance(node1, node2) < 2s + 1` |
+| Solution | An independent set represents a valid code with min distance >= 2s + 1 |
 
-1. Install required dependencies:
-   ```bash
-   pip install python-Levenshtein tqdm
-   ```
+### Usage
 
-2. Edit the `params` list and `q` value in the `__main__` block to specify which (n, s) pairs and alphabet size you want:
-   ```python
-   q = 4  # 2 for binary, 4 for DNA (quaternary)
-   params = [
-       (6, 1),  # n=6, s=1 (requires min distance 3)
-       (7, 1),
-       # ... add more as needed
-   ]
-   ```
+1. Edit the `params` list and `q` value in `__main__`:
 
-3. Run the script:
-   ```bash
-   cd src/construct_graphs
-   python construct_ids_graphs.py
-   ```
+```python
+q = 4  # 2 for binary, 4 for DNA (quaternary)
+params = [
+    (6, 1),  # n=6, s=1 (requires min distance 3)
+    (7, 1),
+    # ... add more as needed
+]
+```
 
-4. Graphs will be saved to `src/graphs/` as LMDB databases with naming format:
-   ```
-   graph_ids_s{s}_n{n}_q{q}.lmdb
-   ```
+2. Run the script:
 
-**Example output:**
-- `graph_ids_s1_n6_q2.lmdb`: Binary code with n=6, s=1 (min distance 3)
-- `graph_ids_s2_n10_q4.lmdb`: DNA code with n=10, s=2 (min distance 5)
+```bash
+cd src/construct_graphs
+python construct_ids_graphs.py
+```
 
-**Note:** Graph construction can be slow for large n or q values due to computing pairwise edit distances for all q^n sequences.
+### Output
 
-## Using the Graphs in Experiments
+Graphs saved to `src/graphs/` as LMDB databases:
+- Format: `graph_ids_s{s}_n{n}_q{q}.lmdb`
+- Example: `graph_ids_s2_n10_q4.lmdb` (DNA code, n=10, s=2, min distance 5)
 
-To use IDS graphs in your experiments:
+**Changing output directory:** For large graphs (n >= 10), you may want to save to a different location with more storage. Edit `OUTPUT_DIR` in `__main__`:
 
-1. **First, construct the graphs** (see instructions above)
+```python
+# Default: saves to src/graphs/
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
 
-2. **Update your config** to use IDS specification:
-   Edit `src/experiments/experiment1/config.py` and modify the `get_spec_path()` function:
-   ```python
-   def get_spec_path() -> str:
-       # ... (docstring and path construction code)
+# Custom: save to external storage
+OUTPUT_DIR = "/mnt/large_storage/graphs"
+```
 
-       # Comment out the Deletions line:
-       # return os.path.join(decos_base, "src", "decos", "specifications", "Deletions", "StarCoder2", "load_graph", "baseline.txt")
+> **Note:** Construction can be slow for large n or q due to computing pairwise edit distances for all q^n sequences. 
 
-       # Uncomment the IDS line:
-       return os.path.join(decos_base, "src", "decos", "specifications", "IDS", "StarCoder2", "load_graph", "baseline.txt")
-   ```
+---
 
-3. **Configure your test parameters**:
-   The config file already has the `EvaluatorConfig` set up. You can adjust it if needed:
-   ```python
-   evaluator = EvaluatorConfig(
-       s_values=[1, 2],      # Number of errors to correct
-       start_n=[6, 6],       # Starting code length for each s
-       end_n=[10, 12],       # Ending code length for each s
-       # ... other config options
-   )
-   ```
+## Checkpointing
 
-4. **Run your experiment**:
-   ```bash
-   cd src/experiments/experiment1
-   python -m disfun
-   ```
+Both scripts support resuming from checkpoints after interruption:
 
-**Note:** The config uses a helper function `get_spec_path()` that automatically constructs the full path. Simply comment/uncomment the appropriate return statement to switch between Deletions and IDS specifications.
+- Checkpoints saved after each worker completes
+- Default location: `<OUTPUT_DIR>/checkpoints/checkpoint_<type>_s{s}_n{n}_q{q}.pkl`
+- Auto-detected on restart: script resumes from last checkpoint
+- Delete checkpoint file to force fresh start
+
+**Changing checkpoint location:** Checkpoints are stored relative to `OUTPUT_DIR`. To use a different location, change `OUTPUT_DIR` (see above) or modify `_get_checkpoint_path()`:
+
+```python
+def _get_checkpoint_path(output_dir, n, s, q):
+    # Default: checkpoints inside output_dir
+    checkpoint_dir = os.path.join(output_dir, "checkpoints")
+
+    # Custom: use fast local SSD for checkpoints
+    # checkpoint_dir = "/tmp/graph_checkpoints"
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    return os.path.join(checkpoint_dir, f"checkpoint_<type>_s{s}_n{n}_q{q}.pkl")
+```
+
+---
 
 ## Memory Tracking
 
-Both construction scripts include real-time memory monitoring:
-- **Before**: Shows estimated upper bound (based on Hamming ball formula)
-- **During**: Samples memory every 2s (main process + all workers)
-- **After**: Reports actual peak memory vs estimate
+Both scripts include memory monitoring:
 
-For SLURM jobs, verify actual usage after completion:
+| Phase | Description |
+|-------|-------------|
+| Before | Shows estimated upper bound (Hamming ball formula) |
+| During | Samples memory every 0.5s (main process + all workers) |
+| After | Reports actual peak memory vs estimate |
+
+For SLURM jobs, verify actual usage:
+
 ```bash
 sacct -j <job_id> --format=JobID,MaxRSS,ReqMem,Elapsed
 ```
-

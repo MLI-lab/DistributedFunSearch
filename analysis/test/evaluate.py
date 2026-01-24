@@ -47,9 +47,7 @@ from utils.helpers import (
     build_graph_networkx,
     build_graph_gt,
 )
-
-# Default path for pre-computed graphs
-DEFAULT_GRAPH_DIR = "/mnt/Checkpoints/Graphs"
+from utils.graph_paths import get_graph_path as find_graph_path, DEFAULT_GRAPH_DIR
 
 
 def load_neighbors_from_lmdb(graph_path: str) -> Dict[str, Set[str]]:
@@ -84,28 +82,17 @@ def get_graph_path(graph_dir: str, n: int, s: int, q: int) -> Optional[str]:
     """
     Find pre-computed graph path for given parameters.
 
-    Tries multiple naming conventions:
-    - graph_d_s{s}_n{n}_q{q}.lmdb (main codebase format)
-    - n{n}_s{s} (alternative format)
+    Uses centralized GraphPaths to check multiple locations:
+    - Organized: /mnt/Graphs/deletion/binary/s1/graph_d_s1_n10_q2.lmdb
+    - Flat: /mnt/Checkpoints/Graphs/graph_d_s1_n10_q2.lmdb
+    - Alternative: n{n}_s{s}
 
     Returns path if found, None otherwise.
     """
-    import os
-
     if not graph_dir:
         return None
 
-    # Try main format first
-    path1 = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
-    if os.path.exists(path1):
-        return path1
-
-    # Try alternative format
-    path2 = os.path.join(graph_dir, f"n{n}_s{s}")
-    if os.path.exists(path2):
-        return path2
-
-    return None
+    return find_graph_path("deletion", s, n, q, graph_dir=graph_dir)
 
 
 # =============================================================================
