@@ -92,15 +92,24 @@ src/experiments/experiment1/attach_evaluators_zih.sh
 src/experiments/experiment1/exp1_alpha_zih.sh
 
 # ==============================================================================
-# Analysis (generated/private files)
+# Analysis (generated output files)
 # ==============================================================================
+# Output directories (created dynamically by analysis scripts)
+analysis/successful_functions/
+analysis/analysis_*/
+analysis/greedy_results/
+analysis/baselines/greedy_results/
+analysis/results/
+
+# Checkpoint artifacts
 analysis/Checkpoints_*
 analysis/checkpoint_full.txt
-analysis/analysis_*
+
+# Generated plots/images
 analysis/config_overlap_heatmap.png
-analysis/graph_ablation_analysis.py
-analysis/throughput_sweep_analysis.ipynb
-analysis/
+analysis/*.png
+
+# Specification directories
 src/disfun/specifications/Enc_Dec/
 src/disfun/specifications/IDS/
 

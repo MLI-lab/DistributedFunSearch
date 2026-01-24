@@ -30,11 +30,24 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
 from multiprocessing import Pool, cpu_count
 from statistics import mean, stdev
+from tqdm import tqdm
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.helpers import lcs_length, are_neighbors
+from utils.helpers import are_neighbors
+
+
+# Global variables for multiprocessing (initialized per worker)
+_worker_neighbors: Dict[str, Set[str]] = {}
+_worker_nodes: List[str] = []
+
+
+def _init_worker(neighbors: Dict[str, Set[str]], nodes: List[str]):
+    """Initialize worker process with shared data."""
+    global _worker_neighbors, _worker_nodes
+    _worker_neighbors = neighbors
+    _worker_nodes = nodes
 
 
 def build_neighbor_dict(nodes: List[str], n: int, s: int) -> Dict[str, Set[str]]:
@@ -49,25 +62,76 @@ def build_neighbor_dict(nodes: List[str], n: int, s: int) -> Dict[str, Set[str]]
 
 
 def load_graph_from_lmdb(graph_path: str) -> Dict[str, Set[str]]:
-    """Load graph from LMDB database."""
+    """Load graph from LMDB database into memory."""
     try:
         import lmdb
+        import ujson as json
     except ImportError:
-        raise ImportError("lmdb required. Install with: pip install lmdb")
+        raise ImportError("lmdb and ujson required. Install with: pip install lmdb ujson")
 
     neighbors = {}
     env = lmdb.open(graph_path, readonly=True, lock=False)
-    with env.begin() as txn:
+    with env.begin(buffers=True) as txn:
         for key, value in txn.cursor():
-            node = key.decode()
-            neighbor_list = value.decode().split(',')
-            neighbors[node] = set(n for n in neighbor_list if n)
+            node = bytes(key).decode()
+            # Try JSON format first (used by main codebase), fall back to CSV
+            val_str = bytes(value).decode()
+            if val_str.startswith('['):
+                neighbor_list = json.loads(val_str)
+            else:
+                neighbor_list = [n for n in val_str.split(',') if n]
+            neighbors[node] = set(neighbor_list)
     env.close()
     return neighbors
 
 
+class LMDBGraph:
+    """Memory-efficient graph backed by LMDB (memory-mapped, no Python copy)."""
+
+    def __init__(self, graph_path: str):
+        try:
+            import lmdb
+        except ImportError:
+            raise ImportError("lmdb required. Install with: pip install lmdb")
+
+        self.graph_path = graph_path
+        self.env = lmdb.open(graph_path, readonly=True, lock=False,
+                            readahead=False, meminit=False)
+        self._nodes = None
+
+    def get_neighbors(self, node: str) -> Set[str]:
+        """Get neighbors of a node (reads from LMDB on demand)."""
+        try:
+            import ujson as json
+        except ImportError:
+            import json
+
+        with self.env.begin(buffers=True) as txn:
+            value = txn.get(node.encode())
+            if value is None:
+                return set()
+            val_str = bytes(value).decode()
+            if val_str.startswith('['):
+                return set(json.loads(val_str))
+            else:
+                return set(n for n in val_str.split(',') if n)
+
+    def get_nodes(self) -> List[str]:
+        """Get all node names (cached after first call)."""
+        if self._nodes is None:
+            self._nodes = []
+            with self.env.begin(buffers=True) as txn:
+                for key, _ in txn.cursor():
+                    self._nodes.append(bytes(key).decode())
+        return self._nodes
+
+    def close(self):
+        self.env.close()
+
+
 def random_greedy_mis(
     neighbors: Dict[str, Set[str]],
+    nodes: List[str],
     seed: int,
     return_set: bool = False
 ) -> Tuple[int, Optional[List[str]]]:
@@ -76,20 +140,21 @@ def random_greedy_mis(
 
     Args:
         neighbors: Dict mapping each node to its neighbors
+        nodes: List of all nodes (avoids repeated dict.keys() calls)
         seed: Random seed
         return_set: If True, return the actual set
 
     Returns:
-        (size, set) if return_set else size
+        (size, set) if return_set else (size, None)
     """
     rng = random.Random(seed)
-    nodes = list(neighbors.keys())
-    rng.shuffle(nodes)
+    shuffled = nodes.copy()
+    rng.shuffle(shuffled)
 
     independent_set = []
     removed = set()
 
-    for node in nodes:
+    for node in shuffled:
         if node in removed:
             continue
         independent_set.append(node)
@@ -101,32 +166,155 @@ def random_greedy_mis(
     return len(independent_set), None
 
 
+def _worker_trial(seed: int) -> Tuple[int, int, Optional[List[str]]]:
+    """Worker function for parallel trials (in-memory graph). Returns (seed, size, solution)."""
+    size, solution = random_greedy_mis(_worker_neighbors, _worker_nodes, seed, return_set=True)
+    return seed, size, solution
+
+
+# Global for LMDB-backed worker
+_worker_graph_path: str = ""
+
+
+def _init_lmdb_worker(graph_path: str, nodes: List[str]):
+    """Initialize worker with LMDB path (each worker opens its own connection)."""
+    global _worker_graph_path, _worker_nodes
+    _worker_graph_path = graph_path
+    _worker_nodes = nodes
+
+
+def _lmdb_worker_trial(seed: int) -> Tuple[int, int, Optional[List[str]]]:
+    """Worker function for LMDB-backed trials. Each worker opens its own LMDB."""
+    graph = LMDBGraph(_worker_graph_path)
+
+    rng = random.Random(seed)
+    shuffled = _worker_nodes.copy()
+    rng.shuffle(shuffled)
+
+    independent_set = []
+    removed = set()
+
+    for node in shuffled:
+        if node in removed:
+            continue
+        independent_set.append(node)
+        removed.add(node)
+        # Get neighbors on-demand from LMDB
+        removed.update(graph.get_neighbors(node))
+
+    graph.close()
+    return seed, len(independent_set), independent_set
+
+
 def run_trials(
     neighbors: Dict[str, Set[str]],
     num_trials: int,
-    base_seed: int
+    base_seed: int,
+    num_workers: int = None
 ) -> Tuple[List[int], int, List[str]]:
     """
-    Run multiple random greedy trials.
+    Run multiple random greedy trials in parallel (in-memory graph).
+
+    Args:
+        neighbors: Dict mapping each node to its neighbors
+        num_trials: Number of random trials to run
+        base_seed: Base random seed (each trial uses base_seed + i)
+        num_workers: Number of parallel workers (default: cpu_count)
 
     Returns:
         (sizes, best_size, best_solution)
     """
+    if num_workers is None:
+        num_workers = cpu_count()
+
+    nodes = list(neighbors.keys())
+    seeds = [base_seed + i for i in range(num_trials)]
+
+    # Single worker: run sequentially without multiprocessing (avoids memory copy)
+    if num_workers == 1:
+        sizes = []
+        best_size = 0
+        best_solution = []
+        for seed in tqdm(seeds, desc="Running trials", unit="trial"):
+            size, solution = random_greedy_mis(neighbors, nodes, seed, return_set=True)
+            sizes.append(size)
+            if size > best_size:
+                best_size = size
+                best_solution = solution
+        return sizes, best_size, best_solution
+
+    # Multiple workers: use multiprocessing (copies data to each worker)
+    with Pool(num_workers, initializer=_init_worker, initargs=(neighbors, nodes)) as pool:
+        # Use imap_unordered with tqdm for progress bar
+        results = list(tqdm(
+            pool.imap_unordered(_worker_trial, seeds),
+            total=num_trials,
+            desc="Running trials",
+            unit="trial"
+        ))
+
+    # Collect results
     sizes = []
     best_size = 0
     best_solution = []
 
-    for i in range(num_trials):
-        size, solution = random_greedy_mis(neighbors, base_seed + i, return_set=(i < 100))
+    for seed, size, solution in results:
         sizes.append(size)
-
         if size > best_size:
             best_size = size
-            if solution:
-                best_solution = solution
-            else:
-                # Re-run to get the actual solution
-                _, best_solution = random_greedy_mis(neighbors, base_seed + i, return_set=True)
+            best_solution = solution
+
+    return sizes, best_size, best_solution
+
+
+def run_trials_lmdb(
+    graph_path: str,
+    nodes: List[str],
+    num_trials: int,
+    base_seed: int,
+    num_workers: int = None
+) -> Tuple[List[int], int, List[str]]:
+    """
+    Run multiple random greedy trials in parallel (LMDB-backed, memory efficient).
+
+    Each worker opens its own LMDB connection and reads neighbors on-demand.
+    Uses ~O(nodes) memory per worker instead of O(edges).
+
+    Args:
+        graph_path: Path to LMDB graph database
+        nodes: List of all node names
+        num_trials: Number of random trials to run
+        base_seed: Base random seed (each trial uses base_seed + i)
+        num_workers: Number of parallel workers (default: cpu_count)
+
+    Returns:
+        (sizes, best_size, best_solution)
+    """
+    if num_workers is None:
+        num_workers = cpu_count()
+
+    seeds = [base_seed + i for i in range(num_trials)]
+
+    # Run trials in parallel - each worker opens its own LMDB connection
+    with Pool(num_workers, initializer=_init_lmdb_worker, initargs=(graph_path, nodes)) as pool:
+        # Use imap_unordered with tqdm for progress bar
+        results = list(tqdm(
+            pool.imap_unordered(_lmdb_worker_trial, seeds),
+            total=num_trials,
+            desc="Running trials",
+            unit="trial"
+        ))
+
+    # Collect results
+    sizes = []
+    best_size = 0
+    best_solution = []
+
+    for seed, size, solution in results:
+        sizes.append(size)
+        if size > best_size:
+            best_size = size
+            best_solution = solution
 
     return sizes, best_size, best_solution
 
@@ -143,20 +331,26 @@ def main():
                         help='Number of deletions to correct (default: 1)')
     parser.add_argument('--q', type=int, default=2,
                         help='Alphabet size (default: 2 for binary)')
-    parser.add_argument('--trials', type=int, default=10000,
-                        help='Number of random trials per n (default: 10000)')
+    parser.add_argument('--trials', type=int, default=100000,
+                        help='Number of random trials per n (default: 100000)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Base random seed (default: 42)')
     parser.add_argument('--graph-dir',
                         help='Directory with pre-computed LMDB graphs')
     parser.add_argument('--output', '-o', default='./greedy_results',
                         help='Output directory for solutions')
+    parser.add_argument('--workers', '-w', type=int, default=None,
+                        help='Number of parallel workers (default: cpu_count)')
+    parser.add_argument('--memory-efficient', action='store_true',
+                        help='Use LMDB-backed mode (slower but uses much less memory). '
+                             'Auto-enabled for n >= 15 with pre-computed graphs.')
 
     args = parser.parse_args()
 
     n_values = [int(x.strip()) for x in args.n_values.split(',')]
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+    num_workers = args.workers or cpu_count()
 
     print("=" * 70)
     print("  Random Greedy Baseline")
@@ -165,6 +359,7 @@ def main():
     print(f"n values: {n_values}")
     print(f"s={args.s}, q={args.q}")
     print(f"Trials per n: {args.trials}")
+    print(f"Workers: {num_workers}")
     print(f"Output: {output_dir}")
     print()
 
@@ -175,6 +370,10 @@ def main():
         print(f"Processing n={n}")
         print("=" * 60)
 
+        # Determine if we should use memory-efficient mode
+        use_lmdb_mode = args.memory_efficient or (args.graph_dir and n >= 15)
+        graph_path = None
+
         # Load or build graph
         if args.graph_dir:
             graph_path = os.path.join(args.graph_dir, f"n{n}_s{args.s}")
@@ -182,25 +381,43 @@ def main():
                 graph_path = os.path.join(args.graph_dir, f"graph_d_s{args.s}_n{n}_q{args.q}.lmdb")
 
             if os.path.exists(graph_path):
-                print(f"Loading graph from: {graph_path}")
-                neighbors = load_graph_from_lmdb(graph_path)
+                if use_lmdb_mode:
+                    # Memory-efficient: only load node names, not full graph
+                    print(f"Using LMDB-backed mode (memory efficient): {graph_path}")
+                    graph = LMDBGraph(graph_path)
+                    nodes = graph.get_nodes()
+                    graph.close()
+                    neighbors = None  # Not loaded into memory
+                    print(f"Nodes: {len(nodes)}")
+                else:
+                    print(f"Loading graph into memory: {graph_path}")
+                    neighbors = load_graph_from_lmdb(graph_path)
+                    nodes = None
+                    print(f"Nodes: {len(neighbors)}")
             else:
                 print(f"Graph not found at {graph_path}, building on-the-fly...")
                 nodes = [''.join(seq) for seq in itertools.product(map(str, range(args.q)), repeat=n)]
                 neighbors = build_neighbor_dict(nodes, n, args.s)
+                use_lmdb_mode = False
+                graph_path = None
+                print(f"Nodes: {len(neighbors)}")
         else:
             print("Building graph on-the-fly...")
             nodes = [''.join(seq) for seq in itertools.product(map(str, range(args.q)), repeat=n)]
             print(f"  Nodes: {len(nodes)}")
             neighbors = build_neighbor_dict(nodes, n, args.s)
+            use_lmdb_mode = False
             print(f"  Graph built")
 
-        print(f"Nodes: {len(neighbors)}")
-
         # Run trials
-        print(f"Running {args.trials} trials...")
-        start_time = time.time()
-        sizes, best_size, best_solution = run_trials(neighbors, args.trials, args.seed)
+        if use_lmdb_mode:
+            print(f"Running {args.trials} trials with {num_workers} workers (LMDB-backed)...")
+            start_time = time.time()
+            sizes, best_size, best_solution = run_trials_lmdb(graph_path, nodes, args.trials, args.seed, num_workers)
+        else:
+            print(f"Running {args.trials} trials with {num_workers} workers (in-memory)...")
+            start_time = time.time()
+            sizes, best_size, best_solution = run_trials(neighbors, args.trials, args.seed, num_workers)
         elapsed = time.time() - start_time
 
         # Statistics

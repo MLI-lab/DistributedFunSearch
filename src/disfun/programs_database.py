@@ -219,6 +219,7 @@ class ProgramsDatabase:
         self.prompts_since_optimal = 0
         self.target_signatures = termination_config.target_solutions if termination_config else None
         self._termination_limit_reached = False
+        self.final_metrics = None  # Computed at end of search by _save_and_shutdown
 
         self.best_known_solutions = best_known_solutions or {}
 
@@ -880,12 +881,28 @@ class ProgramsDatabase:
         """Save checkpoint, log final state to wandb, and trigger graceful shutdown."""
         logger.info(f"{reason} Saving checkpoint and shutting down...")
 
+        # Compute final metrics (gap to optimal, percentiles, etc.)
+        try:
+            self.final_metrics = wandb_logging.compute_final_metrics(self)
+            logger.info(f"Computed final metrics: {self.final_metrics}")
+        except Exception as e:
+            logger.error(f"Error computing final metrics: {e}")
+            self.final_metrics = None
+
         # Log final state to wandb before shutdown
         if self.wandb_enabled and self._wandb_initialized and wandb and wandb.run:
             try:
                 logger.info("Logging final state to W&B before shutdown...")
                 metrics = wandb_logging.compute_wandb_metrics(self)
                 wandb.log(metrics)
+
+                # Log final metrics to W&B summary (persistent, not time-series)
+                if self.final_metrics:
+                    for key, value in self.final_metrics.items():
+                        if value is not None:
+                            wandb.run.summary[key] = value
+                    logger.info("Final metrics logged to W&B summary")
+
                 wandb_logging.log_top_programs_table(self)
                 logger.info("Final W&B logging complete")
             except Exception as e:

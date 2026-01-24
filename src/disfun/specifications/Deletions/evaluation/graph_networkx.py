@@ -14,6 +14,7 @@ import networkx as nx
 import math
 import itertools
 from collections import Counter
+import numpy as np
 
 
 def load_graph(graph_db_path):

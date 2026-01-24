@@ -48,6 +48,65 @@ from utils.helpers import (
     build_graph_gt,
 )
 
+# Default path for pre-computed graphs
+DEFAULT_GRAPH_DIR = "/mnt/Checkpoints/Graphs"
+
+
+def load_neighbors_from_lmdb(graph_path: str) -> Dict[str, Set[str]]:
+    """
+    Load neighbor dict from LMDB database (for fast greedy algorithm).
+
+    Returns:
+        Dict mapping each node to its set of neighbors
+    """
+    try:
+        import lmdb
+    except ImportError:
+        raise ImportError("lmdb required. Install with: pip install lmdb")
+
+    neighbors = {}
+    env = lmdb.open(graph_path, readonly=True, lock=False)
+    with env.begin(buffers=True) as txn:
+        for key, value in txn.cursor():
+            node = bytes(key).decode()
+            val_str = bytes(value).decode()
+            if val_str.startswith('['):
+                import json
+                neighbor_list = json.loads(val_str)
+            else:
+                neighbor_list = [n for n in val_str.split(',') if n]
+            neighbors[node] = set(neighbor_list)
+    env.close()
+    return neighbors
+
+
+def get_graph_path(graph_dir: str, n: int, s: int, q: int) -> Optional[str]:
+    """
+    Find pre-computed graph path for given parameters.
+
+    Tries multiple naming conventions:
+    - graph_d_s{s}_n{n}_q{q}.lmdb (main codebase format)
+    - n{n}_s{s} (alternative format)
+
+    Returns path if found, None otherwise.
+    """
+    import os
+
+    if not graph_dir:
+        return None
+
+    # Try main format first
+    path1 = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+    if os.path.exists(path1):
+        return path1
+
+    # Try alternative format
+    path2 = os.path.join(graph_dir, f"n{n}_s{s}")
+    if os.path.exists(path2):
+        return path2
+
+    return None
+
 
 # =============================================================================
 # Checkpoint Management
@@ -141,7 +200,8 @@ def create_priority_function(body: str, signature: str):
     return namespace['priority']
 
 
-def solve_no_graph(priority_func, nodes: List[str], n: int, s: int, q: int) -> Tuple[Set[str], Dict[str, float]]:
+def solve_no_graph(priority_func, nodes: List[str], n: int, s: int, q: int,
+                   neighbors: Dict[str, Set[str]] = None) -> Tuple[Set[str], Dict[str, float]]:
     """Solve using no_graph signature."""
     priorities = {}
     for node in nodes:
@@ -153,12 +213,27 @@ def solve_no_graph(priority_func, nodes: List[str], n: int, s: int, q: int) -> T
         except Exception:
             priorities[node] = 0.0
 
-    return greedy_independent_set(nodes, priorities, n, s)
+    return greedy_independent_set(nodes, priorities, n, s, neighbors)
 
 
-def solve_graph_networkx(priority_func, nodes: List[str], n: int, s: int, q: int) -> Tuple[Set[str], Dict[str, float]]:
+def solve_graph_networkx(priority_func, nodes: List[str], n: int, s: int, q: int,
+                         neighbors: Dict[str, Set[str]] = None) -> Tuple[Set[str], Dict[str, float]]:
     """Solve using graph_networkx signature."""
-    G = build_graph_networkx(nodes, n, s)
+    # Build NetworkX graph (needed for priority function)
+    # If we have pre-computed neighbors, build graph from them (faster)
+    if neighbors is not None:
+        try:
+            import networkx as nx
+        except ImportError:
+            raise ImportError("NetworkX required. Install with: pip install networkx")
+        G = nx.Graph()
+        G.add_nodes_from(nodes)
+        for node, neighs in neighbors.items():
+            for neigh in neighs:
+                if node < neigh:  # Avoid duplicate edges
+                    G.add_edge(node, neigh)
+    else:
+        G = build_graph_networkx(nodes, n, s)
 
     priorities = {}
     for node in nodes:
@@ -174,9 +249,35 @@ def solve_graph_networkx(priority_func, nodes: List[str], n: int, s: int, q: int
 
 
 def solve_graph_gt(priority_func, nodes: List[str], n: int, s: int, q: int,
-                   graph_dir: str = None) -> Tuple[Set[str], Dict[str, float]]:
+                   graph_dir: str = None,
+                   neighbors: Dict[str, Set[str]] = None) -> Tuple[Set[str], Dict[str, float]]:
     """Solve using graph_gt signature."""
-    G_gt, node_to_vertex, vertex_to_node = build_graph_gt(nodes, n, s, graph_dir)
+    # If we have pre-computed neighbors, build graph-tool graph from them (faster)
+    if neighbors is not None:
+        try:
+            import graph_tool.all as gt
+        except ImportError:
+            raise ImportError("graph-tool required. Install with: conda install -c conda-forge graph-tool")
+
+        node_to_vertex = {node: idx for idx, node in enumerate(nodes)}
+        vertex_to_node = {idx: node for idx, node in enumerate(nodes)}
+
+        G_gt = gt.Graph(directed=False)
+        G_gt.add_vertex(len(nodes))
+
+        edges = []
+        for node, neighs in neighbors.items():
+            v1 = node_to_vertex.get(node)
+            if v1 is None:
+                continue
+            for neigh in neighs:
+                v2 = node_to_vertex.get(neigh)
+                if v2 is not None and v1 < v2:
+                    edges.append((v1, v2))
+        if edges:
+            G_gt.add_edge_list(edges)
+    else:
+        G_gt, node_to_vertex, vertex_to_node = build_graph_gt(nodes, n, s, graph_dir)
 
     priorities = {}
     for node in nodes:
@@ -192,24 +293,40 @@ def solve_graph_gt(priority_func, nodes: List[str], n: int, s: int, q: int,
 
 
 def greedy_independent_set(nodes: List[str], priorities: Dict[str, float],
-                           n: int, s: int) -> Tuple[Set[str], Dict[str, float]]:
-    """Build independent set using greedy algorithm (computing neighbors on-the-fly)."""
+                           n: int, s: int,
+                           neighbors: Dict[str, Set[str]] = None) -> Tuple[Set[str], Dict[str, float]]:
+    """
+    Build independent set using greedy algorithm.
+
+    If neighbors dict is provided, uses O(degree) neighbor lookup.
+    Otherwise falls back to O(|V| * n²) on-the-fly computation (slow for large n).
+    """
     nodes_sorted = sorted(nodes, key=lambda x: (-priorities[x], x))
 
     independent_set = set()
     removed_nodes = set()
 
-    for node in nodes_sorted:
-        if node in removed_nodes:
-            continue
+    if neighbors is not None:
+        # Fast path: use pre-computed neighbors
+        for node in nodes_sorted:
+            if node in removed_nodes:
+                continue
+            independent_set.add(node)
+            removed_nodes.add(node)
+            removed_nodes.update(neighbors.get(node, set()))
+    else:
+        # Slow path: compute neighbors on-the-fly
+        for node in nodes_sorted:
+            if node in removed_nodes:
+                continue
 
-        independent_set.add(node)
-        removed_nodes.add(node)
+            independent_set.add(node)
+            removed_nodes.add(node)
 
-        for other_node in nodes:
-            if other_node not in removed_nodes:
-                if are_neighbors(node, other_node, n, s):
-                    removed_nodes.add(other_node)
+            for other_node in nodes:
+                if other_node not in removed_nodes:
+                    if are_neighbors(node, other_node, n, s):
+                        removed_nodes.add(other_node)
 
     return independent_set, priorities
 
@@ -268,20 +385,34 @@ def solve_with_priority(priority_func, signature: str, n: int, s: int, q: int,
 
     Args:
         graph_dir: Optional path to directory with pre-computed graphs (LMDB format)
+                   Defaults to /mnt/Checkpoints/Graphs if not specified.
 
     Returns:
         - independent_set: Set of codewords
         - priorities: Dict mapping all nodes to their priority values
     """
+    # Use default graph dir if not specified
+    effective_graph_dir = graph_dir if graph_dir is not None else DEFAULT_GRAPH_DIR
+
     # Generate all q-ary strings of length n
     nodes = [''.join(seq) for seq in itertools.product(map(str, range(q)), repeat=n)]
 
+    # Try to load pre-computed neighbors for fast greedy algorithm
+    neighbors = None
+    graph_path = get_graph_path(effective_graph_dir, n, s, q)
+    if graph_path:
+        try:
+            neighbors = load_neighbors_from_lmdb(graph_path)
+        except Exception as e:
+            import sys
+            print(f"Warning: Failed to load graph from {graph_path}: {e}", file=sys.stderr)
+
     if signature == SIGNATURE_NO_GRAPH:
-        return solve_no_graph(priority_func, nodes, n, s, q)
+        return solve_no_graph(priority_func, nodes, n, s, q, neighbors)
     elif signature == SIGNATURE_GRAPH_NETWORKX:
-        return solve_graph_networkx(priority_func, nodes, n, s, q)
+        return solve_graph_networkx(priority_func, nodes, n, s, q, neighbors)
     elif signature == SIGNATURE_GRAPH_GT:
-        return solve_graph_gt(priority_func, nodes, n, s, q, graph_dir)
+        return solve_graph_gt(priority_func, nodes, n, s, q, effective_graph_dir, neighbors)
     else:
         raise ValueError(f"Unknown signature: {signature}")
 
@@ -414,8 +545,9 @@ def main():
                         help='Limit number of functions to evaluate')
     parser.add_argument('--force-signature', choices=['no_graph', 'graph_gt', 'graph_networkx'],
                         help='Force a specific signature instead of auto-detecting')
-    parser.add_argument('--graph-dir', '-g', default=None,
-                        help='Directory with pre-computed graphs (LMDB format, e.g., graphs/n10_s1)')
+    parser.add_argument('--graph-dir', '-g', default=DEFAULT_GRAPH_DIR,
+                        help=f'Directory with pre-computed graphs (LMDB format). '
+                             f'Default: {DEFAULT_GRAPH_DIR}')
     parser.add_argument('--resume', action='store_true',
                         help='Resume from checkpoint if available')
     parser.add_argument('--checkpoint-interval', type=int, default=1,
@@ -474,13 +606,27 @@ def main():
 
     n_values = list(range(args.min_n, args.max_n + 1))
     print(f"Evaluating {len(functions)} functions on n values: {n_values}")
-    if args.graph_dir:
-        print(f"Using pre-computed graphs from: {args.graph_dir}")
+
+    # Check which graphs are available
+    print(f"Graph directory: {args.graph_dir}")
+    graphs_found = []
+    graphs_missing = []
+    for n in n_values:
+        graph_path = get_graph_path(args.graph_dir, n, args.s, args.q)
+        if graph_path:
+            graphs_found.append(n)
+        else:
+            graphs_missing.append(n)
+
+    if graphs_found:
+        print(f"  Pre-computed graphs found for n={graphs_found}")
+    if graphs_missing:
+        print(f"  WARNING: No graphs for n={graphs_missing} - will compute neighbors on-the-fly (slow)")
     print()
 
     # Setup checkpoint and log paths
-    checkpoint_path = output_dir / "evaluation_checkpoint_type1.json"
-    log_path = output_dir / "evaluation_progress_type1.log"
+    checkpoint_path = output_dir / "evaluation_checkpoint.json"
+    log_path = output_dir / "evaluation_progress.log"
 
     # Checkpoint metadata
     metadata = {

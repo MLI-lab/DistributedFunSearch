@@ -41,7 +41,7 @@ class ProgramsDatabaseConfig:
     cluster_sampling_temperature_period: int = 30_000
     no_deduplication: bool = False
     save_lineage: bool = False  # Track parent/child relationships
-    initial_program_copies: int = 1
+    initial_program_copies: int = 100
     batch_size: int = 1
     batch_timeout: float = 0.01
 
@@ -55,16 +55,16 @@ class SamplerConfig:
     samples_per_prompt_mutation: int = 5  # Override for ReEvo mutation phase
     temperature_period = None  # Programs until LLM temperature decays (exploration to exploitation), None for fixed
     temperature: float = 0.9444444444444444
-    max_new_tokens: int = 100000 #246
+    max_new_tokens: int = 246 #100000 #246
     top_p: float = 0.7777777777777778
     repetition_penalty: float = 1.222222
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "Qwen/Qwen3-8B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html
-    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-8b"  # LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+    model: str = "bigcode/starcoder2-15b"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B
+    cost_model: str = "fireworks_ai/accounts/fireworks/models/starcoder2-15b"  # LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
-    use_chat_api: bool = True  # True to use vLLM chat() instead of generate(), required for Qwen3 thinking mode
+    use_chat_api: bool = False  # True to use vLLM chat() instead of generate(), required for Qwen3 thinking mode
     enable_thinking: bool = True  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
     model_params_billions: float = 15.0  # For FLOP estimation, None to disable
     api_base: str = None
@@ -99,8 +99,8 @@ class PromptConfig:
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/templates/instruction_basic.txt"
-    funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
+    funsearch_template: str = "funsearch/templates/completion.txt"
+    funsearch_problem_desc: str = "funsearch/problem_descriptions/completion.txt"
     funsearch_system_message: str | None = None
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
@@ -250,6 +250,6 @@ class Config:
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
     sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
     num_samplers: int = 3
-    num_evaluators: int = 60
+    num_evaluators: int = 65
     num_pdb: int = 1
     random_seed: int = 13  # None for non-deterministic

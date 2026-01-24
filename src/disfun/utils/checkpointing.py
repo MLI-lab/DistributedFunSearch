@@ -92,6 +92,9 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
         }
         logger.info(f"Restored {len(database._pending_reflection_type)} pending reflection types")
 
+    # Note: final_metrics is saved to checkpoint but NOT restored here.
+    # It's only computed at termination and used for post-hoc analysis (e.g., inspector.py).
+
     # Restore best scores
     for i, score in enumerate(checkpoint_data["best_score_per_island"]):
         database._best_score_per_island[i] = score
@@ -191,6 +194,8 @@ def serialize_checkpoint(database) -> dict:
         # ReEvo reflection state
         "reevo_state": database.reevo_state,
         "_pending_reflection_type": {str(k): v for k, v in database._pending_reflection_type.items()},
+        # Final metrics (computed at end of search)
+        "final_metrics": getattr(database, 'final_metrics', None),
         "islands_state": []
     }
 

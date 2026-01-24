@@ -503,6 +503,131 @@ def compute_wandb_metrics(database) -> dict:
     return metrics
 
 
+def compute_gap_to_optimal(scores_per_test: dict, target_solutions: dict) -> float:
+    """Compute gap to optimal across all test cases.
+
+    Args:
+        scores_per_test: Dict mapping test keys (e.g., (n, s)) to achieved scores
+        target_solutions: Dict mapping test keys to optimal/target scores
+
+    Returns:
+        Average relative gap: mean((optimal - actual) / optimal).
+        Returns 0.0 if function matches or exceeds optimal for all cases.
+        Returns 1.0 if no valid comparisons can be made.
+    """
+    import ast
+    gaps = []
+    for test_key, optimal in target_solutions.items():
+        # Handle string keys from checkpoint loading
+        if isinstance(test_key, str):
+            test_key = ast.literal_eval(test_key)
+
+        # Find matching score in scores_per_test
+        actual = None
+        for k, v in scores_per_test.items():
+            parsed_k = ast.literal_eval(k) if isinstance(k, str) else k
+            if parsed_k == test_key:
+                actual = v
+                break
+
+        if actual is not None and optimal > 0:
+            gap = (optimal - actual) / optimal
+            gaps.append(max(0.0, gap))  # Clamp to 0 if better than "optimal"
+
+    return sum(gaps) / len(gaps) if gaps else 1.0
+
+
+def compute_final_metrics(database) -> dict:
+    """Compute final metrics at end of search run.
+
+    These metrics summarize search quality using gap-to-optimal measures,
+    which are comparable across different scoring modes (last, average, weighted).
+
+    Args:
+        database: ProgramsDatabase instance
+
+    Returns:
+        Dictionary with:
+        - discovered_optimal: bool
+        - best_gap_to_optimal: float
+        - gap_at_99th_percentile: float
+        - gap_at_95th_percentile: float
+        - top_20_mean_gap: float
+        - top_50_mean_gap: float
+        - total_unique_signatures: int
+    """
+    target_solutions = database.target_signatures
+    if not target_solutions:
+        logger.warning("No target_solutions configured, cannot compute gap metrics")
+        return {
+            "final/discovered_optimal": database.found_optimal_solution,
+            "final/best_gap_to_optimal": None,
+            "final/gap_at_99th_percentile": None,
+            "final/gap_at_95th_percentile": None,
+            "final/top_20_mean_gap": None,
+            "final/top_50_mean_gap": None,
+            "final/total_unique_signatures": 0,
+        }
+
+    # Collect gaps from all unique clusters (signatures) across all islands
+    # Each cluster has a unique signature (scores_per_test), so we deduplicate by signature
+    signature_to_gap = {}
+
+    for island in database._islands:
+        for signature, cluster_data in island['clusters'].items():
+            if signature not in signature_to_gap:
+                scores_per_test = cluster_data.get('scores_per_test', {})
+                gap = compute_gap_to_optimal(scores_per_test, target_solutions)
+                signature_to_gap[signature] = gap
+
+    all_gaps = list(signature_to_gap.values())
+
+    if not all_gaps:
+        logger.warning("No clusters found, cannot compute gap metrics")
+        return {
+            "final/discovered_optimal": database.found_optimal_solution,
+            "final/best_gap_to_optimal": None,
+            "final/gap_at_99th_percentile": None,
+            "final/gap_at_95th_percentile": None,
+            "final/top_20_mean_gap": None,
+            "final/top_50_mean_gap": None,
+            "final/total_unique_signatures": 0,
+        }
+
+    # Sort gaps ascending (lower = better)
+    sorted_gaps = sorted(all_gaps)
+    n_clusters = len(sorted_gaps)
+
+    # Best gap (minimum)
+    best_gap = sorted_gaps[0]
+
+    # Percentile gaps (top X% = lowest X% of gaps)
+    # 99th percentile = top 1% = index at 1% from the start
+    idx_99 = max(0, int(n_clusters * 0.01))
+    idx_95 = max(0, int(n_clusters * 0.05))
+    gap_99th = sorted_gaps[idx_99] if idx_99 < n_clusters else sorted_gaps[-1]
+    gap_95th = sorted_gaps[idx_95] if idx_95 < n_clusters else sorted_gaps[-1]
+
+    # Top-k mean gaps (absolute counts)
+    top_20 = sorted_gaps[:min(20, n_clusters)]
+    top_50 = sorted_gaps[:min(50, n_clusters)]
+    top_20_mean = sum(top_20) / len(top_20) if top_20 else 1.0
+    top_50_mean = sum(top_50) / len(top_50) if top_50 else 1.0
+
+    metrics = {
+        "final/discovered_optimal": database.found_optimal_solution,
+        "final/best_gap_to_optimal": best_gap,
+        "final/gap_at_99th_percentile": gap_99th,
+        "final/gap_at_95th_percentile": gap_95th,
+        "final/top_20_mean_gap": top_20_mean,
+        "final/top_50_mean_gap": top_50_mean,
+        "final/total_unique_signatures": n_clusters,
+    }
+
+    logger.info(f"Final metrics: {metrics}")
+    return metrics
+
+
 def get_program_by_id(database, program_id: int):
     """Find a program by its ID across all islands.
 
