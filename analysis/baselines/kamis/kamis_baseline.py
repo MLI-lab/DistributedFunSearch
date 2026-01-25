@@ -2,12 +2,32 @@
 """
 KaMIS baseline wrapper for maximum independent set computation.
 
-Runs online_mis and/or redumis algorithms on METIS-format graphs.
+Runs online_mis and/or redumis algorithms on metis-format graphs.
 Supports multiple runs with different seeds and configurable timeouts.
 
-Usage:
-    python kamis_baseline.py --n-values 6,7,8 --timeout 60 --algorithm online_mis
-    python kamis_baseline.py --n-values 10,11,12 --timeout 3600 --algorithm redumis
+Requires metis format graphs. Convert lmdb graphs first:
+    python convert_lmdb_to_metis.py --n-values 6,7,8 --q 4 --graph-type ids
+
+
+Usage Examples:
+    # Binary deletion codes with online_mis (1 minute timeout)
+    python kamis_baseline.py --n-values 6,7,8,9,10 --timeout 60 --algorithm online_mis
+
+
+Arguments:
+    --n-values        Comma-separated n values (required)
+    --s               Number of errors to correct (default: 1)
+    --q               Alphabet size: 2=binary, 4=quaternary (default: 2)
+    --graph-type      Graph type: 'deletions' or 'ids' (default: deletions)
+    --graph-dir       Directory with metis graphs (default: /mnt/Graphs)
+    --algorithm       Algorithm: 'online_mis', 'redumis', or 'both' (default: online_mis)
+    --timeout         Timeout per run in seconds (default: 60, 86400 for 24h)
+    --runs            Number of runs per algorithm (default: 3)
+    --seeds           Comma-separated seeds for each run (default: 0,100000,200000)
+    --redumis-config  ReduMIS config: 'standard' or 'social' (default: standard)
+    --output, -o      Output directory for results (default: ./kamis_results)
+    --log             Log file path (default: <output>/kamis.log)
+
 """
 
 import argparse
@@ -21,31 +41,36 @@ import logging
 from pathlib import Path
 from statistics import mean, stdev
 from typing import List, Dict, Tuple, Optional
+from datetime import datetime
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utils.graph_paths import DEFAULT_GRAPH_DIR, get_metis_path as get_metis_path_central
+
 KAMIS_DIR = Path(__file__).parent / "KaMIS"
 DEPLOY_DIR = KAMIS_DIR / "deploy"
 ONLINE_MIS_BIN = DEPLOY_DIR / "online_mis"
 REDUMIS_BIN = DEPLOY_DIR / "redumis"
+RESULTS_BASE_DIR = Path(__file__).parent / "results"
 
 
 def setup_logging(log_file: str):
-    """Set up logging to both console and file."""
+    """Set up logging to both console and file with timestamps."""
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
 
+    # Console: simple format
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter('%(message)s')
     console_handler.setFormatter(console_formatter)
 
+    # File: with timestamps
     file_handler = logging.FileHandler(log_file, mode='a')
     file_handler.setLevel(logging.INFO)
-    file_formatter = logging.Formatter('%(message)s')
+    file_formatter = logging.Formatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     file_handler.setFormatter(file_formatter)
 
     logger.addHandler(console_handler)
@@ -57,6 +82,14 @@ def setup_logging(log_file: str):
 def log(msg: str):
     """Print to both console and log file."""
     logging.info(msg)
+
+
+def generate_output_dir(s: int, q: int, graph_type: str, algorithm: str) -> str:
+    """Generate output directory name with parameters and timestamp."""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    algo_str = algorithm if algorithm != 'both' else 'both'
+    dir_name = f"kamis_s{s}_q{q}_{graph_type}_{algo_str}_{timestamp}"
+    return str(RESULTS_BASE_DIR / dir_name)
 
 
 def check_kamis_compiled():
@@ -275,6 +308,23 @@ def get_metis_path(graph_dir: str, graph_type: str, s: int, n: int, q: int) -> s
     return get_metis_path_central(graph_type, s, n, q, base_dir=graph_dir)
 
 
+def save_results_json(results: List[Dict], output_dir: str, s: int, q: int, graph_type: str):
+    """Save results to JSON file (called incrementally)."""
+    results_file = os.path.join(output_dir, "kamis_results.json")
+    output_data = {
+        "timestamp": datetime.now().isoformat(),
+        "parameters": {
+            "s": s,
+            "q": q,
+            "graph_type": graph_type,
+        },
+        "results": results,
+    }
+    with open(results_file, "w") as f:
+        json.dump(output_data, f, indent=2)
+    return results_file
+
+
 def run_kamis_baseline(
     n_values: List[int],
     s: int = 1,
@@ -313,49 +363,64 @@ def run_kamis_baseline(
 
     os.makedirs(output_dir, exist_ok=True)
 
+    # Create subdirectories for each algorithm
+    for algo in algorithms:
+        os.makedirs(os.path.join(output_dir, algo), exist_ok=True)
+
     all_results = []
+    start_time_total = datetime.now()
 
-    log("\n" + "="*60)
-    log("KaMIS Baseline Evaluation")
-    log("="*60)
-    log(f"n values: {n_values}")
-    log(f"s={s}, q={q}, type={graph_type}")
-    log(f"Algorithms: {', '.join(algorithms)}")
-    log(f"Runs per algorithm: {num_runs}")
-    log(f"Timeout: {timeout}s")
-    log(f"Seeds: {base_seeds}")
-    log(f"Output directory: {output_dir}")
-    log("="*60 + "\n")
+    # Calculate total work for progress tracking
+    total_tasks = len(n_values) * len(algorithms)
+    current_task = 0
 
-    for n in n_values:
-        metis_file = get_metis_path(graph_dir, graph_type, s, n, q)
-        mapping_file = metis_file.replace(".metis", ".mapping")
+    log("\n" + "="*70)
+    log("  KaMIS Baseline Evaluation")
+    log("="*70)
+    log(f"  Started: {start_time_total.strftime('%Y-%m-%d %H:%M:%S')}")
+    log(f"  n values: {n_values}")
+    log(f"  Parameters: s={s}, q={q}, type={graph_type}")
+    log(f"  Algorithms: {', '.join(algorithms)}")
+    log(f"  Runs per (n, algorithm): {num_runs}")
+    log(f"  Timeout per run: {timeout}s ({timeout/3600:.1f}h)")
+    log(f"  Seeds: {base_seeds}")
+    log(f"  Output directory: {output_dir}")
+    log(f"  Total tasks: {total_tasks} (n × algorithm pairs)")
+    log("="*70 + "\n")
 
-        if not os.path.exists(metis_file):
-            log(f"\n[WARNING] METIS file not found: {metis_file}, skipping n={n}")
-            log(f"         Run convert_lmdb_to_metis.py first to generate it")
-            continue
+    for algorithm in algorithms:
+        algo_dir = os.path.join(output_dir, algorithm)
 
-        graph_name = os.path.basename(metis_file).replace(".metis", "")
+        log(f"\n{'='*70}")
+        log(f"  ALGORITHM: {algorithm.upper()}")
+        log(f"  Config: {redumis_config if algorithm == 'redumis' else 'N/A'}")
+        log("="*70)
 
-        log(f"\n{'='*60}")
-        log(f"[INFO] Processing: {graph_name} (n={n})")
-        log(f"[INFO] Graph file: {metis_file}")
-        log("="*60)
+        for n in n_values:
+            current_task += 1
+            metis_file = get_metis_path(graph_dir, graph_type, s, n, q)
 
-        for algorithm in algorithms:
-            log(f"\n[ALGORITHM] {algorithm}")
-            log(f"  Config: {redumis_config if algorithm == 'redumis' else 'N/A'}")
+            if not os.path.exists(metis_file):
+                log(f"\n[{current_task}/{total_tasks}] n={n} | {algorithm} | SKIPPED (METIS not found)")
+                log(f"    File: {metis_file}")
+                log(f"    Run: python convert_lmdb_to_metis.py --n-values {n} --q {q} --graph-type {graph_type}")
+                continue
+
+            graph_name = os.path.basename(metis_file).replace(".metis", "")
+
+            log(f"\n[{current_task}/{total_tasks}] n={n} | {algorithm}")
+            log(f"    Graph: {graph_name}")
 
             sizes_per_run = []
             runtimes_per_run = []
 
             for run_idx, seed in enumerate(base_seeds):
-                log(f"\n  [RUN {run_idx+1}/{num_runs}] Seed: {seed}")
+                log(f"    [RUN {run_idx+1}/{num_runs}] Seed: {seed}", )
 
+                # Save result files in algorithm subdirectory
                 result_file = os.path.join(
-                    output_dir,
-                    f"{graph_name}_{algorithm}_seed{seed}.result"
+                    algo_dir,
+                    f"n{n}_seed{seed}.result"
                 )
 
                 solution_size, runtime, success = run_kamis_algorithm(
@@ -371,7 +436,7 @@ def run_kamis_baseline(
                 runtimes_per_run.append(runtime)
 
                 status = "OK" if success else "FAIL"
-                log(f"    [{status}] Solution size: {solution_size}, Runtime: {runtime:.2f}s")
+                log(f"      [{status}] Size: {solution_size}, Time: {runtime:.1f}s")
 
             # Statistics
             best_size = max(sizes_per_run) if sizes_per_run else 0
@@ -380,14 +445,10 @@ def run_kamis_baseline(
             mean_runtime = mean(runtimes_per_run) if runtimes_per_run else 0
             best_count = sizes_per_run.count(best_size) if best_size > 0 else 0
 
-            log(f"\n  [RESULT] {algorithm} | {num_runs} runs with seeds {base_seeds}")
-            log(f"  [RESULT] Best: {best_size}")
-            log(f"  [RESULT] Mean: {mean_size:.2f} +/- {std_size:.2f}")
-            log(f"  [RESULT] Sizes: {sizes_per_run}")
-            log(f"  [RESULT] Best found: {best_count}/{num_runs} times ({100*best_count/num_runs:.1f}%)")
-            log(f"  [RESULT] Mean runtime: {mean_runtime:.2f}s")
+            log(f"    [SUMMARY] Best: {best_size}, Mean: {mean_size:.1f}±{std_size:.1f}, "
+                f"Best found: {best_count}/{num_runs}, Avg time: {mean_runtime:.1f}s")
 
-            all_results.append({
+            result_entry = {
                 "n": n,
                 "s": s,
                 "q": q,
@@ -397,27 +458,40 @@ def run_kamis_baseline(
                 "timeout": timeout,
                 "num_runs": num_runs,
                 "best": best_size,
-                "mean": mean_size,
-                "std": std_size,
+                "mean": round(mean_size, 2),
+                "std": round(std_size, 2),
                 "sizes": sizes_per_run,
-                "mean_runtime": mean_runtime
-            })
+                "runtimes": [round(r, 2) for r in runtimes_per_run],
+                "mean_runtime": round(mean_runtime, 2),
+                "timestamp": datetime.now().isoformat(),
+            }
+            all_results.append(result_entry)
 
-    # Summary
-    log("\n" + "="*60)
-    log("FINAL SUMMARY")
-    log("="*60)
+            # Save results incrementally after each (algorithm, n) pair
+            results_file = save_results_json(all_results, output_dir, s, q, graph_type)
+            log(f"    [SAVED] Results updated: {results_file}")
+
+    # Final summary
+    end_time_total = datetime.now()
+    elapsed = end_time_total - start_time_total
+
+    log("\n" + "="*70)
+    log("  FINAL SUMMARY")
+    log("="*70)
+    log(f"  Completed: {end_time_total.strftime('%Y-%m-%d %H:%M:%S')}")
+    log(f"  Total elapsed: {elapsed}")
+    log("")
+    log(f"  {'n':>4} | {'Algorithm':>12} | {'Best':>6} | {'Mean±Std':>12} | {'Time':>8}")
+    log(f"  {'-'*4}-+-{'-'*12}-+-{'-'*6}-+-{'-'*12}-+-{'-'*8}")
     for result in all_results:
-        log(f"[RESULT] n={result['n']} | {result['algorithm']}: "
-            f"Best={result['best']}, Mean={result['mean']:.2f}+/-{result['std']:.2f}, "
-            f"Runtime={result['mean_runtime']:.2f}s")
-    log("="*60 + "\n")
-
-    # Save results
-    results_file = os.path.join(output_dir, "kamis_results.json")
-    with open(results_file, "w") as f:
-        json.dump(all_results, f, indent=2)
-    log(f"Results saved to: {results_file}")
+        log(f"  {result['n']:>4} | {result['algorithm']:>12} | {result['best']:>6} | "
+            f"{result['mean']:>5.1f}±{result['std']:<5.1f} | {result['mean_runtime']:>6.1f}s")
+    log("="*70)
+    log(f"\n  Results saved to: {output_dir}")
+    log(f"  - kamis_results.json (all results)")
+    for algo in algorithms:
+        log(f"  - {algo}/ (solution files)")
+    log("="*70 + "\n")
 
     return all_results
 
@@ -450,8 +524,8 @@ def main():
     parser.add_argument('--redumis-config', choices=['standard', 'social'],
                         default='standard',
                         help='ReduMIS config (default: standard)')
-    parser.add_argument('--output', '-o', default='./kamis_results',
-                        help='Output directory (default: ./kamis_results)')
+    parser.add_argument('--output', '-o', default='auto',
+                        help='Output directory (default: auto-generated with timestamp)')
     parser.add_argument('--log', default=None,
                         help='Log file path (default: <output>/kamis.log)')
 
@@ -470,14 +544,20 @@ def main():
         print(f"Warning: {len(seeds)} seeds provided for {args.runs} runs. Adjusting runs to match seeds.")
         args.runs = len(seeds)
 
+    # Determine output directory
+    if args.output == 'auto':
+        output_dir = generate_output_dir(args.s, args.q, args.graph_type, args.algorithm)
+    else:
+        output_dir = args.output
+
     # Setup logging
-    os.makedirs(args.output, exist_ok=True)
-    log_file = args.log or os.path.join(args.output, "kamis.log")
+    os.makedirs(output_dir, exist_ok=True)
+    log_file = args.log or os.path.join(output_dir, "kamis.log")
     setup_logging(log_file)
     log(f"[INFO] Logging to: {log_file}\n")
 
     # Run baselines
-    results = run_kamis_baseline(
+    run_kamis_baseline(
         n_values=n_values,
         s=args.s,
         q=args.q,
@@ -488,7 +568,7 @@ def main():
         num_runs=args.runs,
         base_seeds=seeds,
         redumis_config=args.redumis_config,
-        output_dir=args.output
+        output_dir=output_dir
     )
 
     return 0

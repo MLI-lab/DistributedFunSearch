@@ -55,18 +55,18 @@ class SamplerConfig:
     samples_per_prompt_mutation: int = 5  # Override for ReEvo mutation phase
     temperature_period = None  # Programs until LLM temperature decays (exploration to exploitation), None for fixed
     temperature: float = 0.9444444444444444
-    max_new_tokens: int = 246 #100000 #246
+    max_new_tokens: int = 512 #246
     top_p: float = 0.7777777777777778
     repetition_penalty: float = 1.222222
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "bigcode/starcoder2-15b"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B
-    cost_model: str = "fireworks_ai/accounts/fireworks/models/starcoder2-15b"  # LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+    model: str = "Qwen/Qwen3-8B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
+    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-8b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
-    use_chat_api: bool = False  # True to use vLLM chat() instead of generate(), required for Qwen3 thinking mode
-    enable_thinking: bool = True  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
-    model_params_billions: float = 15.0  # For FLOP estimation, None to disable
+    use_chat_api: bool = True  # True to use vLLM chat() instead of generate(), required for Qwen3 thinking mode
+    enable_thinking: bool = False  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
+    model_params_billions: float = None # For FLOP estimation, None to disable
     api_base: str = None
     api_key: str = None  # None loads from .env
     cache_dir: str = "/mnt/models"
@@ -79,9 +79,9 @@ class EvaluatorConfig:
     """Evaluator settings."""
     evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/evaluation/graph_networkx.py"
     initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/Deletions/initial_functions/graph_networkx"
-    s_values: List[int] = dataclasses.field(default_factory=lambda: [1])  # Deletions to correct 
-    start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Shortest code length to evaluate
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Longest code length to evaluate
+    s_values: List[int] = dataclasses.field(default_factory=lambda: [2])  # Deletions to correct 
+    start_n: List[int] = dataclasses.field(default_factory=lambda: [7])  # Shortest code length to evaluate
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [12])  # Longest code length to evaluate
     mode: str = "last"  # last, average, weighted, relative_difference
     timeout: int = 30
     max_workers: int = 2  # Parallel CPU processes per evaluator
@@ -99,9 +99,9 @@ class PromptConfig:
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/templates/completion.txt"
-    funsearch_problem_desc: str = "funsearch/problem_descriptions/completion.txt"
-    funsearch_system_message: str | None = None
+    funsearch_template: str = "funsearch/templates/instruction_basic.txt"
+    funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
+    funsearch_system_message: str | None = "funsearch/system_messages/basic.txt"
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
@@ -122,15 +122,15 @@ class PromptConfig:
     reevo_initial_reflection: str | None = "reevo/initial_reflection.txt"
 
     # Score display
-    show_scores: bool = False
-    score_display_mode: str = "absolute"  # absolute, relative
+    show_scores: bool = True
+    score_display_mode: str = "relative"  # absolute, relative
     best_known_solutions: dict = dataclasses.field(default_factory=lambda: {  # Best known or upper bound scores
-        (6, 1): 10,   # (n, s): score, q is constant per run, set in EvaluatorConfig
-        (7, 1): 16,
-        (8, 1): 30,
-        (9, 1): 52,
-        (10, 1): 94,
-        (11, 1): 172
+        (7, 2): 5,   # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (8, 2): 7,
+        (9, 2): 11,
+        (10, 2): 16,
+        (11, 2): 24,
+        (12, 2): 40
     })
 
     # Docstring templates for priority functions in few-shot examples (paths relative to spec_dir)
@@ -147,7 +147,7 @@ class WandbConfig:
     project: str = "disfun_new"
     entity: str = "franziweindel-technical-university-of-munich"
     run_name: str = None  # None for auto-generated
-    run_name_tag: str = "graph_seed13"
+    run_name_tag: str = "graph_seed13_s2"
     log_interval: int = 300  # Seconds
     tags: List[str] = dataclasses.field(default_factory=list)
     checkpoints_base_path: str = "/mnt/disfun/checkpoints"
@@ -198,19 +198,18 @@ class ScalingConfig:
 class TerminationConfig:
     """Experiment termination conditions."""
     termination_mode: str = "iterations"  # "iterations" or "cost"
-    iteration_limit: int = 400_000  # Used when termination_mode="iterations"
+    iteration_limit: int = 500_000  # Used when termination_mode="iterations"
     cost_limit: float = None  # Max cost in USD, used when termination_mode="cost"
     stop_on_optimal: bool = False  # If True, stop early after finding optimal solution
     optimal_solution_programs: int = 20_000  # Extra iterations after optimal found (only if stop_on_optimal=True)
     target_solutions: dict = dataclasses.field(default_factory=lambda: {
-        (6, 1): 10,   # (n, s): target_score, q is constant per run
-        (7, 1): 16,
-        (8, 1): 30,
-        (9, 1): 52,
-        (10, 1): 94,
-        (11, 1): 172
+        (7, 2): 5,   # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (8, 2): 7,
+        (9, 2): 11,
+        (10, 2): 16,
+        (11, 2): 24,
+        (12, 2): 40
     })
-
 
 @dataclasses.dataclass(frozen=True)
 class ThroughputConfig:
@@ -249,7 +248,7 @@ class Config:
     termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
     sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
-    num_samplers: int = 3
+    num_samplers: int = 4
     num_evaluators: int = 65
     num_pdb: int = 1
     random_seed: int = 13  # None for non-deterministic

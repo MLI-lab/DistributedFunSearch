@@ -1,4 +1,3 @@
-import math
+import math 
+import itertools 
 import numpy as np 
-import itertools
-from collections import Counter

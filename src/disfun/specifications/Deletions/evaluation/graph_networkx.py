@@ -15,6 +15,7 @@ import math
 import itertools
 from collections import Counter
 import numpy as np
+import random
 
 
 def load_graph(graph_db_path):
@@ -61,6 +62,10 @@ def solve(n, s, q, graph_dir):
     # Freeze graph to protect against LLM modifications (instant, no copy needed).
     # If LLM tries to modify G, it raises NetworkXError and evaluation fails.
     nx.freeze(G)
+
+    # Seed random for deterministic evaluation (same code always gets same score)
+    random.seed(1)
+    np.random.seed(1)
 
     # Compute priorities (G is frozen, read only)
     priorities = {node: priority(node, G, n, s) for node in G.nodes}

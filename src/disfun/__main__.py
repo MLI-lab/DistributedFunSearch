@@ -725,7 +725,7 @@ class TaskManager:
 
                     # Stagger starts to avoid model loading race conditions
                     if i < self.config.num_samplers - 1:
-                        time.sleep(10)
+                        time.sleep(90)
             else:
                 self.logger.info(f"Starting {self.config.num_samplers} sampler(s) with API model: {self.config.sampler.model}")
 

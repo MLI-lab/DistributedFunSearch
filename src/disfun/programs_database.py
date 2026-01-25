@@ -766,6 +766,15 @@ class ProgramsDatabase:
         if not sampled_programs:
             return empty_result
 
+        # Sort by score (ascending) so best program is last (v1 = improved version)
+        # Tie-break by signature (larger n scores first)
+        sampled_programs.sort(
+            key=lambda x: (
+                _reduce_score(x[1], self.evaluator_config.mode, self.best_known_solutions),
+                self._get_signature(x[1]) if x[1] else ()
+            )
+        )
+
         # Check for duplicate few-shot examples (same hash = low diversity)
         flag_duplicate = False
         if len(sampled_programs) == 2:

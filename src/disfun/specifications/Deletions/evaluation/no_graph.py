@@ -11,6 +11,7 @@ import math
 import itertools
 from collections import Counter
 import numpy as np
+import random
 
 
 def lcs_length(s1, s2):
@@ -52,6 +53,10 @@ def solve(n, s, q, graph_dir):
     """Find a large independent set, computes neighbors on the fly without loading graph files."""
     # Generate all q ary strings of length n
     nodes = [''.join(seq) for seq in itertools.product(map(str, range(q)), repeat=n)]
+
+    # Seed random for deterministic evaluation (same code always gets same score)
+    random.seed(1)
+    np.random.seed(1)
 
     # Calculate priorities based only on node string properties (no graph passed)
     priorities = {node: priority(node, n, s, q) for node in nodes}

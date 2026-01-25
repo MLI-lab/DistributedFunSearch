@@ -140,7 +140,13 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
   # ============================================================
 
   # Tier 1: <code> tags (highest priority)
+  # Try closed tags first, then unclosed (truncated output)
   code_match = re.search(r'<code>(.*?)</code>', text, re.DOTALL)
+  if not code_match:
+    # Fallback: unclosed <code> tag (output truncated before </code>)
+    code_match = re.search(r'<code>(.*)', text, re.DOTALL)
+    if code_match:
+      logger.debug(f"Extracted code from unclosed <code> tag (truncated output)")
   if code_match:
     code = code_match.group(1)
     logger.debug(f"Extracted code from <code> tags ({len(code)} chars)")

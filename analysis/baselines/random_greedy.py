@@ -5,18 +5,56 @@ Random Greedy Independent Set Baseline
 Runs multiple trials with different random seeds, building maximal independent
 sets by shuffling node order and greedily selecting nodes.
 
-Outputs solutions in text format (one codeword per line) for easy comparison
-with VT codes using compare_to_vt.py.
+Outputs:
+- greedy_<type>_s<s>_n<n>_q<q>_best.txt  - Best solution found (one codeword per line)
+- greedy_summary.json                     - Statistics for all n values
 
-Usage:
-    # Run for specific n values
-    python baselines/random_greedy.py --n-values 6,7,8,9,10 --trials 1000
+Usage Examples:
+    # Binary deletion codes (default: q=2, type=deletion)
+    python random_greedy.py --n-values 6,7,8,9,10 --trials 100000
 
-    # Use pre-computed graphs
-    python baselines/random_greedy.py --graph-dir /path/to/graphs --n-values 10,11,12
+    # Quaternary deletion codes
+    python random_greedy.py --n-values 6,7,8,9,10 --q 4 --graph-dir /mnt/Graphs
 
-    # Build graphs on-the-fly (slower)
-    python baselines/random_greedy.py --n-values 6,7,8 --trials 100
+    # IDS (Insertion/Deletion/Substitution) codes
+    python random_greedy.py --n-values 6,7,8,9,10 --graph-type ids --graph-dir /mnt/Graphs
+
+    # Quaternary IDS codes
+    python random_greedy.py --n-values 6,7,8,9,10,11 --q 4 --graph-type ids \\
+        --graph-dir /mnt/Graphs --trials 100000
+
+    # Specify number of parallel workers
+    python random_greedy.py --n-values 6,7,8 --workers 16
+
+    # Custom output directory
+    python random_greedy.py --n-values 6,7,8 --output ./my_results
+
+    # Custom random seed
+    python random_greedy.py --n-values 6,7,8 --seed 12345
+
+    # Memory-efficient mode for large graphs (n >= 15)
+    python random_greedy.py --n-values 15,16,17 --memory-efficient --graph-dir /mnt/Graphs
+
+    # Build graphs on-the-fly (no pre-computed graphs needed, slower)
+    python random_greedy.py --n-values 6,7,8 --trials 1000
+
+Arguments:
+    --n-values          Comma-separated n values (required)
+    --s                 Number of errors to correct (default: 1)
+    --q                 Alphabet size: 2=binary, 4=quaternary (default: 2)
+    --graph-type        Graph type: 'deletion' or 'ids' (default: deletion)
+    --graph-dir         Directory with pre-computed LMDB graphs (default: None, builds on-the-fly)
+    --trials            Number of random trials per n (default: 100000)
+    --seed              Base random seed (default: 42)
+    --workers, -w       Number of parallel workers (default: cpu_count)
+    --output, -o        Output directory for solutions (default: ./greedy_results)
+    --memory-efficient  Use LMDB-backed mode for large graphs (auto for n >= 15)
+
+Graph Path Structure (with --graph-dir /mnt/Graphs):
+    /mnt/Graphs/deletion/binary/s1/graph_d_s1_n10_q2.lmdb
+    /mnt/Graphs/deletion/quaternary/s1/graph_d_s1_n10_q4.lmdb
+    /mnt/Graphs/ids/binary/s1/graph_ids_s1_n10_q2.lmdb
+    /mnt/Graphs/ids/quaternary/s1/graph_ids_s1_n10_q4.lmdb
 """
 
 import argparse
@@ -338,6 +376,8 @@ def main():
                         help='Base random seed (default: 42)')
     parser.add_argument('--graph-dir',
                         help='Directory with pre-computed LMDB graphs')
+    parser.add_argument('--graph-type', choices=['deletion', 'ids'], default='deletion',
+                        help='Graph type: "deletion" or "ids" (default: deletion)')
     parser.add_argument('--output', '-o', default='./greedy_results',
                         help='Output directory for solutions')
     parser.add_argument('--workers', '-w', type=int, default=None,
@@ -358,7 +398,7 @@ def main():
     print("=" * 70)
     print()
     print(f"n values: {n_values}")
-    print(f"s={args.s}, q={args.q}")
+    print(f"s={args.s}, q={args.q}, type={args.graph_type}")
     print(f"Trials per n: {args.trials}")
     print(f"Workers: {num_workers}")
     print(f"Output: {output_dir}")
@@ -377,7 +417,7 @@ def main():
 
         # Load or build graph
         if args.graph_dir:
-            graph_path = get_graph_path("deletion", args.s, n, args.q, graph_dir=args.graph_dir)
+            graph_path = get_graph_path(args.graph_type, args.s, n, args.q, graph_dir=args.graph_dir)
 
             if graph_path:
                 if use_lmdb_mode:
@@ -430,8 +470,14 @@ def main():
         print(f"  Mean: {avg_size:.2f} +/- {std_size:.2f}")
         print(f"  Max frequency: {max_freq:.2f}%")
 
+        # Append to log file (human-readable, incremental)
+        type_prefix = "d" if args.graph_type == "deletion" else "ids"
+        log_file = output_dir / f"greedy_{type_prefix}_s{args.s}_q{args.q}_log.txt"
+        with open(log_file, 'a') as f:
+            f.write(f"n={n}: best={best_size}, mean={avg_size:.2f}+/-{std_size:.2f}, time={elapsed:.1f}s\n")
+
         # Save best solution
-        solution_file = output_dir / f"greedy_s{args.s}_n{n}_q{args.q}_best.txt"
+        solution_file = output_dir / f"greedy_{type_prefix}_s{args.s}_n{n}_q{args.q}_best.txt"
         with open(solution_file, 'w') as f:
             for cw in sorted(best_solution):
                 f.write(f"{cw}\n")
@@ -441,6 +487,7 @@ def main():
             'n': n,
             's': args.s,
             'q': args.q,
+            'graph_type': args.graph_type,
             'trials': args.trials,
             'best': best_size,
             'mean': round(avg_size, 2),
@@ -448,7 +495,12 @@ def main():
             'max_freq_pct': round(max_freq, 2),
         })
 
-    # Save summary
+        # Save summary after each n (incremental updates)
+        summary_file = output_dir / "greedy_summary.json"
+        with open(summary_file, 'w') as f:
+            json.dump(results, f, indent=2)
+
+    # Save final summary
     summary_file = output_dir / "greedy_summary.json"
     with open(summary_file, 'w') as f:
         json.dump(results, f, indent=2)

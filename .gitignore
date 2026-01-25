@@ -123,3 +123,4 @@ src/baselines/
 # macOS
 .DS_Store
 **/.DS_Store
+analysis/baselines/kamis/results/

@@ -10,14 +10,55 @@ Three conversion modes:
 LMDB format: JSON adjacency lists with string node IDs
 METIS format: Text file with integer node IDs (1-indexed), sorted neighborhoods
 
-Output:
-- <output_dir>/graph_<type>_s<s>_n<n>_q<q>.metis
-- <output_dir>/graph_<type>_s<s>_n<n>_q<q>.mapping (node ID mapping)
+Output files (saved next to source LMDB by default, or in --output-dir if specified):
+- graph_<type>_s<s>_n<n>_q<q>.metis   - METIS graph file
+- graph_<type>_s<s>_n<n>_q<q>.mapping - Node ID mapping (JSON)
 
-Usage:
-    python convert_lmdb_to_metis.py --n-values 6,7,8 --graph-dir /mnt/Checkpoints/Graphs
-    python convert_lmdb_to_metis.py --n-values 18,19,20 --memory-efficient
-    python convert_lmdb_to_metis.py --n-values 22,23,24 --ultra-efficient
+Example: If LMDB is at /mnt/Graphs/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb
+         METIS saved to /mnt/Graphs/ids/quaternary/s1/graph_ids_s1_n6_q4.metis
+
+Usage Examples:
+    # Binary deletion codes (default: q=2, type=deletion)
+    python convert_lmdb_to_metis.py --n-values 6,7,8,9,10
+
+    # Quaternary deletion codes
+    python convert_lmdb_to_metis.py --n-values 6,7,8,9,10 --q 4
+
+    # IDS (Insertion/Deletion/Substitution) codes
+    python convert_lmdb_to_metis.py --n-values 6,7,8,9,10 --graph-type ids
+
+    # Quaternary IDS codes
+    python convert_lmdb_to_metis.py --n-values 6,7,8,9,10,11 --q 4 --graph-type ids
+
+    # Custom graph directory
+    python convert_lmdb_to_metis.py --n-values 6,7,8 --graph-dir /path/to/graphs
+
+    # Custom output directory
+    python convert_lmdb_to_metis.py --n-values 6,7,8 --output-dir /path/to/output
+
+    # Force memory-efficient mode (for large graphs)
+    python convert_lmdb_to_metis.py --n-values 15,16,17 --memory-efficient
+
+    # Force ultra-efficient mode (minimal memory, for very large graphs)
+    python convert_lmdb_to_metis.py --n-values 20,21,22 --ultra-efficient
+
+    # Force in-memory mode even for large graphs
+    python convert_lmdb_to_metis.py --n-values 15,16 --no-memory-efficient
+
+    # Overwrite existing METIS files
+    python convert_lmdb_to_metis.py --n-values 6,7,8 --force
+
+Arguments:
+    --n-values        Comma-separated n values (required)
+    --s               Number of errors to correct (default: 1)
+    --q               Alphabet size: 2=binary, 4=quaternary (default: 2)
+    --graph-type      Graph type: 'deletions' or 'ids' (default: deletions)
+    --graph-dir       Directory with LMDB graphs (default: /mnt/Graphs)
+    --output-dir      Output directory for METIS files (default: same as graph-dir)
+    --memory-efficient  Force streaming mode (auto for n >= 15)
+    --ultra-efficient   Force ultra mode (auto for n >= 20)
+    --no-memory-efficient  Disable memory-efficient modes
+    --force           Overwrite existing METIS files
 """
 
 import argparse
@@ -461,9 +502,10 @@ def main():
     # Parse n values
     n_values = [int(x.strip()) for x in args.n_values.split(',')]
 
-    # Output directory defaults to graph directory
-    output_dir = args.output_dir or args.graph_dir
-    os.makedirs(output_dir, exist_ok=True)
+    # Output directory: if specified, use it; otherwise save next to source LMDB
+    custom_output_dir = args.output_dir  # None if not specified
+    if custom_output_dir:
+        os.makedirs(custom_output_dir, exist_ok=True)
 
     # Determine mode overrides
     if args.no_memory_efficient:
@@ -485,7 +527,10 @@ def main():
     print(f"n values: {n_values}")
     print(f"s={args.s}, q={args.q}, type={args.graph_type}")
     print(f"Graph directory: {args.graph_dir}")
-    print(f"Output directory: {output_dir}")
+    if custom_output_dir:
+        print(f"Output directory: {custom_output_dir}")
+    else:
+        print(f"Output: Same directory as source LMDB files")
     if args.no_memory_efficient:
         print(f"Mode: in-memory (forced)")
     elif args.ultra_efficient:
@@ -502,6 +547,7 @@ def main():
     not_found = []
 
     # Convert all specified graphs
+    output_dirs_used = set()
     for n in n_values:
         lmdb_path = get_lmdb_path_local(args.graph_dir, args.graph_type, args.s, n, args.q)
 
@@ -509,6 +555,15 @@ def main():
             print(f"\n[WARNING] Graph not found: {lmdb_path}, skipping n={n}")
             not_found.append(n)
             continue
+
+        # Determine output directory: custom or same as LMDB source
+        if custom_output_dir:
+            output_dir = custom_output_dir
+        else:
+            # Save next to the source LMDB file
+            output_dir = os.path.dirname(lmdb_path)
+
+        output_dirs_used.add(output_dir)
 
         result = convert_graph(
             lmdb_path,
@@ -535,7 +590,10 @@ def main():
         print(f"Skipped (already exist): n={skipped}")
     if not_found:
         print(f"Not found: n={not_found}")
-    print(f"METIS graphs saved to: {output_dir}")
+    if len(output_dirs_used) == 1:
+        print(f"METIS files saved to: {list(output_dirs_used)[0]}")
+    else:
+        print(f"METIS files saved to source directories")
     print("=" * 60)
 
 

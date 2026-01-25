@@ -244,7 +244,9 @@ class LLM_model:
 
         if self.use_local_vllm:
             if self.use_chat_api:
+                logger.debug("Using vLLM chat API (system message enabled)")
                 return await self._draw_batch_vllm_chat(prompts, n, system_message=system_message)
+            logger.debug("Using vLLM generate API (no system message)")
             return await self._draw_batch_vllm(prompts, n)
         else:
             return await self._draw_batch_api(prompts, n, system_message=system_message)
@@ -359,6 +361,10 @@ class LLM_model:
 
             # Build messages for each prompt
             messages_batch = []
+            if system_message:
+                logger.info(f"vLLM chat: Using system message: {system_message[:100]}...")
+            else:
+                logger.warning("vLLM chat: No system message provided")
             for prompt in prompts:
                 messages = []
                 if system_message:

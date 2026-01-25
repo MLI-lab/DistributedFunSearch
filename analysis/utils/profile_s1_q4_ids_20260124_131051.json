@@ -1,0 +1,95 @@
+{
+  "timestamp": "2026-01-24T13:10:51.199740",
+  "last_updated": "2026-01-25T01:20:07.513599",
+  "parameters": {
+    "s": 1,
+    "q": 4,
+    "graph_type": "ids"
+  },
+  "results": [
+    {
+      "n": 6,
+      "num_nodes": 4096,
+      "graph": {
+        "load": 2.3590559773147106,
+        "eval": 0.0036970647051930428,
+        "total": 2.3627530420199037,
+        "score": 96,
+        "edges": 392358,
+        "peak_memory_mb": 205.3046875,
+        "process_memory_mb": 243.546875
+      },
+      "no_graph": {
+        "total": 8.124263864941895,
+        "greedy": 8.118790730834007,
+        "score": 182,
+        "peak_memory_mb": 0.7211380004882812
+      },
+      "winner": "GRAPH-BASED",
+      "speedup": 3.438473560485403
+    },
+    {
+      "n": 7,
+      "num_nodes": 16384,
+      "graph": {
+        "load": 15.580811023712158,
+        "eval": 0.01804044283926487,
+        "total": 15.598851466551423,
+        "score": 311,
+        "edges": 2206374,
+        "peak_memory_mb": 968.2578125,
+        "process_memory_mb": 1125.265625
+      },
+      "no_graph": {
+        "total": 136.52146110031754,
+        "greedy": 136.50024115946144,
+        "score": 595,
+        "peak_memory_mb": 2.90179443359375
+      },
+      "winner": "GRAPH-BASED",
+      "speedup": 8.752020069750658
+    },
+    {
+      "n": 8,
+      "num_nodes": 65536,
+      "graph": {
+        "load": 99.55728265829384,
+        "eval": 0.17275712452828884,
+        "total": 99.73003978282213,
+        "score": 1025,
+        "edges": 11815590,
+        "peak_memory_mb": 5603.05859375,
+        "process_memory_mb": 6222.6484375
+      },
+      "no_graph": {
+        "total": 2380.311272134073,
+        "greedy": 2380.2005528295413,
+        "score": 1993,
+        "peak_memory_mb": 11.933128356933594
+      },
+      "winner": "GRAPH-BASED",
+      "speedup": 23.867545599275562
+    },
+    {
+      "n": 9,
+      "num_nodes": 262144,
+      "graph": {
+        "load": 672.3549306569621,
+        "eval": 0.5341272726655006,
+        "total": 672.8890579296276,
+        "score": 3451,
+        "edges": 60992166,
+        "peak_memory_mb": 27636.08203125,
+        "process_memory_mb": 30598.16796875
+      },
+      "no_graph": {
+        "total": 40417.51458792854,
+        "greedy": 40417.1574402526,
+        "score": 6840,
+        "peak_memory_mb": 48.03956604003906
+      },
+      "winner": "GRAPH-BASED",
+      "speedup": 60.06564397448636
+    }
+  ]
+}
