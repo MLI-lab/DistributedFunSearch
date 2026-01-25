@@ -2,6 +2,26 @@
 
 KaMIS (Karlsruhe Maximum Independent Set) solver for finding maximum independent sets on conflict graphs.
 
+## Setup
+
+### 1. Get KaMIS submodule
+
+After cloning this repository, fetch KaMIS:
+```bash
+git submodule update --init
+```
+
+### 2. Compile KaMIS
+
+Requires: cmake, make, g++
+
+```bash
+cd analysis/baselines/kamis/KaMIS
+./compile_withcmake.sh
+```
+
+This creates executables in `KaMIS/deploy/` (redumis, online_mis, etc.)
+
 ## Workflow
 
 ```
@@ -70,12 +90,3 @@ python kamis_baseline.py \
 # Results printed and saved to ./results/kamis_results.json
 ```
 
-## Requirements
-
-KaMIS binaries must be compiled first:
-```bash
-cd KaMIS
-./compile_withcmake.sh
-```
-
-This creates binaries in `KaMIS/deploy/`.

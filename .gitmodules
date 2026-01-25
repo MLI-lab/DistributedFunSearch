@@ -1,0 +1,3 @@
+[submodule "analysis/baselines/kamis/KaMIS"]
+	path = analysis/baselines/kamis/KaMIS
+	url = https://github.com/KarlsruheMIS/KaMIS.git
