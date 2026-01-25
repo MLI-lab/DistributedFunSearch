@@ -11,5 +11,5 @@ I construct independent sets greedily:
 3. Remove that node and all its neighbors from G
 4. Repeat until G is empty
 
-A better priority function constructs a larger independent set.
+Improve priority_v{version} over the previous versions below.
 

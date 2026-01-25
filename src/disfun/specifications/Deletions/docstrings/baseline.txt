@@ -1,2 +1,2 @@
-Returns the priority with which we want to add `node` to the independent set.
+Returns the priority with which we want to add `node` to the independent set. Higher priority nodes are added first.
 {score}
