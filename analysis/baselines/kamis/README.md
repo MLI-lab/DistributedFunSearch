@@ -16,7 +16,9 @@ git submodule update --init
 Requires: cmake, make, g++
 
 ```bash
+apt-get update && apt-get install -y cmake make g++  
 cd analysis/baselines/kamis/KaMIS
+chmod +x compile_withcmake.sh 
 ./compile_withcmake.sh
 ```
 
