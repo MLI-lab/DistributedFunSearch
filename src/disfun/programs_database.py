@@ -27,6 +27,7 @@ Differences from the original DeepMind FunSearch version
 """
 
 import ast
+import copy
 import dataclasses
 import time
 import logging
@@ -613,9 +614,12 @@ class ProgramsDatabase:
                     founder_island_id = np.random.choice(keep_islands_ids)
                     founder = self._best_program_per_island[founder_island_id]
                     founder_scores = self._best_scores_per_test_per_island[founder_island_id]
-                    # Founder inherits from the original program
+                    # Deep-copy founder so the surviving island's program is not mutated
+                    founder_copy = copy.deepcopy(founder)
+                    founder_copy.is_migration = True
+                    founder_copy.migrated_from_island = founder_island_id
                     founder_parent_ids = [founder.program_id] if founder.program_id is not None else []
-                    self._register_program_in_island(founder, island_id, founder_scores, None, founder_parent_ids)
+                    self._register_program_in_island(founder_copy, island_id, founder_scores, None, founder_parent_ids)
                 await self.get_prompt()
             self._total_resets += 1
             logger.info(f"Island reset #{self._total_resets} completed. Reset {len(reset_islands_ids)} islands.")
