@@ -211,6 +211,12 @@ def _compute_edges_chunk_streaming(args):
                 pbar.update(update_interval if idx > 0 else 1)
 
     pbar.close()
+
+    # Write done marker so resume logic can distinguish complete vs partial files
+    done_file = os.path.join(temp_dir, f"worker_{worker_id}.done")
+    with open(done_file, 'w') as df:
+        df.write(str(edge_count))
+
     return (worker_id, edge_count, output_file)
 
 
@@ -338,15 +344,17 @@ def generate_deletion_graph(n, s, q=2, max_workers=None, output_dir=None, stream
     total_pairs = n_sequences * (n_sequences - 1) // 2
     pairs_per_worker = total_pairs / max_workers
 
-    # Create temp directory for streaming mode (in output_dir if provided, else system temp)
+    # Create temp directory for streaming mode (deterministic name for resume support)
     temp_dir = None
+    total_resumed_edges = 0
     if stream_to_disk:
         if output_dir:
             temp_base = os.path.join(output_dir, "temp")
             os.makedirs(temp_base, exist_ok=True)
-            temp_dir = tempfile.mkdtemp(prefix=f"graph_edges_n{n}_s{s}_", dir=temp_base)
+            temp_dir = os.path.join(temp_base, f"graph_edges_n{n}_s{s}_q{q}")
         else:
-            temp_dir = tempfile.mkdtemp(prefix=f"graph_edges_n{n}_s{s}_")
+            temp_dir = os.path.join(tempfile.gettempdir(), f"graph_edges_n{n}_s{s}_q{q}")
+        os.makedirs(temp_dir, exist_ok=True)
         print(f"  Temp directory for edges: {temp_dir}")
 
     # Build worker arguments with balanced workload
@@ -354,12 +362,53 @@ def generate_deletion_graph(n, s, q=2, max_workers=None, output_dir=None, stream
     current_i = 0
     checkpoint_path = _get_checkpoint_path(output_dir or ".", n, s, q) if output_dir and not stream_to_disk else None
 
-    # For streaming mode, we don't use checkpoints (temp files act as checkpoints)
+    # For streaming mode, check for resumable state via done marker files
     completed_workers = set()
-    if checkpoint_path and not stream_to_disk:
-        checkpoint_data = _load_checkpoint(checkpoint_path)
-        if checkpoint_data:
-            completed_workers = set(checkpoint_data['completed_workers'])
+    if stream_to_disk and temp_dir:
+        metadata_file = os.path.join(temp_dir, "_metadata.json")
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, 'r') as mf:
+                    metadata = json.load(mf)
+                if metadata.get('max_workers') != max_workers:
+                    print(f"  Worker count changed ({metadata.get('max_workers')} -> {max_workers}), clearing temp dir...")
+                    for f in os.listdir(temp_dir):
+                        os.remove(os.path.join(temp_dir, f))
+                else:
+                    # Scan for completed workers
+                    for f in os.listdir(temp_dir):
+                        if f.endswith('.done'):
+                            wid = int(f.replace('worker_', '').replace('.done', ''))
+                            try:
+                                with open(os.path.join(temp_dir, f), 'r') as df:
+                                    edge_count = int(df.read().strip())
+                                total_resumed_edges += edge_count
+                                completed_workers.add(wid)
+                            except (ValueError, IOError):
+                                pass
+                    # Clean up partial edge files (no matching .done)
+                    for f in os.listdir(temp_dir):
+                        if f.endswith('.edges'):
+                            wid = int(f.replace('worker_', '').replace('.edges', ''))
+                            if wid not in completed_workers:
+                                os.remove(os.path.join(temp_dir, f))
+                                print(f"  Removed partial edge file: {f}")
+                    if completed_workers:
+                        print(f"  Resuming: {len(completed_workers)} workers already done ({total_resumed_edges:,} edges)")
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"  Warning: Could not read metadata: {e}, starting fresh")
+                for f in os.listdir(temp_dir):
+                    os.remove(os.path.join(temp_dir, f))
+
+        # Write metadata for future resume
+        with open(metadata_file, 'w') as mf:
+            json.dump({'max_workers': max_workers}, mf)
+
+    elif not stream_to_disk:
+        if checkpoint_path:
+            checkpoint_data = _load_checkpoint(checkpoint_path)
+            if checkpoint_data:
+                completed_workers = set(checkpoint_data['completed_workers'])
 
     for worker_id in range(max_workers):
         start_i = current_i
@@ -380,7 +429,7 @@ def generate_deletion_graph(n, s, q=2, max_workers=None, output_dir=None, stream
             else:
                 end_i = n_sequences
 
-        # Skip already completed workers (in-memory mode only)
+        # Skip already completed workers
         if worker_id in completed_workers:
             current_i = end_i
             continue
@@ -394,23 +443,28 @@ def generate_deletion_graph(n, s, q=2, max_workers=None, output_dir=None, stream
         current_i = end_i
 
     if not worker_args:
-        print("  All workers already completed from checkpoint!")
-        all_edges = []
-        if checkpoint_path:
-            checkpoint_data = _load_checkpoint(checkpoint_path)
-            if checkpoint_data:
-                all_edges = checkpoint_data['edges']
+        if stream_to_disk:
+            print(f"  All workers already completed! ({total_resumed_edges:,} edges from previous run)")
+            memory_monitor.stop()
+            return (temp_dir, total_resumed_edges, sequences)
+        else:
+            print("  All workers already completed from checkpoint!")
+            all_edges = []
+            if checkpoint_path:
+                checkpoint_data = _load_checkpoint(checkpoint_path)
+                if checkpoint_data:
+                    all_edges = checkpoint_data['edges']
     else:
         print(f"  Computing common subsequences in parallel...")
         print(f"  Each worker will show its own progress bar below:\n")
 
         if stream_to_disk:
             # Streaming mode: workers write to temp files
-            total_edge_count = 0
+            total_edge_count = total_resumed_edges
             edge_files = []
 
             try:
-                with Pool(max_workers) as pool:
+                with Pool(len(worker_args)) as pool:
                     for result in pool.imap_unordered(_compute_edges_chunk_streaming, worker_args):
                         worker_id, edge_count, output_file = result
                         total_edge_count += edge_count
@@ -423,6 +477,8 @@ def generate_deletion_graph(n, s, q=2, max_workers=None, output_dir=None, stream
             peak_memory_gb = memory_monitor.stop()
             print(f"\n  Edge computation complete:")
             print(f"    Total edges: {total_edge_count:,}")
+            if total_resumed_edges > 0:
+                print(f"    (includes {total_resumed_edges:,} edges from resumed workers)")
             print(f"    Peak memory during computation: {peak_memory_gb:.2f} GB")
 
             # Return temp_dir info for streaming LMDB build
@@ -690,13 +746,32 @@ def construct_and_save_graph(n, s, q, output_dir, max_workers=None, stream_to_di
         max_workers: Number of parallel workers (default: cpu_count())
         stream_to_disk: If True, use streaming mode. If None, auto-enable for n >= 19.
     """
-    # Generate graph
-    result = generate_deletion_graph(n, s, q, max_workers=max_workers, output_dir=output_dir,
-                                     stream_to_disk=stream_to_disk)
-
     # Create output path
     graph_name = f"graph_d_s{s}_n{n}_q{q}.lmdb"
     output_path = os.path.join(output_dir, graph_name)
+
+    # Check if LMDB already exists and is complete
+    expected_entries = q ** n
+    if os.path.exists(output_path):
+        try:
+            env = lmdb.open(output_path, readonly=True)
+            with env.begin() as txn:
+                actual = txn.stat()['entries']
+            env.close()
+            if actual == expected_entries:
+                print(f"Graph n={n}, s={s}, q={q} already complete ({actual} entries), skipping.")
+                print()
+                return
+            else:
+                print(f"Graph n={n}, s={s}, q={q} has {actual}/{expected_entries} entries, rebuilding...")
+                shutil.rmtree(output_path)
+        except Exception as e:
+            print(f"  Warning: Could not read existing LMDB: {e}, rebuilding...")
+            shutil.rmtree(output_path, ignore_errors=True)
+
+    # Generate graph
+    result = generate_deletion_graph(n, s, q, max_workers=max_workers, output_dir=output_dir,
+                                     stream_to_disk=stream_to_disk)
 
     # Handle streaming vs in-memory mode
     if isinstance(result, tuple):

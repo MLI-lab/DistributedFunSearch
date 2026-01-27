@@ -123,3 +123,4 @@ src/baselines/
 .DS_Store
 **/.DS_Store
 analysis/baselines/kamis/results/
+analysis/baselines/kamis/results_old/

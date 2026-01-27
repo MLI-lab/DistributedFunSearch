@@ -738,18 +738,35 @@ class ProgramsDatabase:
         template_req = self.prompt_spec.template_requirements.get(template_name)
         samples_per_prompt = template_req.samples_per_prompt if template_req else None
 
-        # Compute sampling probabilities with temperature-based softmax
-        valid_sigs, probs = self._compute_cluster_probabilities(island, signatures)
-        if not valid_sigs:
+        # Compute temperature once for all sampling iterations
+        temperature = self._compute_temperature(island)
+
+        # Iteratively sample clusters: pick one, remove it, recompute softmax on the rest.
+        # This prevents the top cluster from starving all others during low-temperature phases.
+        remaining_sigs = list(signatures)
+        selected_sigs = []
+
+        for i in range(num_programs_needed):
+            if not remaining_sigs:
+                break
+
+            valid_sigs, probs = self._compute_cluster_probabilities(
+                island, remaining_sigs, temperature=temperature
+            )
+
+            if not valid_sigs:
+                break
+
+            idx = np.random.choice(len(valid_sigs), p=probs)
+            chosen_sig = valid_sigs[idx]
+            selected_sigs.append(chosen_sig)
+            remaining_sigs.remove(chosen_sig)
+
+        if not selected_sigs:
             return empty_result
 
-        # Sample clusters (use all if fewer than needed)
-        num_to_sample = min(len(valid_sigs), num_programs_needed)
-        if num_to_sample < num_programs_needed:
-            logger.warning(f"Only {num_to_sample} cluster(s) available, need {num_programs_needed}. Using {num_to_sample} few-shot example(s).")
-
-        indices = np.random.choice(len(valid_sigs), size=num_to_sample, p=probs, replace=False)
-        selected_sigs = [valid_sigs[i] for i in indices]
+        if len(selected_sigs) < num_programs_needed:
+            logger.warning(f"Only {len(selected_sigs)} cluster(s) available, need {num_programs_needed}. Using {len(selected_sigs)} few-shot example(s).")
 
         # Sample one program from each selected cluster
         sampled_programs = []
@@ -812,11 +829,25 @@ class ProgramsDatabase:
 
         return result
 
-    def _compute_cluster_probabilities(self, island, signatures):
-        """Compute sampling probabilities for clusters using temperature-scaled softmax.
+    def _compute_temperature(self, island) -> float:
+        """Compute current sampling temperature for an island.
 
         Temperature decays cyclically: high (explore) -> low (exploit) -> reset.
+        """
+        period = self._config.cluster_sampling_temperature_period
+        progress = (island['num_programs'] % period) / period
+        temp = self._config.cluster_sampling_temperature_init * (1 - progress)
+        return max(temp, 0.01)  # Floor to avoid numerical issues
+
+    def _compute_cluster_probabilities(self, island, signatures, temperature=None):
+        """Compute sampling probabilities for clusters using temperature-scaled softmax.
+
         Filters out near-zero probabilities to avoid numerical issues in sampling.
+
+        Args:
+            island: Island dict.
+            signatures: List of cluster signatures to compute probabilities for.
+            temperature: Sampling temperature. If None, computed from island state.
         """
         if not signatures:
             return [], np.array([])
@@ -824,14 +855,11 @@ class ProgramsDatabase:
         clusters = island['clusters']
         scores = np.array([clusters[s]['score'] for s in signatures])
 
-        # Temperature decays from init to ~0 over each period, then resets
-        period = self._config.cluster_sampling_temperature_period
-        progress = (island['num_programs'] % period) / period
-        temp = self._config.cluster_sampling_temperature_init * (1 - progress)
-        temp = max(temp, 0.01)  # Floor to avoid numerical issues
+        if temperature is None:
+            temperature = self._compute_temperature(island)
 
         try:
-            probs = _softmax(scores, temp)
+            probs = _softmax(scores, temperature)
         except Exception as e:
             logger.warning(f"Softmax failed: {e}, using uniform")
             return signatures, np.ones(len(signatures)) / len(signatures)
