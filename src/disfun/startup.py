@@ -203,6 +203,7 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
 
     if hasattr(config.sampler, 'cache_dir') and config.sampler.cache_dir:
         os.environ["HF_HOME"] = config.sampler.cache_dir
+        os.environ["HF_HUB_CACHE"] = os.path.join(config.sampler.cache_dir, "hub")
         print(f"Sampler process: Set HF_HOME to {config.sampler.cache_dir}")
 
     from disfun import sampler
