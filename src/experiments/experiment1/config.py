@@ -125,12 +125,12 @@ class PromptConfig:
     show_scores: bool = True
     score_display_mode: str = "relative"  # absolute, relative
     best_known_solutions: dict = dataclasses.field(default_factory=lambda: {  # Best known or upper bound scores
-        (7, 2): 5,   # (n, s): score, q is constant per run, set in EvaluatorConfig
-        (8, 2): 7,
-        (9, 2): 11,
-        (10, 2): 16,
-        (11, 2): 24,
-        (12, 2): 40
+        (6, 1): 10,   # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (7, 1): 16,
+        (8, 1): 30,
+        (9,1): 52,
+        (10, 1): 94,
+        (11, 1): 172
     })
 
     # Docstring templates for priority functions in few-shot examples (paths relative to spec_dir)
@@ -144,10 +144,10 @@ class PromptConfig:
 class WandbConfig:
     """Weights & Biases settings."""
     enabled: bool = True
-    project: str = "disfun_s2_qwen8b"
+    project: str = "disfun_new_s1"
     entity: str = "franziweindel-technical-university-of-munich"
     run_name: str = None  # None for auto-generated
-    run_name_tag: str = "graph_seed13_s2"
+    run_name_tag: str = "graph_seed13"
     log_interval: int = 300  # Seconds
     tags: List[str] = dataclasses.field(default_factory=list)
     checkpoints_base_path: str = "/mnt/disfun/checkpoints/s2"
@@ -203,12 +203,12 @@ class TerminationConfig:
     stop_on_optimal: bool = False  # If True, stop early after finding optimal solution
     optimal_solution_programs: int = 20_000  # Extra iterations after optimal found (only if stop_on_optimal=True)
     target_solutions: dict = dataclasses.field(default_factory=lambda: {
-        (7, 2): 5,   # (n, s): score, q is constant per run, set in EvaluatorConfig
-        (8, 2): 7,
-        (9, 2): 11,
-        (10, 2): 16,
-        (11, 2): 24,
-        (12, 2): 40
+        (6, 1): 10,   # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (7, 1): 16,
+        (8, 1): 30,
+        (9,1): 52,
+        (10, 1): 94,
+        (11, 1): 172
     })
 
 @dataclasses.dataclass(frozen=True)
@@ -248,7 +248,7 @@ class Config:
     termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
     sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
-    num_samplers: int = 3
+    num_samplers: int = 4
     num_evaluators: int = 75
     num_pdb: int = 1
     random_seed: int = 13  # None for non-deterministic

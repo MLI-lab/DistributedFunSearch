@@ -24,6 +24,20 @@ chmod +x compile_withcmake.sh
 
 This creates executables in `KaMIS/deploy/` (redumis, online_mis, etc.)
 
+### Large graphs (n=11+ quaternary IDS)
+
+The default KaMIS build uses a 32-bit signed guard check that rejects graphs with more than ~1.07 billion (undirected) edges. For large graphs like `graph_ids_s1_n11_q4` (1.5B edges), this check was patched in three files to use `unsigned int` limits (max ~2.15B undirected edges / ~4.3B directed):
+
+- `KaMIS/extern/KaHIP/lib/io/graph_io.cpp`
+- `KaMIS/lib/mis/kernel/ParFastKer/fast_reductions/extern/KaHIP/lib/io/graph_io.cpp`
+- `KaMIS/lib/mis/kernel/ParFastKer/LinearTime/MIS_sigmod_pub/Graph.cpp`
+
+These patches are already applied in this repository.
+
+### Cluster (SLURM + enroot)
+
+The enroot container needs `libgomp1` (OpenMP runtime) to run KaMIS. The `run_kamis_baseline.sh` script handles this via `--container-writable` and `apt-get install libgomp1`.
+
 ## Workflow
 
 ```

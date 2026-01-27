@@ -227,6 +227,8 @@ def run_kamis_algorithm(
         raise ValueError(f"Unknown algorithm: {algorithm}")
 
     # Run command with Popen for better timeout control
+    log(f"    [DEBUG] Command: {' '.join(str(c) for c in cmd)}")
+    log(f"    [DEBUG] Graph file exists: {os.path.exists(metis_file)}")
     start_time = time.time()
     process = None
     try:
@@ -245,6 +247,13 @@ def run_kamis_algorithm(
             stdout, stderr = process.communicate(timeout=subprocess_timeout)
             runtime = time.time() - start_time
             success = process.returncode == 0
+
+            if process.returncode != 0:
+                log(f"    [DEBUG] Return code: {process.returncode}")
+            if stderr and stderr.strip():
+                log(f"    [DEBUG] stderr: {stderr.strip()[:500]}")
+            if not success and stdout and stdout.strip():
+                log(f"    [DEBUG] stdout: {stdout.strip()[:500]}")
 
             # Parse solution
             if os.path.exists(output_file):

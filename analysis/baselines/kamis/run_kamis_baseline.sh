@@ -5,8 +5,8 @@
 #SBATCH --mem=120GB
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH -o logs/kamis_%j.out
-#SBATCH -e logs/kamis_%j.err
+#SBATCH -o /dss/dsshome1/02/di38yur/DistributedFunSearch/analysis/baselines/kamis/logs/kamis_%j.out
+#SBATCH -e /dss/dsshome1/02/di38yur/DistributedFunSearch/analysis/baselines/kamis/logs/kamis_%j.err
 #SBATCH --time=24:00:00
 
 # Configuration (override via environment variables)
@@ -18,7 +18,7 @@ ALGORITHM=${ALGORITHM:-redumis}
 TIMEOUT=${TIMEOUT:-86400}  # 24h = 86400s
 SEEDS=${SEEDS:-0}          # Single seed by default for 24h jobs
 REDUMIS_CONFIG=${REDUMIS_CONFIG:-standard}
-GRAPH_DIR=${GRAPH_DIR:-/mnt/Graphs}
+GRAPH_DIR=${GRAPH_DIR:-/mnt}
 OUTPUT_DIR=${OUTPUT_DIR:-auto}
 
 # Calculate number of runs from seeds
@@ -49,7 +49,7 @@ echo "Start time: $(date)"
 
 srun -N1 -n1 \
   --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw.sqsh" \
-  --container-mounts="$PWD/DistributedFunSearch:/DistributedFunSearch,$PWD/.ssh:/DistributedFunSearch/.ssh,/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/decosearch:/mnt" \
+  --container-mounts="$PWD/DistributedFunSearch:/DistributedFunSearch,$PWD/.ssh:/DistributedFunSearch/.ssh,/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/metis:/mnt" \
   bash -lc "
     set -euo pipefail
     echo 'Running on \$(hostname -f)'
@@ -61,6 +61,17 @@ srun -N1 -n1 \
     python3 -m pip install python-Levenshtein tqdm lmdb psutil -q
 
     cd /DistributedFunSearch/analysis/baselines/kamis
+
+    chmod +x KaMIS/deploy/*
+
+    # Convert LMDB to METIS if needed (skips existing .metis files)
+    echo 'Checking for METIS graphs (converting from LMDB if needed)...'
+    python3 convert_lmdb_to_metis.py \\
+        --n-values '$N_VALUES' \\
+        --s $S_VALUE \\
+        --q $Q_VALUE \\
+        --graph-type '$GRAPH_TYPE' \\
+        --graph-dir '$GRAPH_DIR'
 
     echo 'Running KaMIS baseline...'
     python3 kamis_baseline.py \\
