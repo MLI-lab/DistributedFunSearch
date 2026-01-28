@@ -268,12 +268,16 @@ class ExternalProcessSandbox:
         """Clean up call directory after evaluation to save disk space.
 
         Removes the call{count} directory including prog.pickle and output.pickle.
-        Keeps stderr logs and input files (inputs are reused).
+        Also removes stderr logs. Input files are kept (reused via hash).
         """
         try:
             call_data_folder = self.output_path / f"call{count}"
             if call_data_folder.exists():
                 shutil.rmtree(call_data_folder, ignore_errors=True)
+            # Also remove stderr log file
+            stderr_file = self.output_path / f"stderr_{count}.log"
+            if stderr_file.exists():
+                stderr_file.unlink()
         except Exception:
             # Do not fail evaluation if cleanup fails
             pass
