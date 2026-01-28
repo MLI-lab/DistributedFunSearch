@@ -435,7 +435,7 @@ class TaskManager:
 
                     # Stagger restarts to avoid simultaneous model loading
                     if use_local and len(dead_samplers) > 1:
-                        await asyncio.sleep(10)
+                        await asyncio.sleep(90)
 
                 except Exception as e:
                     self.logger.error(f"Failed to respawn sampler: {e}")
@@ -563,6 +563,10 @@ class TaskManager:
                     self.logger.info(f"Published {len(all_publications)} initial programs ({len(initial_programs)} unique x {num_copies} copies)")
                 break
             elif consumer_count >= 1:
+                # Wait for database connection before calling get_prompt
+                while database._conn.channel is None:
+                    self.logger.info("Waiting for database RabbitMQ connection...")
+                    await asyncio.sleep(0.1)
                 await database.get_prompt()
                 self.logger.info(f"Loading from checkpoint: {checkpoint_file}")
                 break
