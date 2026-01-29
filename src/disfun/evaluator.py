@@ -40,8 +40,8 @@ import aio_pika
 import sys
 import asyncio
 import concurrent.futures
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Manager  # For shared state between ProcessPoolExecutor workers
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock  # For shared state between ThreadPoolExecutor workers
 import gc
 import psutil
 import re
@@ -349,9 +349,9 @@ def _sample_to_program(
 
 
 def run_evaluation(sandbox, program, function_to_run, input, timeout_seconds, call_count, call_count_lock):
-    with call_count_lock: # the with statement ensures the lock is released once the block is exited regardless of whether an exception is raised
-        count = call_count.value
-        call_count.value += 1
+    with call_count_lock:  # Ensures lock is released once the block exits
+        count = call_count[0]
+        call_count[0] += 1
 
     result, runs_ok, cpu_time, call_data_folder, input_path, error_file = sandbox.run(program, function_to_run, input, timeout_seconds, count)
 
@@ -395,10 +395,11 @@ class Evaluator:
         self.prefetch_count = evaluator_config.prefetch_count
         self._conn = connection_manager
 
-        # Sandbox and process pool for parallel evaluation
-        self.manager = Manager()
-        self.call_count = self.manager.Value('i', 0)
-        self.call_count_lock = self.manager.Lock()
+        # Sandbox and thread pool for parallel evaluation
+        # Using ThreadPoolExecutor instead of ProcessPoolExecutor to avoid memory copying
+        # (threads share memory, so graphs loaded in evaluator are shared across threads)
+        self.call_count = [0]  # Use list to allow mutation in threads
+        self.call_count_lock = Lock()
         self.sandbox = sandbox.ExternalProcessSandbox(
             base_path=sandbox_base_path,
             timeout_secs=evaluator_config.timeout,
@@ -407,7 +408,7 @@ class Evaluator:
             graph_dir=evaluator_config.graph_dir,
             memory_limit_gb=evaluator_config.sandbox_memory_limit_gb
         )
-        self.executor = ProcessPoolExecutor(max_workers=evaluator_config.max_workers)
+        self.executor = ThreadPoolExecutor(max_workers=evaluator_config.max_workers)
         self.cumulative_cpu_time = 0.0
 
     async def consume_and_process(self):

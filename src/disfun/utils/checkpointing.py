@@ -34,6 +34,7 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
     database.cumulative_sampler_gpu_time = checkpoint_data.get("cumulative_sampler_gpu_time", 0.0)
     database.cumulative_input_tokens = checkpoint_data.get("cumulative_input_tokens", 0)
     database.cumulative_output_tokens = checkpoint_data.get("cumulative_output_tokens", 0)
+    database.cumulative_cost = checkpoint_data.get("cumulative_cost", 0.0)
     database.iterations = checkpoint_data.get("iterations", 0)
     database.duplicate_prompts = checkpoint_data.get("duplicate_prompts", 0)
     database.total_stored_programs = checkpoint_data.get("total_stored_programs", 0)
@@ -166,6 +167,7 @@ def serialize_checkpoint(database) -> dict:
         "cumulative_sampler_gpu_time": database.cumulative_sampler_gpu_time,
         "cumulative_input_tokens": database.cumulative_input_tokens,
         "cumulative_output_tokens": database.cumulative_output_tokens,
+        "cumulative_cost": database.cumulative_cost,
         "best_score_per_island": list(database._best_score_per_island),
         "best_program_per_island": [
             program.to_dict() if program else None

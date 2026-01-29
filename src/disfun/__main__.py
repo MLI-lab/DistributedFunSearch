@@ -62,9 +62,61 @@ from disfun.utils import checkpointing as checkpoint
 from disfun.utils.resource_manager import ResourceManager, ScalingContext
 from disfun.startup import sampler_process_entry, evaluator_process_entry, load_config, initialize_logger, load_initial_programs
 
+# Graph loading imports for pre-caching
+import lmdb
+import ujson
+import networkx as nx
+
 # Disable multi-threaded tokenization.
 # Our prompts are short and we run many parallel processes so single-threaded tokenization is faster
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+def _load_graph_from_lmdb(graph_path):
+    """Load graph from LMDB database into NetworkX Graph.
+
+    This is called once at startup to pre-cache graphs for all evaluators,
+    eliminating repeated disk I/O during evaluations.
+    """
+    env = lmdb.open(graph_path, readonly=True, lock=False, readahead=True, max_readers=126)
+
+    edges = []
+    nodes = []
+
+    with env.begin(buffers=True) as txn:
+        for key, value in txn.cursor():
+            node = bytes(key).decode()
+            nodes.append(node)
+            for neighbor in ujson.loads(bytes(value).decode()):
+                if node < neighbor:  # Add each edge only once
+                    edges.append((node, neighbor))
+
+    env.close()
+
+    G = nx.Graph()
+    G.add_nodes_from(nodes)
+    G.add_edges_from(edges)
+
+    # Freeze graph to protect against modifications
+    nx.freeze(G)
+    return G
+
+
+def _load_all_graphs(graph_dir, s_values, start_n_list, end_n_list, q):
+    """Pre-load all graphs needed for evaluation.
+
+    Returns:
+        dict: Mapping (n, s, q) -> frozen NetworkX Graph
+    """
+    graphs = {}
+    for s, start_n, end_n in zip(s_values, start_n_list, end_n_list, strict=True):
+        for n in range(start_n, end_n + 1):
+            path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+            if os.path.exists(path):
+                graphs[(n, s, q)] = _load_graph_from_lmdb(path)
+            else:
+                print(f"Warning: Graph not found at {path}")
+    return graphs
 
 
 def _cleanup_sandbox_processes():
@@ -204,9 +256,21 @@ def merge_config_with_args(args, config):
         target_solutions=target_signatures
     )
 
-    # Evaluation inputs
+    # Pre-load graphs for evaluation (eliminates disk I/O during evaluations)
+    print("Pre-loading graphs for evaluation...")
+    graphs = _load_all_graphs(
+        graph_dir=config.evaluator.graph_dir,
+        s_values=config.evaluator.s_values,
+        start_n_list=config.evaluator.start_n,
+        end_n_list=config.evaluator.end_n,
+        q=config.evaluator.q
+    )
+    total_edges = sum(g.number_of_edges() for g in graphs.values())
+    print(f"Loaded {len(graphs)} graphs into memory ({total_edges:,} total edges)")
+
+    # Evaluation inputs (now include pre-loaded graphs)
     inputs = [
-        (n, s, config.evaluator.q)
+        (n, s, config.evaluator.q, graphs.get((n, s, config.evaluator.q)))
         for s, start_n, end_n in zip(
             config.evaluator.s_values,
             config.evaluator.start_n,

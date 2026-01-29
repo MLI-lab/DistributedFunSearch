@@ -82,14 +82,8 @@ plots/
 # ==============================================================================
 # Experiments
 # ==============================================================================
-# Ignore all experiments except experiment1
-src/experiments/experiment*/
-!src/experiments/experiment1/
-
-# Experiment-specific ignores
-src/experiments/experiment1/exp1.sh
-src/experiments/experiment1/attach_evaluators_zih.sh
-src/experiments/experiment1/exp1_alpha_zih.sh
+# Ignore all experiments
+src/experiments/
 
 # ==============================================================================
 # Analysis (generated output files)

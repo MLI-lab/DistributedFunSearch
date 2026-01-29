@@ -49,19 +49,26 @@ def hash_priority_mapping(priorities, nodes):
 
 
 def evaluate(params, graph_dir):
-    n, s, q = params
-    independent_set, hash_value = solve(n, s, q, graph_dir)
+    # Support both old format (n, s, q) and new format (n, s, q, graph)
+    if len(params) == 4:
+        n, s, q, G = params
+    else:
+        n, s, q = params
+        G = None
+    independent_set, hash_value = solve(n, s, q, graph_dir, G)
     return (len(independent_set), hash_value)
 
 
-def solve(n, s, q, graph_dir):
+def solve(n, s, q, graph_dir, G=None):
     """Find a large independent set using NetworkX."""
-    path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
-    G = load_graph(path)
-
-    # Freeze graph to protect against LLM modifications (instant, no copy needed).
-    # If LLM tries to modify G, it raises NetworkXError and evaluation fails.
-    nx.freeze(G)
+    # Use pre-loaded graph if provided, otherwise load from disk
+    if G is None:
+        path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+        G = load_graph(path)
+        # Freeze graph to protect against LLM modifications (instant, no copy needed).
+        # If LLM tries to modify G, it raises NetworkXError and evaluation fails.
+        # Note: Pre-loaded graphs are already frozen during startup.
+        nx.freeze(G)
 
     # Seed random for deterministic evaluation (same code always gets same score)
     random.seed(1)

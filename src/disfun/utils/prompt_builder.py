@@ -533,6 +533,13 @@ def _format_function_code(
                 docstring_content = docstring_content.replace("\n{score}", "")
                 docstring_content = docstring_content.replace("{score}", "")
 
+        # Append baseline note for initial seed functions (generation == 0)
+        # This clarifies when a simple baseline outperforms a more complex function
+        is_seed = getattr(func, 'generation', None) == 0
+        if is_seed and version is not None:
+            # Only append for non-v0 positions (where "Improved version" docstring is used)
+            docstring_content += " Simple baseline that assigns equal priority to all nodes."
+
         # Clean up and format docstring
         docstring_content = docstring_content.strip()
         if docstring_content:
