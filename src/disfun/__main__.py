@@ -482,10 +482,8 @@ class TaskManager:
 
     def _load_initial_programs(self):
         """Load initial functions from the initial_functions directory."""
-        strip_tags = not hasattr(self.config.prompt, 'prompt_style_path') or self.config.prompt.prompt_style_path is None
         return load_initial_programs(
             self.config.evaluator.initial_functions_dir,
-            strip_tags=strip_tags,
             logger=self.logger
         )
 

@@ -142,12 +142,14 @@ def initialize_logger(log_dir, log_filename, process_type=None, use_custom_log_f
     return logger
 
 
-def load_initial_programs(initial_functions_dir, strip_tags=True, logger=None):
+def load_initial_programs(initial_functions_dir, strip_tags=False, logger=None):
     """Load initial functions from a directory.
 
     Args:
         initial_functions_dir: Path to directory containing .txt files with initial functions
-        strip_tags: If True, remove description/code tags from function bodies
+        strip_tags: If True, remove description/code tags from function bodies.
+            Default False lets evaluator's parse_llm_output handle tags consistently,
+            preserving descriptions for prompt building.
         logger: Optional logger for status messages
 
     Returns:

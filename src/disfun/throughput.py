@@ -378,7 +378,6 @@ class ThroughputRunner:
         """Load initial programs from directory."""
         return load_initial_programs(
             config.evaluator.initial_functions_dir,
-            strip_tags=True,
             logger=self.logger
         )
 
