@@ -250,10 +250,24 @@ def run_kamis_algorithm(
 
             if process.returncode != 0:
                 log(f"    [DEBUG] Return code: {process.returncode}")
+                # Interpret signal-based crashes
+                if process.returncode < 0:
+                    sig_num = -process.returncode
+                    sig_names = {
+                        4: "SIGILL (illegal instruction - CPU incompatibility?)",
+                        6: "SIGABRT (abort - assertion failed?)",
+                        7: "SIGBUS (bus error - memory alignment?)",
+                        8: "SIGFPE (floating point exception)",
+                        9: "SIGKILL (killed - OOM killer?)",
+                        11: "SIGSEGV (segmentation fault - memory access error)",
+                        15: "SIGTERM (terminated)",
+                    }
+                    sig_name = sig_names.get(sig_num, f"signal {sig_num}")
+                    log(f"    [DEBUG] Crash signal: {sig_name}")
             if stderr and stderr.strip():
-                log(f"    [DEBUG] stderr: {stderr.strip()[:500]}")
+                log(f"    [DEBUG] stderr: {stderr.strip()[:1000]}")
             if not success and stdout and stdout.strip():
-                log(f"    [DEBUG] stdout: {stdout.strip()[:500]}")
+                log(f"    [DEBUG] stdout (last 2000 chars): ...{stdout.strip()[-2000:]}")
 
             # Parse solution
             if os.path.exists(output_file):

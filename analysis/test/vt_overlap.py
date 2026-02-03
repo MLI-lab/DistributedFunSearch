@@ -19,6 +19,7 @@ Examples:
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
@@ -271,7 +272,7 @@ def main():
     parser.add_argument('--vt-a', type=int, default=0,
                         help='VT syndrome value to compare against (default: 0 for VT_0)')
     parser.add_argument('--output', '-o', default=None,
-                        help='Output directory (default: same as input)')
+                        help='Output directory (default: ./vt_overlap_<timestamp>/)')
 
     args = parser.parse_args()
 
@@ -280,7 +281,8 @@ def main():
     if args.output:
         output_dir = Path(args.output)
     else:
-        output_dir = input_path.parent
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(f"./vt_overlap_{timestamp}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

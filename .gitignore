@@ -118,3 +118,19 @@ src/baselines/
 **/.DS_Store
 analysis/baselines/kamis/results/
 analysis/baselines/kamis/results_old/
+
+# License files (sensitive)
+*.lic
+
+# Timestamped output directories
+analysis/extract_*/
+analysis/evaluate_*/
+analysis/vt_overlap_*/
+
+# Sparsity analysis results
+analysis/baselines/sparsity_results.*
+
+# Work in progress (not ready to track yet)
+docs/SEARCH_SUMMARIZER_PLAN.md
+scripts/
+src/disfun/specifications/Sketch/

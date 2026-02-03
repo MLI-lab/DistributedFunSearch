@@ -27,6 +27,7 @@ import itertools
 import sys
 import json
 import textwrap
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Set
 from collections import defaultdict
@@ -132,23 +133,67 @@ def parse_signature_string(sig_str: str) -> Dict[tuple, int]:
 def extract_matching_functions(checkpoint: Dict[str, Any],
                                 target_signature: Dict[tuple, int],
                                 source_path: str = None) -> List[Dict]:
-    """Extract all functions that match the target signature exactly."""
-    target_tuple = tuple(sorted(target_signature.items()))
+    """Extract all functions that match the target signature exactly.
+
+    Handles both old and new checkpoint formats:
+    - New format: cluster has 'scores_per_test' dict like {'(6, 1)': 10, ...}
+    - Old format: cluster signature IS the scores tuple like (10, 14, 22, 37, 69, 124)
+    """
+    # Normalize target to compare only (n, s) -> score, ignoring q if present
+    target_normalized = {}
+    for k, v in target_signature.items():
+        if len(k) >= 2:
+            target_normalized[(k[0], k[1])] = v  # (n, s) -> score
+        else:
+            target_normalized[k] = v
+    target_tuple = tuple(sorted(target_normalized.items()))
+
+    # Also create a simple tuple of target scores for old format comparison
+    # Old format uses (score_n6, score_n7, score_n8, ...) assuming s=1
+    target_scores_list = [target_normalized.get((n, 1), -1) for n in range(6, 12)]
+    target_scores_tuple = tuple(target_scores_list)
+
     matching_functions = []
 
     for island_id, island_state in enumerate(checkpoint['islands_state']):
         for signature_str, cluster_data in island_state['clusters'].items():
             scores_per_test = cluster_data.get('scores_per_test', {})
 
-            # Parse scores_per_test keys
             parsed_scores = {}
-            for k, v in scores_per_test.items():
-                key = eval(k) if isinstance(k, str) else k
-                parsed_scores[key] = v
+            is_match = False
 
-            current_tuple = tuple(sorted(parsed_scores.items()))
+            if scores_per_test:
+                # New format: parse scores_per_test
+                for k, v in scores_per_test.items():
+                    key = eval(k) if isinstance(k, str) else k
+                    # Normalize to (n, s)
+                    if isinstance(key, tuple) and len(key) >= 2:
+                        parsed_scores[(key[0], key[1])] = v
+                    else:
+                        parsed_scores[key] = v
 
-            if current_tuple == target_tuple:
+                current_tuple = tuple(sorted(parsed_scores.items()))
+                is_match = (current_tuple == target_tuple)
+            else:
+                # Old format: signature_str IS the scores tuple
+                # Parse it: "(10, 14, 22, 37, 69, 124)" or (10, 14, 22, 37, 69, 124)
+                try:
+                    if isinstance(signature_str, str):
+                        sig_tuple = eval(signature_str)
+                    else:
+                        sig_tuple = signature_str
+
+                    if isinstance(sig_tuple, tuple) and len(sig_tuple) == 6:
+                        # Assume this is (score_n6, score_n7, ..., score_n11) with s=1
+                        is_match = (sig_tuple == target_scores_tuple)
+                        if is_match:
+                            # Reconstruct parsed_scores for consistency
+                            for i, score in enumerate(sig_tuple):
+                                parsed_scores[(6 + i, 1)] = score
+                except:
+                    pass
+
+            if is_match:
                 programs = cluster_data.get('programs', [])
                 for prog_idx, program_dict in enumerate(programs):
                     matching_functions.append({
@@ -421,8 +466,8 @@ def main():
                         help='Checkpoint file(s) or folder(s) containing checkpoints')
     parser.add_argument('--target', '-t',
                         help='Target signature (default: VT-optimal for s=1,q=2)')
-    parser.add_argument('--output', '-o', default='./successful_functions/',
-                        help='Output directory')
+    parser.add_argument('--output', '-o', default=None,
+                        help='Output directory (default: ./extract_<timestamp>/)')
     parser.add_argument('--no-dedup', action='store_true',
                         help='Skip deduplication step')
     parser.add_argument('--dedup-n', type=int, default=6,
@@ -440,13 +485,20 @@ def main():
     else:
         target_signature = DEFAULT_TARGET
 
+    # Setup output directory with timestamp if not specified
+    if args.output:
+        output_dir = args.output
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = f"./extract_{timestamp}"
+
     print("=" * 70)
     print("  Extract Successful Functions")
     print("=" * 70)
     print()
     print(f"Input paths: {args.paths}")
     print(f"Target signature: {target_signature}")
-    print(f"Output directory: {args.output}")
+    print(f"Output directory: {output_dir}")
     print()
 
     # Find all checkpoint files
@@ -518,8 +570,8 @@ def main():
             func['duplicate_count'] = 1
 
     # Save results
-    print(f"\nSaving results to {args.output}...")
-    save_functions(unique_functions, args.output)
+    print(f"\nSaving results to {output_dir}...")
+    save_functions(unique_functions, output_dir)
 
     print()
     print("=" * 70)

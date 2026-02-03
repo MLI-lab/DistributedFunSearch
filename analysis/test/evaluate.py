@@ -517,7 +517,7 @@ def main():
 
     parser.add_argument('functions_json', help='Path to functions JSON file')
     parser.add_argument('--output', '-o', default=None,
-                        help='Output directory (default: same as input)')
+                        help='Output directory (default: ./evaluate_<timestamp>/)')
     parser.add_argument('--min-n', type=int, default=6,
                         help='Minimum n value (default: 6)')
     parser.add_argument('--max-n', type=int, default=16,
@@ -549,7 +549,8 @@ def main():
     if args.output:
         output_dir = Path(args.output)
     else:
-        output_dir = input_path.parent
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(f"./evaluate_{timestamp}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

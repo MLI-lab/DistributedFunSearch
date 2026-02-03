@@ -12,4 +12,4 @@ Improve on these functions.
 First, compare the two functions above and explain why the second outperforms the first.
 The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
 
-Respond with ONLY: <description>your insight</description> <code>your implementation</code>. No other text.
+Respond with only: <description>your insight</description> <code>your implementation</code>. No other text.
