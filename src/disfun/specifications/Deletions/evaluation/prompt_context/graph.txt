@@ -1,12 +1,6 @@
-import networkx as nx
-import math
-import itertools
-from collections import Counter
-
-
-def solve(n, s, q, G):
+def solve(n, s, G):
     """Find a large independent set using greedy algorithm."""
-    priorities = {node: priority(node, G, n, s) for node in G.nodes}
+    priorities = {node: priority_v{version}(node, G, n, s) for node in G.nodes}
     nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))
 
     independent_set = set()

@@ -273,7 +273,7 @@ def main():
         print(f"    {cat:<25} density range: {min(densities)*100:.4f}% - {max(densities)*100:.2f}%")
     print()
 
-    # Recommendation
+    # Recommendation - more nuanced based on density range
     print("  RECOMMENDATION FOR KAMIS:")
     print("    KaMIS is optimized for sparse graphs. Based on their benchmarks:")
     print(f"    - KaMIS benchmarks have density: {min(kamis_densities)*100:.6f}% - {max(kamis_densities)*100:.4f}%")
@@ -281,13 +281,22 @@ def main():
     print()
     for cat in sorted(by_category.keys()):
         densities = by_category[cat]
+        min_d = min(densities)
         max_d = max(densities)
-        if max_d < 0.01:
-            status = "✓ Good fit for KaMIS"
-        elif max_d < 0.10:
-            status = "⚠ May work, try with timeout"
+
+        # Count how many graphs are in different density ranges
+        sparse_count = sum(1 for d in densities if d < 0.01)  # < 1%
+        medium_count = sum(1 for d in densities if 0.01 <= d < 0.10)  # 1-10%
+        dense_count = sum(1 for d in densities if d >= 0.10)  # > 10%
+
+        if min_d >= 0.10:
+            status = "✗ All too dense for KaMIS"
+        elif max_d < 0.01:
+            status = "✓ All good for KaMIS"
+        elif min_d < 0.01:
+            status = f"✓ Sparse for large n ({sparse_count}/{len(densities)} graphs < 1%)"
         else:
-            status = "✗ Too dense for KaMIS"
+            status = f"⚠ Mixed: {sparse_count} sparse, {medium_count} medium, {dense_count} dense"
         print(f"    {cat:<25} {status}")
     print()
     print("=" * 100)

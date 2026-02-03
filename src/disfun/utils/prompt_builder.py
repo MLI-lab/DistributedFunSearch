@@ -713,6 +713,7 @@ def _fill_program_placeholders(
     prompt = prompt.replace("{function_header}", function_header)
     prompt = prompt.replace("{version}", str(next_version))
     prompt = prompt.replace("{evaluation_script}", spec.evaluation_script)
+    prompt = prompt.replace("{version}", str(next_version))  # Also replace {version} in evaluation_script
 
     return prompt
 
