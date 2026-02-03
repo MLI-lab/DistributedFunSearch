@@ -73,7 +73,6 @@ class PromptSpec:
     # FunSearch specific
     fewshot_num_examples: int = 2
     fewshot_include_description: bool = True  # Include <description> in few-shot examples
-    evaluation_preamble: str = ""
     evaluation_script: str = ""
     function_to_evolve: str = "priority"
     function_args: str = ""
@@ -206,7 +205,6 @@ def load_specification(
     funsearch_template: str = "funsearch/template.txt",
     funsearch_problem_desc: str = "funsearch/problem_descriptions/baseline.txt",
     funsearch_system_message: str | None = None,
-    funsearch_evaluation_preamble: str | None = None,
     funsearch_evaluation_script: str | None = None,
     fewshot_num_examples: int = 2,
     fewshot_include_description: bool = True,
@@ -258,7 +256,6 @@ def load_specification(
     user_generator = ""
     reflector_system_message = None
     initial_reflection = ""
-    evaluation_preamble = ""
     evaluation_script = ""
     function_args = ""
     return_type = "float"
@@ -270,9 +267,6 @@ def load_specification(
 
         if funsearch_system_message:
             system_message = _load_file(base / funsearch_system_message).strip()
-
-        if funsearch_evaluation_preamble:
-            evaluation_preamble = _load_file(base / funsearch_evaluation_preamble).strip()
 
         if funsearch_evaluation_script:
             evaluation_script = _load_file(base / funsearch_evaluation_script)
@@ -349,7 +343,6 @@ def load_specification(
         template_requirements=template_requirements,
         fewshot_num_examples=fewshot_num_examples,
         fewshot_include_description=fewshot_include_description,
-        evaluation_preamble=evaluation_preamble,
         evaluation_script=evaluation_script,
         function_to_evolve="priority",
         function_args=function_args,
@@ -398,8 +391,7 @@ def load_prompt_spec_from_config(config) -> PromptSpec:
         funsearch_template=config.prompt.funsearch_template,
         funsearch_problem_desc=config.prompt.funsearch_problem_desc,
         funsearch_system_message=config.prompt.funsearch_system_message,
-        funsearch_evaluation_preamble=config.prompt.funsearch_evaluation_preamble,
-        funsearch_evaluation_script=config.prompt.funsearch_evaluation_script,
+        funsearch_evaluation_script=getattr(config.prompt, 'funsearch_evaluation_script', None),
         fewshot_num_examples=config.prompt.fewshot_num_examples,
         fewshot_include_description=config.prompt.fewshot_include_description,
         initial_functions_dir=initial_functions_dir,
@@ -659,7 +651,7 @@ def _fill_program_placeholders(
         {better_code}        Last program as v1 (for EoH/ReEvo)
         {function_header}    Next function header for completion
         {version}            Next version number
-        {evaluation_preamble}, {evaluation_script}   FunSearch evaluation context
+        {evaluation_script}  FunSearch evaluation context
     """
     # Detect tag format from template, but respect config for description in few-shots
     include_description_tags = "<description>" in prompt and spec.fewshot_include_description
@@ -720,7 +712,6 @@ def _fill_program_placeholders(
     prompt = prompt.replace("{better_code}", better_code)
     prompt = prompt.replace("{function_header}", function_header)
     prompt = prompt.replace("{version}", str(next_version))
-    prompt = prompt.replace("{evaluation_preamble}", spec.evaluation_preamble)
     prompt = prompt.replace("{evaluation_script}", spec.evaluation_script)
 
     return prompt

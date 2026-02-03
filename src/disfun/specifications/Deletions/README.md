@@ -187,7 +187,6 @@ def priority(node, G, n, s) -> float:
 
 | Placeholder | Description |
 |-------------|-------------|
-| `{evaluation_preamble}` | Explanation text before evaluation script. |
 | `{evaluation_script}` | The evaluation code. |
 | `{function_header}` | Function signature (e.g., `def priority_v2(...):`) |
 
