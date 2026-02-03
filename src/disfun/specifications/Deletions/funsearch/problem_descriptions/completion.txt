@@ -1,7 +1,7 @@
 """
 Finds large independent set in graph G where nodes are binary strings of length n.
 Nodes in G are connected if they share a subsequence of length at least n-s.
-The priority function must return a numeric value (int or float). Higher priority nodes are added first.
+The priority function must return a numeric value (int or float). 
 
 Improve the `priority_v{version}` function over its previous version(s) below.
 Keep the code short and comment for easy understanding.

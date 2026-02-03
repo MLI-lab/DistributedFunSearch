@@ -362,6 +362,28 @@ async def compute_rabbitmq_metrics(rabbitmq_manager) -> dict:
     return metrics
 
 
+def _parse_test_key(test_key) -> tuple | None:
+    """Parse a test key that may be a tuple or string representation.
+
+    Args:
+        test_key: Either a tuple like (9, 1, 2) or string like '(9, 1, 2)'
+
+    Returns:
+        Parsed tuple, or None if parsing fails
+    """
+    import ast
+    if isinstance(test_key, tuple):
+        return test_key
+    if isinstance(test_key, str):
+        try:
+            parsed = ast.literal_eval(test_key)
+            if isinstance(parsed, tuple):
+                return parsed
+        except (ValueError, SyntaxError):
+            pass
+    return None
+
+
 def compute_wandb_metrics(database) -> dict:
     """Compute metrics for Weights & Biases logging.
 
@@ -381,10 +403,11 @@ def compute_wandb_metrics(database) -> dict:
         scores_per_test = database._best_scores_per_test_per_island[island_id]
         if scores_per_test is not None:
             for test_key, test_score in scores_per_test.items():
-                # test_key is (n, s) tuple
-                if isinstance(test_key, tuple) and len(test_key) >= 2:
-                    n, s = test_key[0], test_key[1]
-                    metrics[f"island_{island_id}/score_n{n}_s{s}"] = test_score
+                # test_key may be tuple (n, s) or string '(n, s, q)' - normalize to (n, s)
+                parsed = _parse_test_key(test_key)
+                if parsed is not None and len(parsed) >= 2:
+                    n, s = parsed[0], parsed[1]
+                    metrics[f"island_{island_id}/score_({n}, {s})"] = test_score
                 else:
                     metrics[f"island_{island_id}/score_{test_key}"] = test_score
 
@@ -396,9 +419,10 @@ def compute_wandb_metrics(database) -> dict:
     best_scores_per_test = database._best_scores_per_test_per_island[best_island_id]
     if best_scores_per_test is not None:
         for test_key, test_score in best_scores_per_test.items():
-            if isinstance(test_key, tuple) and len(test_key) >= 2:
-                n, s = test_key[0], test_key[1]
-                metrics[f"overall/score_n{n}_s{s}"] = test_score
+            parsed = _parse_test_key(test_key)
+            if parsed is not None and len(parsed) >= 2:
+                n, s = parsed[0], parsed[1]
+                metrics[f"overall/score_({n}, {s})"] = test_score
             else:
                 metrics[f"overall/score_{test_key}"] = test_score
 
@@ -1170,8 +1194,13 @@ async def periodic_wandb_logging(database, rabbitmq_manager=None):
                 resource_metrics = await get_all_resource_stats()
                 metrics.update(resource_metrics)
 
+                # Compute final/percentile metrics periodically (gap-to-optimal, percentiles)
+                # These are useful for tracking search quality over time
+                final_metrics = compute_final_metrics(database)
+                metrics.update(final_metrics)
+
                 wandb.log(metrics)
-                logger.debug(f"Logged {len(metrics)} metrics to W&B (including {len(resource_metrics)} resource metrics)")
+                logger.debug(f"Logged {len(metrics)} metrics to W&B (including {len(resource_metrics)} resource metrics, {len(final_metrics)} final metrics)")
 
                 # Log top programs table with lineage
                 log_top_programs_table(database)
