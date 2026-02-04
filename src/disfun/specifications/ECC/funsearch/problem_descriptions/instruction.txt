@@ -12,3 +12,5 @@ I construct independent sets greedily:
 4. Repeat until G is empty
 
 A better priority function constructs a larger independent set.
+
+{string_hint}
