@@ -28,7 +28,9 @@ import gc
 import json
 import logging
 import asyncio
+import math
 import os
+import subprocess
 import sys
 import time
 from typing import List, Optional
@@ -85,6 +87,10 @@ class LLM_model:
             use_chat_api: bool = False,  # True=vLLM chat(), False=vLLM generate()
             enable_thinking: Optional[bool] = None,  # Qwen3 thinking mode control
             cost_model: Optional[str] = None,  # LiteLLM model name for pricing lookup
+            tensor_parallel_size: int | str = "auto",  # "auto" or explicit 1, 2, 4, 8
+            model_params_billions: Optional[float] = None,  # Model size for auto tensor parallelism
+            sampler_id: int = 0,  # Sampler index for GPU block allocation
+            enforce_eager: bool = True,  # Skip CUDA graph compilation
     ) -> None:
         self.inference_time = 0.0
         self._samples_per_prompt = samples_per_prompt
@@ -121,19 +127,45 @@ class LLM_model:
             if not VLLM_AVAILABLE:
                 raise RuntimeError(f"use_local_vllm=True but vLLM is not installed. Install with: pip install vllm")
 
+            # Compute tensor parallel size
+            if tensor_parallel_size == "auto" and model_params_billions:
+                model_gb = model_params_billions * 2  # fp16
+                gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                available_gb = gpu_gb * gpu_memory_utilization * 0.85
+                gpus_needed = math.ceil(model_gb / available_gb)
+                tp_size = 2 ** math.ceil(math.log2(max(1, gpus_needed)))  # round to power of 2
+                logger.info(f"Auto tp={tp_size} for {model_params_billions}B model ({model_gb:.0f}GB), {gpu_gb:.0f}GB per GPU")
+            elif tensor_parallel_size == "auto":
+                tp_size = 1
+            else:
+                tp_size = int(tensor_parallel_size)
+
+            # Assign GPU block for multi-GPU inference
+            if tp_size > 1:
+                try:
+                    result = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True)
+                    total_gpus = len([l for l in result.stdout.split("\n") if l.startswith("GPU")])
+                except Exception:
+                    total_gpus = torch.cuda.device_count()
+                base_gpu = sampler_id * tp_size
+                if base_gpu + tp_size > total_gpus:
+                    raise RuntimeError(f"Sampler {sampler_id} needs GPUs {base_gpu}-{base_gpu + tp_size - 1}, only {total_gpus} available")
+                gpu_ids = ",".join(str(base_gpu + i) for i in range(tp_size))
+                os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
+                os.environ["NCCL_P2P_DISABLE"] = "1"  # Required for servers with broken GPU P2P
+                os.environ["NCCL_SHM_DISABLE"] = "1"  # Disable shared memory transport
+                logger.info(f"Sampler {sampler_id}: GPUs {gpu_ids}")
+
             logger.info(f"Initializing vLLM model: {model} on device {device}")
             try:
                 self.vllm_engine = vLLM_Engine(
                     model=model,
-                    tensor_parallel_size=1,
+                    tensor_parallel_size=tp_size,
                     dtype="float16",
                     gpu_memory_utilization=gpu_memory_utilization,
                     trust_remote_code=True,
-                    enforce_eager=False,  # Enables CUDA graphs for faster repeated inference
+                    enforce_eager=enforce_eager,
                 )
-                # Run dummy generation to compile CUDA graphs upfront (avoids slow first inference)
-                warmup_params = SamplingParams(temperature=0.1, max_tokens=16, n=1)
-                _ = self.vllm_engine.generate(["def hello():\n    "], warmup_params)
                 logger.info(f"vLLM initialized on GPU {device}")
             except Exception as e:
                 logger.error(f"Failed to initialize vLLM: {e}")
@@ -584,9 +616,10 @@ class LLM_model:
 class Sampler:
     """Samples program continuations and sends them for evaluation."""
 
-    def __init__(self, config, rabbitmq_config, device=None, log_dir=None, random_seed=None):
+    def __init__(self, config, rabbitmq_config, device=None, log_dir=None, random_seed=None, sampler_id=0):
         self._config = config
         self.device = device
+        self.sampler_id = sampler_id
 
         from disfun.utils import rabbitmq
         self._conn = rabbitmq.ConnectionManager(
@@ -620,6 +653,10 @@ class Sampler:
                 use_chat_api=getattr(self._config, 'use_chat_api', False),
                 enable_thinking=getattr(self._config, 'enable_thinking', None),
                 cost_model=getattr(self._config, 'cost_model', None),
+                tensor_parallel_size=getattr(self._config, 'tensor_parallel_size', 'auto'),
+                model_params_billions=getattr(self._config, 'model_params_billions', None),
+                sampler_id=sampler_id,
+                enforce_eager=getattr(self._config, 'enforce_eager', True),
             )
             mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")

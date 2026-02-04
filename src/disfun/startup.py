@@ -262,7 +262,7 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
             try:
                 state.instance = sampler.Sampler(
                     config.sampler, rabbitmq_config=config, device=device, log_dir=log_dir,
-                    random_seed=sampler_seed
+                    random_seed=sampler_seed, sampler_id=sampler_id
                 )
                 logger.info(f"Sampler {local_id}: Model loaded successfully.")
             except Exception as e:

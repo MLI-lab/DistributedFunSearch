@@ -72,6 +72,8 @@ class SamplerConfig:
     cache_dir: str = "/mnt/models"
     gpu_memory_utilization: float = 0.85
     prefetch_multiplier: int = 2
+    tensor_parallel_size: int | str = "auto"  # "auto" or explicit 1, 2, 4, 8 for multi-GPU
+    enforce_eager: bool = True  # True to skip CUDA graph compilation (faster startup, required for multi-GPU)
 
 
 @dataclasses.dataclass(frozen=True)

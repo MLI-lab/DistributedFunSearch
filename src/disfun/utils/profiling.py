@@ -1,8 +1,7 @@
 """Profiling decorators for timing and memory measurement.
 
 Time decorators have negligible overhead (microseconds) and can be left enabled.
-Memory decorators are expensive (~100ms+ per call) as they spawn a subprocess
-to sample memory usage. Enable only for debugging.
+Memory decorators are expensive as they spawn a subprocess to sample memory usage. Enable only for debugging.
 
 Usage:
     @async_time_execution("Evaluator")
