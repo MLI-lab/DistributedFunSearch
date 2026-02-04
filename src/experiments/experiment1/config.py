@@ -87,7 +87,7 @@ class EvaluatorConfig:
     mode: str = "last"  # last, average, weighted, relative_difference
     timeout: int = 30
     max_workers: int = 2  # Parallel CPU processes per evaluator
-    q: int = 2  # Alphabet size (2 for binary, 4 for DNA)
+    q: int = 4  # Alphabet size (2 for binary, 4 for DNA)
     graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
     prefetch_count: int = 15
     sandbox_memory_limit_gb: float = 1.0
@@ -104,6 +104,7 @@ class PromptConfig:
     # FunSearch
     funsearch_template: str = "funsearch/templates/single_turn/thought.txt"
     funsearch_problem_desc: str = "funsearch/templates/single_turn/thought.txt"
+    funsearch_string_hint: str | None = None  # e.g., "funsearch/problem_descriptions/string_hint.txt"
     funsearch_system_message: str | None = "funsearch/system_messages/single_turn/thought.txt" #"funsearch/system_messages/basic.txt"
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)

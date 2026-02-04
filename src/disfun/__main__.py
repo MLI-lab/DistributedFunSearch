@@ -102,7 +102,18 @@ def _cleanup_sandbox_processes():
     cleanup_orphaned_sandbox_processes(max_age_seconds=0)
 
 
+def _cleanup_orphaned_vllm_workers():
+    """Kill orphaned multiprocessing.spawn workers."""
+    for proc in psutil.process_iter(['cmdline']):
+        try:
+            if proc.info['cmdline'] and 'multiprocessing.spawn' in ' '.join(proc.info['cmdline']):
+                proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, TypeError):
+            pass
+
+
 atexit.register(_cleanup_sandbox_processes)
+atexit.register(_cleanup_orphaned_vllm_workers)
 
 
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
@@ -925,6 +936,9 @@ if __name__ == "__main__":
 
         # Kill orphaned sandbox processes
         _cleanup_sandbox_processes()
+
+        # Kill orphaned vLLM workers
+        _cleanup_orphaned_vllm_workers()
 
         # Clean up RabbitMQ
         await cleanup_rabbitmq(task_manager)

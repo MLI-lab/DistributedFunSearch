@@ -35,6 +35,8 @@ import sys
 import time
 from typing import List, Optional
 
+import psutil
+
 import aio_pika
 import litellm
 
@@ -590,23 +592,26 @@ class LLM_model:
             return [], [], []
 
     def cleanup(self):
-        """Clean up vLLM GPU memory."""
+        """Clean up vLLM GPU memory and worker processes."""
         if not (self.use_local_vllm and getattr(self, 'vllm_engine', None)):
             return
-
         logger.info("LLM_model: Cleaning up vLLM...")
-
         try:
-            # Destroy distributed state (needed for multi-GPU setups)
+            children = psutil.Process().children(recursive=True)
             try:
                 from vllm.distributed.parallel_state import destroy_model_parallel
                 destroy_model_parallel()
             except ImportError:
                 pass
-
             self.vllm_engine = None
             gc.collect()
             torch.cuda.empty_cache()
+            # Kill vLLM worker processes
+            for p in children:
+                try:
+                    p.kill()
+                except psutil.NoSuchProcess:
+                    pass
             logger.info("LLM_model: Cleanup done")
         except Exception as e:
             logger.error(f"LLM_model: Cleanup error: {e}")

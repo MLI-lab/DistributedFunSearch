@@ -260,6 +260,7 @@ def load_specification(
     # FunSearch options
     funsearch_template: str = "funsearch/template.txt",
     funsearch_problem_desc: str = "funsearch/problem_descriptions/baseline.txt",
+    funsearch_string_hint: str | None = None,  # Optional hint file, fills {string_hint} placeholder
     funsearch_system_message: str | None = None,
     funsearch_evaluation_script: str | None = None,
     fewshot_num_examples: int = 2,
@@ -357,6 +358,8 @@ def load_specification(
             # Single file (legacy behavior)
             templates = {"funsearch": _load_file(template_path).strip()}
         problem_description = _load_file(base / funsearch_problem_desc).strip()
+        string_hint = _load_file(base / funsearch_string_hint).strip() if funsearch_string_hint else ""
+        problem_description = problem_description.replace("{string_hint}", string_hint)
 
         if funsearch_system_message:
             system_message = _load_file(base / funsearch_system_message).strip()
@@ -499,6 +502,7 @@ def load_prompt_spec_from_config(config) -> PromptSpec:
         variant=getattr(config.prompt, 'variant', None),
         funsearch_template=config.prompt.funsearch_template,
         funsearch_problem_desc=config.prompt.funsearch_problem_desc,
+        funsearch_string_hint=getattr(config.prompt, 'funsearch_string_hint', None),
         funsearch_system_message=config.prompt.funsearch_system_message,
         funsearch_evaluation_script=getattr(config.prompt, 'funsearch_evaluation_script', None),
         fewshot_num_examples=config.prompt.fewshot_num_examples,
