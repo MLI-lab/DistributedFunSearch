@@ -152,8 +152,7 @@ class LLM_model:
                     raise RuntimeError(f"Sampler {sampler_id} needs GPUs {base_gpu}-{base_gpu + tp_size - 1}, only {total_gpus} available")
                 gpu_ids = ",".join(str(base_gpu + i) for i in range(tp_size))
                 os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
-                os.environ["NCCL_P2P_DISABLE"] = "1"  # Required for servers with broken GPU P2P
-                os.environ["NCCL_SHM_DISABLE"] = "1"  # Disable shared memory transport
+                # os.environ["NCCL_P2P_DISABLE"] = "1"  # Uncomment for servers with broken GPU P2P
                 logger.info(f"Sampler {sampler_id}: GPUs {gpu_ids}")
 
             logger.info(f"Initializing vLLM model: {model} on device {device}")

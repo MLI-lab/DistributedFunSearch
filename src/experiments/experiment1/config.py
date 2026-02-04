@@ -81,9 +81,9 @@ class EvaluatorConfig:
     """Evaluator settings."""
     evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/evaluation/graph_networkx.py"
     initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/initial_functions/graph_networkx"
-    s_values: List[int] = dataclasses.field(default_factory=lambda: [2])  # Deletions to correct 
-    start_n: List[int] = dataclasses.field(default_factory=lambda: [7])  # Shortest code length to evaluate
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [12])  # Longest code length to evaluate
+    s_values: List[int] = dataclasses.field(default_factory=lambda: [1])  # Deletions to correct 
+    start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Shortest code length to evaluate
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [10])  # Longest code length to evaluate
     mode: str = "last"  # last, average, weighted, relative_difference
     timeout: int = 30
     max_workers: int = 2  # Parallel CPU processes per evaluator
@@ -98,13 +98,13 @@ class PromptConfig:
     """Prompt building settings."""
     strategy: str = "funsearch"  # funsearch, eoh, reevo
     spec_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC"
-    variant: str = "deletions"  # ECC variant: "deletions" or "ids"
+    variant: str = "ids"  # ECC variant: "deletions" or "ids"
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
     funsearch_template: str = "funsearch/templates/instruction_thought.txt"
-    funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
-    funsearch_system_message: str | None = "funsearch/system_messages/thought.txt" #"funsearch/system_messages/basic.txt"
+    funsearch_problem_desc: str = "funsearch/templates/single_turn/thought.txt"
+    funsearch_system_message: str | None = "funsearch/system_messages/single_turn/thought.txt" #"funsearch/system_messages/basic.txt"
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
@@ -125,7 +125,7 @@ class PromptConfig:
     reevo_initial_reflection: str | None = "reevo/initial_reflection.txt"
 
     # Score display
-    show_scores: bool = True
+    show_scores: bool = False
     score_display_mode: str = "relative"  # absolute, relative
     best_known_solutions: dict = dataclasses.field(default_factory=lambda: {  # Best known or upper bound scores
         (7, 2): 5,   # (n, s): score, q is constant per run, set in EvaluatorConfig
@@ -146,7 +146,7 @@ class PromptConfig:
 @dataclasses.dataclass(frozen=True)
 class WandbConfig:
     """Weights & Biases settings."""
-    enabled: bool = True
+    enabled: bool = False
     project: str = "disfun_s2_qwen8b"
     entity: str = "franziweindel-technical-university-of-munich"
     run_name: str = None  # None for auto-generated
@@ -251,7 +251,7 @@ class Config:
     termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
     sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
-    num_samplers: int = 2
+    num_samplers: int = 4
     num_evaluators: int = 60
     num_pdb: int = 1
     random_seed: int = 13  # None for non-deterministic
