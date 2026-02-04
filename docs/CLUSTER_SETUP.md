@@ -49,8 +49,9 @@ pip install --upgrade pip setuptools
 pip install -e /path/to/DistributedFunSearch
 
 # Build FastGraph C++ module (optional, for graph problems)
-# This compiles for your active Python version (e.g., cpython-310 for Python 3.10).
+# This compiles for your active Python version (e.g., cpython-311 for Python 3.11).
 # If nodes have different Python versions, build on each node separately.
+# Requires: build-essential, liblmdb-dev (apt-get install -y build-essential liblmdb-dev)
 cd /path/to/DistributedFunSearch
 ./tools/build_fast_graph.sh
 

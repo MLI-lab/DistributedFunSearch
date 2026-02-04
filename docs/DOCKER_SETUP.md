@@ -39,11 +39,21 @@ pip install .  # or pip install -e . for development mode
 
 **Build FastGraph C++ module (optional, for graph problems):**
 
-This compiles for your active Python version (e.g., cpython-310 for Python 3.10). If nodes have different Python versions, build on each node separately.
+This compiles for your active Python version (e.g., cpython-311 for Python 3.11). If nodes have different Python versions, build on each node separately.
+
+First install build dependencies:
+
+```bash
+apt-get update && apt-get install -y build-essential liblmdb-dev
+```
+
+Then build:
 
 ```bash
 ./tools/build_fast_graph.sh
 ```
+
+The script automatically handles multiarch header symlinks on Ubuntu/Debian systems.
 
 **Install C compiler (required for local models):**
 
