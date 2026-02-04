@@ -44,7 +44,7 @@ sudo systemctl start rabbitmq-server
 pip install . # or pip install -e . for development mode
 
 # 6. Build FastGraph C++ module (optional, for graph problems)
-# NOTE: This compiles for your active Python version (e.g., cpython-310 for Python 3.10).
+# This compiles for your active Python version (e.g., cpython-310 for Python 3.10).
 # If nodes have different Python versions, build on each node separately.
 ./tools/build_fast_graph.sh
 ```

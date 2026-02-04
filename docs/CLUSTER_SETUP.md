@@ -49,10 +49,10 @@ pip install --upgrade pip setuptools
 pip install -e /path/to/DistributedFunSearch
 
 # Build FastGraph C++ module (optional, for graph problems)
-cd /path/to/DistributedFunSearch/src/disfun/utils/_fast_graph_cpp_src
-pip install pybind11 lmdb
-python setup.py build_ext --inplace
-cp fast_graph_cpp*.so ../
+# This compiles for your active Python version (e.g., cpython-310 for Python 3.10).
+# If nodes have different Python versions, build on each node separately.
+cd /path/to/DistributedFunSearch
+./tools/build_fast_graph.sh
 
 wandb login
 ```

@@ -39,12 +39,10 @@ pip install .  # or pip install -e . for development mode
 
 **Build FastGraph C++ module (optional, for graph problems):**
 
+This compiles for your active Python version (e.g., cpython-310 for Python 3.10). If nodes have different Python versions, build on each node separately.
+
 ```bash
-cd src/disfun/utils/_fast_graph_cpp_src
-pip install pybind11 lmdb
-python setup.py build_ext --inplace
-cp fast_graph_cpp*.so ../
-cd ../../../..
+./tools/build_fast_graph.sh
 ```
 
 **Install C compiler (required for local models):**
