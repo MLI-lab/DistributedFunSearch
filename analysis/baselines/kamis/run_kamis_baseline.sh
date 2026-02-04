@@ -45,7 +45,7 @@ echo "============================================================"
 NODE_1=$(hostname -f)
 echo "Running on: $NODE_1"
 echo "Job ID: $SLURM_JOB_ID"
-echo "Start time: $(date)"
+echo "Start time: $(date)"Ok
 
 srun -N1 -n1 \
   --container-image="/dss/dssmcmlfs01/pn57vo/pn57vo-dss-0000/franziska/enroot/fw_v3.sqsh" \
@@ -71,6 +71,39 @@ srun -N1 -n1 \
     python3 -m pip install python-Levenshtein tqdm lmdb psutil -q
 
     cd /DistributedFunSearch/analysis/baselines/kamis
+
+    # Compile KaMIS on the cluster to avoid CPU architecture mismatch
+    # (binaries compiled with -march=native on different CPUs will crash)
+    echo '============================================================'
+    echo 'Compiling KaMIS for this cluster node...'
+    cd KaMIS
+
+    # Initialize git submodules if needed (ensures all source files are present)
+    echo 'Initializing git submodules...'
+    git submodule update --init --recursive 2>&1 | tail -10 || echo 'Git submodule init skipped (may already be initialized)'
+
+    # Verify source files exist
+    if [ ! -f lib/mis/kernel/branch_and_reduce_algorithm.cpp ]; then
+        echo '[ERROR] KaMIS source files missing! Check git submodule status.'
+        ls -la lib/
+        exit 1
+    fi
+    echo 'Source files verified.'
+
+    rm -rf build deploy
+    mkdir -p build && cd build
+    cmake ../ -DPORTABLE=ON -D64BITMODE=ON 2>&1 | tail -20
+    make -j 10 2>&1 | tail -30
+    cd ..
+    mkdir -p deploy
+    cp ./build/redumis ./build/graphchecker ./build/sort_adjacencies ./build/online_mis deploy/ 2>/dev/null || true
+    # Copy weighted MIS binaries if they exist
+    cp ./build/wmis/branch_reduce deploy/weighted_branch_reduce 2>/dev/null || true
+    cp ./build/wmis/weighted_ls deploy/weighted_local_search 2>/dev/null || true
+    echo '[OK] KaMIS compiled successfully'
+    ls -la deploy/
+    cd /DistributedFunSearch/analysis/baselines/kamis
+    echo '============================================================'
 
     chmod +x KaMIS/deploy/*
 

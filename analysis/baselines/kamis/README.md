@@ -4,48 +4,57 @@ KaMIS (Karlsruhe Maximum Independent Set) solver for finding maximum independent
 
 ## Setup
 
-### 1. Get KaMIS submodule
+### 1. Get KaMIS and apply 64-bit patch
 
-After cloning this repository, fetch KaMIS:
 ```bash
-git submodule update --init
+cd analysis/baselines/kamis
+
+# Clone KaMIS (or use: git submodule update --init --recursive)
+git clone https://github.com/KarlsruheMIS/KaMIS.git
+cd KaMIS
+git submodule update --init --recursive
+
+# Apply 64-bit patch for large graphs
+git apply ../kamis_64bit_changes.patch
 ```
+
+The warning `unable to rmdir 'mmwis/extern/KaHIP': Directory not empty` is harmless.
 
 ### 2. Compile KaMIS
 
 Requires: cmake, make, g++
 
 ```bash
-apt-get update && apt-get install -y cmake make g++  
-cd analysis/baselines/kamis/KaMIS
-chmod +x compile_withcmake.sh 
-./compile_withcmake.sh
+cd KaMIS
+mkdir build && cd build
+cmake ../ -DPORTABLE=ON -D64BITMODE=ON
+make -j 10
+cd ..
+mkdir -p deploy
+cp build/online_mis build/redumis build/graphchecker build/sort_adjacencies deploy/
 ```
+
+Flags:
+- `-DPORTABLE=ON`: Disables `-march=native` so binary works on any CPU (required for cluster)
+- `-D64BITMODE=ON`: Enables 64-bit edge IDs for graphs with >2B edges
 
 This creates executables in `KaMIS/deploy/` (redumis, online_mis, etc.)
 
-### Large graphs (n=11+ quaternary IDS)
+### What the 64-bit patch does
 
-The default KaMIS build uses a 32-bit signed guard check that rejects graphs with more than ~1.07 billion (undirected) edges. For large graphs like `graph_ids_s1_n11_q4` (1.5B edges), this check was patched in three files to use `unsigned int` limits (max ~2.15B undirected edges / ~4.3B directed):
+The `kamis_64bit_changes.patch` modifies KaMIS to:
+1. Use `uint64_t` for EdgeID when `MODE64BITEDGES` is defined (supports >2B edges)
+2. Add a `PORTABLE` cmake option to disable `-march=native`
+3. Fix type mismatches in KaHIP files
 
-- `KaMIS/extern/KaHIP/lib/io/graph_io.cpp`
-- `KaMIS/lib/mis/kernel/ParFastKer/fast_reductions/extern/KaHIP/lib/io/graph_io.cpp`
-- `KaMIS/lib/mis/kernel/ParFastKer/LinearTime/MIS_sigmod_pub/Graph.cpp`
-
-These patches are already applied in this repository.
+Without the patch and `-D64BITMODE=ON`, you'll get: `The graph is too large. Currently only 32bit supported!`
 
 ### Cluster (SLURM + enroot)
 
-The enroot container needs `libgomp1` (OpenMP runtime) to run KaMIS. The `run_kamis_baseline.sh` script handles this via `--container-writable` and `apt-get install libgomp1`.
+The enroot container needs build tools (cmake, make, g++) and OpenMP runtime (libgomp1). These should be installed in the container image.
 
-## Workflow
+The `run_kamis_baseline.sh` script automatically compiles KaMIS on the cluster node before running.
 
-```
-LMDB Graph          METIS Graph           KaMIS Result
-(our format)   -->  (integer IDs)    -->  (0/1 per node)
-
-convert_lmdb_to_metis.py    kamis_baseline.py    get size
-```
 
 ## Step 1: Convert LMDB to METIS (one-time)
 
@@ -77,18 +86,7 @@ Options:
 
 ## Step 3: Get Results
 
-Results are saved as `.result` files (one 0/1 per line) and summarized in `kamis_results.json`.
-
-To get solution size:
-```bash
-grep -c "^1$" solution.result
-```
-
-Or in Python:
-```python
-from analysis.baselines.kamis import get_kamis_solution_size
-size = get_kamis_solution_size("solution.result")
-```
+Results are saved as `.result` files (one 0/1 per line) and summarized in `kamis_results.json`. The final MIS size is printed to the terminal.
 
 ## Complete Example
 
