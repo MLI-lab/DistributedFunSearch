@@ -67,7 +67,15 @@ from disfun.startup import sampler_process_entry, evaluator_process_entry, load_
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-def _warm_graph_cache(graph_dir, s_values, start_n_list, end_n_list, q):
+def _build_graph_path(graph_dir, graph_type, s, n, q):
+    """Build graph path: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb"""
+    subdir = "deletion" if graph_type in ("deletion", "deletions", "d", "graph_d") else "ids"
+    alphabet = "binary" if q == 2 else "quaternary" if q == 4 else f"q{q}"
+    prefix = "graph_d" if subdir == "deletion" else "graph_ids"
+    return os.path.join(graph_dir, subdir, alphabet, f"s{s}", f"{prefix}_s{s}_n{n}_q{q}.lmdb")
+
+
+def _warm_graph_cache(graph_dir, graph_type, s_values, start_n_list, end_n_list, q):
     """Warm OS file cache by reading graph files.
 
     This reads graph files into the OS page cache so that when evaluators
@@ -81,7 +89,7 @@ def _warm_graph_cache(graph_dir, s_values, start_n_list, end_n_list, q):
     count = 0
     for s, start_n, end_n in zip(s_values, start_n_list, end_n_list, strict=True):
         for n in range(start_n, end_n + 1):
-            path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+            path = _build_graph_path(graph_dir, graph_type, s, n, q)
             if os.path.exists(path):
                 # Read LMDB data file to warm OS cache (LMDB stores data in data.mdb)
                 data_file = os.path.join(path, "data.mdb")
@@ -244,6 +252,7 @@ def merge_config_with_args(args, config):
     print("Warming OS cache for graph files...")
     graph_count = _warm_graph_cache(
         graph_dir=config.evaluator.graph_dir,
+        graph_type=config.evaluator.graph_type,
         s_values=config.evaluator.s_values,
         start_n_list=config.evaluator.start_n,
         end_n_list=config.evaluator.end_n,

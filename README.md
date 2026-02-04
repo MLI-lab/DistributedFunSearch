@@ -44,11 +44,9 @@ sudo systemctl start rabbitmq-server
 pip install . # or pip install -e . for development mode
 
 # 6. Build FastGraph C++ module (optional, for graph problems)
-cd src/disfun/utils/_fast_graph_cpp_src
-pip install pybind11 lmdb
-python setup.py build_ext --inplace
-cp fast_graph_cpp*.so ../
-cd ../../../..
+# NOTE: This compiles for your active Python version (e.g., cpython-310 for Python 3.10).
+# If nodes have different Python versions, build on each node separately.
+./tools/build_fast_graph.sh
 ```
 
 See [Docker Setup](docs/DOCKER_SETUP.md) for container based installation or [Cluster Setup](docs/CLUSTER_SETUP.md) for cluster execution.
