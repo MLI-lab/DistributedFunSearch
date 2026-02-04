@@ -1,0 +1,11 @@
+{problem_description}
+
+Available imports:
+
+{imports}
+
+Below is an example priority function:
+
+{fewshot_examples}
+
+Analyze in 1-3 sentences what this function does and suggest a concrete improvement.

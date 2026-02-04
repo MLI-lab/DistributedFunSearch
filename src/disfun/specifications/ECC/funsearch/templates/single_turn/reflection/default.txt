@@ -1,0 +1,13 @@
+{problem_description}
+
+Available imports:
+
+{imports}
+
+Below are example priority functions:
+
+{fewshot_examples}
+
+Improve on these functions.
+First, compare the example functions above and explain in 1-3 sentences why the second outperforms the first, then implement a better one in Python.
+The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.

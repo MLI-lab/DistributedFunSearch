@@ -1,0 +1,1 @@
+Consider properties of the {string_type} string `node`, such as specific patterns and the distribution of characters, or relationships with neighboring nodes in the graph.

@@ -2,10 +2,11 @@
 """Test script for prompt_builder.py
 
 Usage:
-    python -m disfun.tests.test_prompt_builder              # Test all 
-    python -m disfun.tests.test_prompt_builder funsearch    # FunSearch only
-    python -m disfun.tests.test_prompt_builder eoh          # EoH only
-    python -m disfun.tests.test_prompt_builder reevo        # ReEvo only
+    python -m disfun.tests.test_prompt_builder                  # Test all
+    python -m disfun.tests.test_prompt_builder funsearch        # FunSearch only
+    python -m disfun.tests.test_prompt_builder eoh              # EoH only
+    python -m disfun.tests.test_prompt_builder reevo            # ReEvo only
+    python -m disfun.tests.test_prompt_builder variants         # Variant tests only
 """
 
 import sys
@@ -72,13 +73,21 @@ def header(title: str):
 
 
 def get_spec_dir() -> Path:
-    return Path(__file__).parent.parent / "specifications" / "Deletions"
+    """Get ECC spec directory path."""
+    return Path(__file__).parent.parent / "specifications" / "ECC"
 
 
-def load_spec(strategy: PromptStrategy, **kwargs) -> PromptSpec:
-    """Load spec with sensible defaults."""
+def load_spec(strategy: PromptStrategy, variant: str = "deletions", **kwargs) -> PromptSpec:
+    """Load spec with sensible defaults.
+
+    Args:
+        strategy: Prompt strategy to use
+        variant: ECC variant name ("deletions" or "ids")
+        **kwargs: Override any default parameters
+    """
     defaults = {
         "spec_dir": str(get_spec_dir()),
+        "variant": variant,
         "imports_file": "imports/networkx.txt",
         "initial_functions_dir": "initial_functions/graph_networkx",
         "fewshot_num_examples": 2,
@@ -93,12 +102,9 @@ def load_spec(strategy: PromptStrategy, **kwargs) -> PromptSpec:
     return prompt_builder.load_specification(strategy=strategy, **defaults)
 
 
-def print_prompt(prompt: str, max_chars: int | None = None):
-    """Print prompt with optional truncation."""
-    if max_chars and len(prompt) > max_chars:
-        print(f"\n[Prompt ({len(prompt)} chars, showing first {max_chars})]\n{prompt[:max_chars]}\n...\n[End]\n")
-    else:
-        print(f"\n[Prompt ({len(prompt)} chars)]\n{prompt}\n[End]\n")
+def print_prompt(prompt: str):
+    """Print full prompt."""
+    print(f"\n[Prompt ({len(prompt)} chars)]\n{prompt}\n[End]\n")
 
 
 # =============================================================================
@@ -116,7 +122,6 @@ def test_funsearch():
     print(f"Template: completion.txt")
     print(f"Function: {spec.function_args} -> {spec.return_type}")
     assert "{function_header}" not in prompt
-    assert "<code>" not in prompt, "Completion should not have <code> tags"
     print_prompt(prompt)
 
     # 2. Completion with evaluation script
@@ -139,53 +144,114 @@ def test_funsearch():
     assert "Gap to best known" in prompt or "%" in prompt, "Should have score info"
     print_prompt(prompt)
 
-    # 4. Instruction templates
-    templates = [
-        ("instruction_basic", False),
-        ("instruction_thought", True),  # Uses <description> tags
-        ("instruction_reflection", True),
+    # 4. Single-turn instruction templates with matching system messages
+    single_turn_configs = [
+        # (template_path, system_message, expected_code_tags, expected_desc_tags)
+        ("single_turn/basic.txt", "single_turn/basic.txt", True, False),
+        ("single_turn/thought.txt", "single_turn/thought.txt", True, True),
+        ("single_turn/reflection", "single_turn/reflection.txt", True, True),  # folder
     ]
 
-    for name, has_description in templates:
-        print(f"\n--- 4. Instruction: {name} ---")
+    for template_path, sys_msg, expect_code, expect_desc in single_turn_configs:
+        name = template_path.split("/")[-1].replace(".txt", "")
+        print(f"\n--- 4. Single-turn: {name} ---")
         spec = load_spec(
             PromptStrategy.FUNSEARCH,
-            funsearch_template=f"funsearch/templates/{name}.txt",
+            funsearch_template=f"funsearch/templates/{template_path}",
             funsearch_problem_desc="funsearch/problem_descriptions/instruction.txt",
-            funsearch_system_message="funsearch/system_message.txt",
+            funsearch_system_message=f"funsearch/system_messages/{sys_msg}",
         )
-        prompt = prompt_builder.build_prompt(spec, "funsearch", PROGRAMS)
-        fewshot = prompt.split("Improve on")[0]
+        print(f"is_multi_turn: {spec.is_multi_turn}")
+        print(f"System message: {spec.system_message}")
+        assert not spec.is_multi_turn, "Single-turn should not be multi-turn"
 
-        print(f"Has <description>: {has_description}")
-        print(f"System message: {spec.system_message[:50]}..." if spec.system_message else "None")
+        # Test with build_funsearch_prompts
+        refl, gen = prompt_builder.build_funsearch_prompts(spec, PROGRAMS)
+        assert refl is None, "Single-turn should have no reflection prompt"
+        assert "Improve on" in gen, "Should have improve instruction"
 
-        assert "<code>" in prompt and fewshot.count("<code>") >= 2
-        if has_description:
-            assert "<description>" in prompt and fewshot.count("<description>") >= 2
-        print_prompt(prompt)
+        # Verify tag detection from system message
+        has_code = "<code>" in gen
+        has_desc = "<description>" in gen
+        assert has_code == expect_code, f"Expected code_tags={expect_code}, got {has_code}"
+        assert has_desc == expect_desc, f"Expected desc_tags={expect_desc}, got {has_desc}"
+        print(f"- Tags correct: <code>={has_code}, <description>={has_desc}")
+        print_prompt(gen)
 
-    # 5. fewshot_include_description=False (description tags only in format instruction, not in examples)
-    print("\n--- 5. fewshot_include_description=False ---")
+    # 5. Single-turn reflection with 1 vs 2 programs
+    print("\n--- 5. Single-turn reflection: 1 vs 2 programs ---")
     spec = load_spec(
         PromptStrategy.FUNSEARCH,
-        funsearch_template="funsearch/templates/instruction_thought.txt",
+        funsearch_template="funsearch/templates/single_turn/reflection",
         funsearch_problem_desc="funsearch/problem_descriptions/instruction.txt",
-        fewshot_include_description=False,
     )
-    prompt = prompt_builder.build_prompt(spec, "funsearch", PROGRAMS)
-    fewshot = prompt.split("Improve on")[0]
-    format_section = prompt.split("Improve on")[1]
+    _, gen_2 = prompt_builder.build_funsearch_prompts(spec, PROGRAMS)
+    _, gen_1 = prompt_builder.build_funsearch_prompts(spec, [PROGRAMS[0]])
+    assert "compare" in gen_2.lower(), "2 programs should use compare"
+    assert "analyze" in gen_1.lower(), "1 program should use analyze"
+    print("- 2 programs: uses default template (compare)")
+    print("- 1 program: uses single template (analyze)")
 
-    print(f"Fewshot <description> count: {fewshot.count('<description>')} (should be 0)")
-    print(f"Format has <description>: {'<description>' in format_section}")
+    # 6. Multi-turn thought
+    print("\n--- 6. Multi-turn thought ---")
+    spec = load_spec(
+        PromptStrategy.FUNSEARCH,
+        funsearch_template="funsearch/templates/multi_turn/thought",
+        funsearch_problem_desc="funsearch/problem_descriptions/instruction.txt",
+    )
+    print(f"is_multi_turn: {spec.is_multi_turn}")
+    print(f"Templates: {list(spec.templates.keys())}")
+    assert spec.is_multi_turn, "Multi-turn should be detected"
 
-    assert fewshot.count("<description>") == 0, "Fewshots should not have <description>"
-    assert fewshot.count("<code>") >= 2, "Fewshots should have <code>"
-    assert "<description>" in format_section, "Format should still request <description>"
-    print_prompt(prompt)
+    refl, gen = prompt_builder.build_funsearch_prompts(spec, PROGRAMS)
+    assert refl is not None, "Multi-turn should have reflection prompt"
+    assert "{reflection}" in gen, "Stage2 should keep {reflection} placeholder"
+    assert "describe" in refl.lower(), "Stage1 should ask to describe"
+    print("- Stage1 asks to describe heuristic")
+    print("- Stage2 has {reflection} placeholder")
+    print_prompt(refl)
 
-    print("\nFunSearch tests passed!")
+    # 7. Multi-turn reflection
+    print("\n--- 7. Multi-turn reflection ---")
+    spec = load_spec(
+        PromptStrategy.FUNSEARCH,
+        funsearch_template="funsearch/templates/multi_turn/reflection",
+        funsearch_problem_desc="funsearch/problem_descriptions/instruction.txt",
+    )
+    print(f"is_multi_turn: {spec.is_multi_turn}")
+    print(f"Templates: {list(spec.templates.keys())}")
+
+    # Test with 2 programs
+    refl, gen = prompt_builder.build_funsearch_prompts(spec, PROGRAMS)
+    assert "compare" in refl.lower(), "Stage1 should ask to compare"
+    print("- 2 programs: stage1 asks to compare")
+
+    # Test with 1 program (should use _single variants)
+    refl, gen = prompt_builder.build_funsearch_prompts(spec, [PROGRAMS[0]])
+    assert "analyze" in refl.lower(), "Stage1 single should ask to analyze"
+    print("- 1 program: stage1_single asks to analyze")
+
+    # 8. Multi-turn system messages
+    print("\n--- 8. Multi-turn system messages ---")
+    # Note: Multi-turn has separate system messages for stage1 and stage2
+    # Stage1: plain text output (no tags)
+    # Stage2: code output with <code> tags
+    sys_msg_dir = get_spec_dir() / "funsearch" / "system_messages" / "multi_turn"
+
+    for variant in ["thought", "reflection"]:
+        stage1_path = sys_msg_dir / variant / "stage1.txt"
+        stage2_path = sys_msg_dir / variant / "stage2.txt"
+        assert stage1_path.exists(), f"Missing {stage1_path}"
+        assert stage2_path.exists(), f"Missing {stage2_path}"
+
+        stage1_msg = stage1_path.read_text()
+        stage2_msg = stage2_path.read_text()
+
+        # Stage1 should NOT have code tags (it's for reasoning)
+        assert "<code>" not in stage1_msg, f"Stage1 {variant} should not have <code>"
+        # Stage2 should have code tags (for code output)
+        assert "<code>" in stage2_msg, f"Stage2 {variant} should have <code>"
+        print(f"- multi_turn/{variant}: stage1 no tags, stage2 has <code>")
 
 
 # =============================================================================
@@ -208,8 +274,6 @@ def test_eoh():
 
         print(f"\n--- {name} ({reqs.num_programs} program(s)) ---")
         print_prompt(prompt)
-
-    print("\nEoH tests passed!")
 
 
 # =============================================================================
@@ -242,7 +306,77 @@ def test_reevo():
         print(f"\n--- {name} ({reqs.num_programs} program(s), reflection={reqs.needs_reflection}) ---")
         print_prompt(prompt)
 
-    print("\nReEvo tests passed!")
+
+# =============================================================================
+# Variant Tests (ECC folder with placeholders)
+# =============================================================================
+
+def test_variants():
+    """Test ECC folder with deletions and ids variants."""
+    header("VARIANT TESTS")
+
+    # Test deletions variant
+    print("\n--- 1. Deletions variant ---")
+    spec = load_spec(
+        PromptStrategy.FUNSEARCH,
+        variant="deletions",
+        funsearch_problem_desc="funsearch/problem_descriptions/instruction.txt",
+    )
+    _, prompt = prompt_builder.build_funsearch_prompts(spec, PROGRAMS)
+
+    # Verify placeholders are replaced with deletions values
+    assert "binary" in prompt, "Should have 'binary' for string_type"
+    assert "deletion" in prompt, "Should have 'deletion' for error_type"
+    assert "subsequence" in prompt, "Should have 'subsequence' in edge_condition"
+    assert "{string_type}" not in prompt, "Placeholder should be replaced"
+    assert "{error_type}" not in prompt, "Placeholder should be replaced"
+    assert "{edge_condition}" not in prompt, "Placeholder should be replaced"
+    print("- Deletions placeholders correctly substituted")
+    print(f"- Problem description preview: {spec.problem_description[:200]}...")
+
+    # Test ids variant
+    print("\n--- 2. IDS variant ---")
+    spec = load_spec(
+        PromptStrategy.FUNSEARCH,
+        variant="ids",
+        funsearch_problem_desc="funsearch/problem_descriptions/instruction.txt",
+    )
+    _, prompt = prompt_builder.build_funsearch_prompts(spec, PROGRAMS)
+
+    # Verify placeholders are replaced with IDS values
+    assert "q-ary" in prompt, "Should have 'q-ary' for string_type"
+    assert "edit distance" in prompt, "Should have 'edit distance' in edge_condition"
+    assert "{string_type}" not in prompt, "Placeholder should be replaced"
+    assert "{error_type}" not in prompt, "Placeholder should be replaced"
+    assert "{edge_condition}" not in prompt, "Placeholder should be replaced"
+    print("- IDS placeholders correctly substituted")
+    print(f"- Problem description preview: {spec.problem_description[:200]}...")
+
+    # Test EoH with deletions variant
+    print("\n--- 3. EoH with deletions variant ---")
+    spec = load_spec(PromptStrategy.EOH, variant="deletions")
+    prompt = prompt_builder.build_prompt(spec, "i1", PROGRAMS)
+    assert "binary" in prompt or "deletion" in prompt, "EoH should have variant substituted"
+    assert "deletion" in spec.system_message, "System message should have variant"
+    print("- EoH system message has variant placeholders substituted")
+    print(f"- System message: {spec.system_message}")
+
+    # Test ReEvo with ids variant
+    print("\n--- 4. ReEvo with ids variant ---")
+    spec = load_spec(PromptStrategy.REEVO, variant="ids")
+    assert "insertion/deletion/substitution" in spec.system_message, "Generator system should have IDS error type"
+    assert "q-ary" in spec.initial_reflection, "Initial reflection should have q-ary"
+    print("- ReEvo system message has IDS error type")
+    print(f"- Generator system: {spec.system_message}")
+    print(f"- Initial reflection: {spec.initial_reflection}")
+
+    # Test error handling for invalid variant
+    print("\n--- 5. Error handling ---")
+    try:
+        load_spec(PromptStrategy.FUNSEARCH, variant="invalid_variant")
+        assert False, "Should raise ValueError for invalid variant"
+    except ValueError as e:
+        print(f"- Correctly raises ValueError: {e}")
 
 
 # =============================================================================
@@ -254,9 +388,7 @@ def test_all():
     test_funsearch()
     test_eoh()
     test_reevo()
-    print("\n" + "=" * 80)
-    print("ALL TESTS PASSED")
-    print("=" * 80)
+    test_variants()
 
 
 def main():
@@ -265,6 +397,7 @@ def main():
         "funsearch": test_funsearch,
         "eoh": test_eoh,
         "reevo": test_reevo,
+        "variants": test_variants,
     }
 
     if not args:

@@ -9,6 +9,11 @@ Placeholders:
     Filled once in load_specification() (static content from spec files):
         {imports}, {problem_description}, {problem_desc}, {func_desc}, {user_generator}
 
+    Variant placeholders (filled if variant specified, e.g., for ECC folder):
+        {string_type}        "binary" or "q-ary"
+        {edge_condition}     Graph connectivity rule
+        {error_type}         "deletion" or "insertion/deletion/substitution"
+
     Filled each iteration in build_prompt() (from sampled programs).
     All program placeholders are available to all strategies, usage depends on template:
         {fewshot_examples}   All programs as versioned functions (v0, v1, ...)
@@ -77,6 +82,7 @@ class PromptSpec:
     function_to_evolve: str = "priority"
     function_args: str = ""
     return_type: str = "float"
+    is_multi_turn: bool = False  # True if using two-stage prompts (stage1 + stage2)
 
     # ReEvo specific
     user_generator: str = ""  # Prebuilt from user_generator.txt
@@ -101,6 +107,55 @@ def _load_file(path: Path) -> str:
         return path.read_text()
     logger.warning(f"File not found: {path}")
     return ""
+
+
+def _load_variant(spec_dir: Path, variant_name: str) -> dict[str, str]:
+    """Load variant placeholders from variants.py.
+
+    Args:
+        spec_dir: Base directory containing variants.py
+        variant_name: Name of variant to load (e.g., "deletions", "ids")
+
+    Returns:
+        Dict of placeholder name to value (e.g., {"string_type": "binary", ...})
+
+    Raises:
+        ValueError: If variants.py not found or variant_name not in VARIANTS
+    """
+    variants_path = spec_dir / "variants.py"
+    if not variants_path.exists():
+        raise ValueError(f"variants.py not found in {spec_dir}")
+
+    # Load variants module
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("variants", variants_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    # Get VARIANTS dict
+    if not hasattr(module, "VARIANTS"):
+        raise ValueError(f"VARIANTS dict not found in {variants_path}")
+
+    variants = module.VARIANTS
+    if variant_name not in variants:
+        raise ValueError(f"Variant '{variant_name}' not found. Available: {list(variants.keys())}")
+
+    return variants[variant_name]
+
+
+def _apply_variant(text: str, variant: dict[str, str]) -> str:
+    """Apply variant placeholders to text.
+
+    Args:
+        text: Text with {placeholder} markers
+        variant: Dict mapping placeholder names to values
+
+    Returns:
+        Text with placeholders replaced
+    """
+    for key, value in variant.items():
+        text = text.replace(f"{{{key}}}", value)
+    return text
 
 
 def _load_directory(path: Path) -> dict[str, str]:
@@ -201,6 +256,7 @@ def load_specification(
     strategy: PromptStrategy,
     spec_dir: str,
     imports_file: str = "imports/networkx.txt",
+    variant: str | None = None,  # ECC variant: "deletions" or "ids" (loads from variants.py)
     # FunSearch options
     funsearch_template: str = "funsearch/template.txt",
     funsearch_problem_desc: str = "funsearch/problem_descriptions/baseline.txt",
@@ -244,6 +300,12 @@ def load_specification(
     """
     base = Path(spec_dir)
 
+    # Load variant placeholders if specified
+    variant_dict = {}
+    if variant:
+        variant_dict = _load_variant(base, variant)
+        logger.info(f"Loaded variant '{variant}': {list(variant_dict.keys())}")
+
     # Load shared content
     imports = _load_file(base / imports_file)
 
@@ -260,9 +322,40 @@ def load_specification(
     function_args = ""
     return_type = "float"
 
+    is_multi_turn = False
+
     if strategy == PromptStrategy.FUNSEARCH:
-        # Load single template
-        templates = {"funsearch": _load_file(base / funsearch_template).strip()}
+        # Load template(s) - supports single file, single-turn folder, or multi-turn folder
+        template_path = base / funsearch_template
+        if template_path.is_dir():
+            # Check if this is a multi-turn template (has stage1.txt and stage2.txt)
+            if (template_path / "stage1.txt").exists() and (template_path / "stage2.txt").exists():
+                # Multi-turn: load stage1 (reflection) and stage2 (generation) templates
+                is_multi_turn = True
+                stage1_template = _load_file(template_path / "stage1.txt").strip()
+                stage2_template = _load_file(template_path / "stage2.txt").strip()
+                templates = {
+                    "funsearch_stage1": stage1_template,
+                    "funsearch": stage2_template,
+                }
+                # Load single-function variants if they exist (optional, no warning if missing)
+                stage1_single_path = template_path / "stage1_single.txt"
+                stage2_single_path = template_path / "stage2_single.txt"
+                if stage1_single_path.exists():
+                    templates["funsearch_stage1_single"] = stage1_single_path.read_text().strip()
+                if stage2_single_path.exists():
+                    templates["funsearch_single"] = stage2_single_path.read_text().strip()
+            else:
+                # Single-turn folder: load default.txt and single.txt variants
+                default_template = _load_file(template_path / "default.txt").strip()
+                templates = {"funsearch": default_template}
+                # Load single-function variant if it exists (optional, no warning if missing)
+                single_path = template_path / "single.txt"
+                if single_path.exists():
+                    templates["funsearch_single"] = single_path.read_text().strip()
+        else:
+            # Single file (legacy behavior)
+            templates = {"funsearch": _load_file(template_path).strip()}
         problem_description = _load_file(base / funsearch_problem_desc).strip()
 
         if funsearch_system_message:
@@ -330,6 +423,20 @@ def load_specification(
     score_label_absolute_content = _load_file(base / score_label_absolute).strip()
     score_label_relative_content = _load_file(base / score_label_relative).strip()
 
+    # Apply variant placeholders if specified
+    if variant_dict:
+        problem_description = _apply_variant(problem_description, variant_dict)
+        problem_desc = _apply_variant(problem_desc, variant_dict)
+        func_desc = _apply_variant(func_desc, variant_dict)
+        if system_message:
+            system_message = _apply_variant(system_message, variant_dict)
+        if reflector_system_message:
+            reflector_system_message = _apply_variant(reflector_system_message, variant_dict)
+        initial_reflection = _apply_variant(initial_reflection, variant_dict)
+        user_generator = _apply_variant(user_generator, variant_dict)
+        for name in templates:
+            templates[name] = _apply_variant(templates[name], variant_dict)
+
     logger.info(f"Loaded {strategy.value} spec from {spec_dir}: {len(templates)} templates")
 
     return PromptSpec(
@@ -347,6 +454,7 @@ def load_specification(
         function_to_evolve="priority",
         function_args=function_args,
         return_type=return_type,
+        is_multi_turn=is_multi_turn,
         user_generator=user_generator,
         reflector_system_message=reflector_system_message,
         initial_reflection=initial_reflection,
@@ -388,6 +496,7 @@ def load_prompt_spec_from_config(config) -> PromptSpec:
         strategy=strategy,
         spec_dir=config.prompt.spec_dir,
         imports_file=config.prompt.imports_file,
+        variant=getattr(config.prompt, 'variant', None),
         funsearch_template=config.prompt.funsearch_template,
         funsearch_problem_desc=config.prompt.funsearch_problem_desc,
         funsearch_system_message=config.prompt.funsearch_system_message,
@@ -454,6 +563,64 @@ def select_template(
         return phase, num_programs
 
     raise ValueError(f"Unknown strategy: {spec.strategy}")
+
+
+def select_funsearch_variant(spec: PromptSpec, available_programs: int) -> str:
+    """Select appropriate FunSearch template variant based on available programs.
+
+    Args:
+        spec: Loaded prompt specification
+        available_programs: Number of programs actually sampled
+
+    Returns:
+        Template name to use ("funsearch" or "funsearch_single")
+    """
+    if available_programs == 1 and "funsearch_single" in spec.templates:
+        return "funsearch_single"
+    return "funsearch"
+
+
+def build_funsearch_prompts(
+    spec: PromptSpec,
+    programs: list,
+) -> tuple[str | None, str]:
+    """Build prompts for FunSearch (single-turn or multi-turn).
+
+    Args:
+        spec: Loaded prompt specification
+        programs: List of (Function, scores_dict) tuples
+
+    Returns:
+        Tuple of (reflection_prompt, generation_prompt).
+        For single-turn, reflection_prompt is None.
+        For multi-turn, generation_prompt keeps {reflection} placeholder for sampler to fill.
+    """
+    available_programs = len(programs)
+
+    if not spec.is_multi_turn:
+        # Single-turn: just build generation prompt
+        template_name = select_funsearch_variant(spec, available_programs)
+        generation_prompt = build_prompt(spec, template_name, programs)
+        return (None, generation_prompt)
+
+    # Multi-turn: build stage1 (reflection) and stage2 (generation) prompts
+    # Select appropriate templates based on available programs
+    if available_programs == 1 and "funsearch_stage1_single" in spec.templates:
+        stage1_template_name = "funsearch_stage1_single"
+        stage2_template_name = "funsearch_single"
+    else:
+        stage1_template_name = "funsearch_stage1"
+        stage2_template_name = "funsearch"
+
+    # Build stage1 prompt (reflection/thought)
+    stage1_prompt = build_prompt(spec, stage1_template_name, programs)
+
+    # Build stage2 template (keep {reflection} placeholder for sampler to fill)
+    stage2_template = spec.templates.get(stage2_template_name, "")
+    # Fill program placeholders but NOT {reflection}
+    stage2_prompt = _fill_program_placeholders(stage2_template, spec, programs)
+
+    return (stage1_prompt, stage2_prompt)
 
 
 def _get_reevo_phase(state: dict | None) -> str:
@@ -641,9 +808,10 @@ def _fill_program_placeholders(
 ) -> str:
     """Fill all program-related placeholders (unified for FunSearch/EoH/ReEvo).
 
-    Detects tag format from template (<description>, <code>) and formats programs
-    accordingly. Whether to include description in few-shot examples is controlled
-    by spec.fewshot_include_description.
+    Detects tag format from system message (if exists) or falls back to template.
+    If <code> or <description> tags are found, few-shot examples are wrapped accordingly.
+    Whether to include description in few-shot examples is controlled by
+    spec.fewshot_include_description.
 
     Fills:
         {fewshot_examples}   All programs as versioned functions (v0, v1, ...)
@@ -653,9 +821,10 @@ def _fill_program_placeholders(
         {version}            Next version number
         {evaluation_script}  FunSearch evaluation context
     """
-    # Detect tag format from template, but respect config for description in few-shots
-    include_description_tags = "<description>" in prompt and spec.fewshot_include_description
-    include_code_tags = "<code>" in prompt
+    # Detect tag format from system message (if exists) or fall back to template
+    check_source = spec.system_message if spec.system_message else prompt
+    include_description_tags = "<description>" in check_source and spec.fewshot_include_description
+    include_code_tags = "<code>" in check_source
 
     # Build {fewshot_examples}
     fewshot_parts = []

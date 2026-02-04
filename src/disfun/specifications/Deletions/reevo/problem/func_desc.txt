@@ -1,1 +1,0 @@
-The priority function takes a node (binary string), the graph G, string length n, and deletion parameter s, and returns a priority score. Nodes in G are connected if they share a subsequence of length at least n-s. Higher priority nodes are added to the independent set first.

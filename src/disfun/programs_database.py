@@ -822,8 +822,17 @@ class ProgramsDatabase:
             result["generation_prompt"] = gen_prompt
             result["system_message"] = self.prompt_spec.system_message
             result["reflection_system_message"] = self.prompt_spec.reflector_system_message
+        elif self.prompt_spec.strategy == prompt_builder.PromptStrategy.FUNSEARCH:
+            # FunSearch: single-turn or multi-turn depending on template
+            refl_prompt, gen_prompt = prompt_builder.build_funsearch_prompts(
+                self.prompt_spec, sampled_programs
+            )
+            result["reflection_prompt"] = refl_prompt
+            result["generation_prompt"] = gen_prompt
+            result["system_message"] = self.prompt_spec.system_message
+            result["reflection_system_message"] = None  # FunSearch uses same system message for both
         else:
-            # FunSearch/EoH: single generation prompt
+            # EoH: single generation prompt
             result["generation_prompt"] = prompt_builder.build_prompt(
                 self.prompt_spec, template_name, sampled_programs, state=self.reevo_state
             )

@@ -1,0 +1,9 @@
+Your proposed heuristic:
+{reflection}
+
+Now implement this heuristic as a Python function.
+The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
+
+Available imports:
+
+{imports}

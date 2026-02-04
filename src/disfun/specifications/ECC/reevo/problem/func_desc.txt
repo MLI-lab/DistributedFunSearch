@@ -1,0 +1,1 @@
+The priority function takes a node ({string_type} string), the graph G, string length n, and error parameter s, and returns a priority score. {edge_condition} Higher priority nodes are added to the independent set first.

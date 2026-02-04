@@ -1,0 +1,6 @@
+"""
+Finds a large independent set in graph G where nodes are {string_type} strings of length n.
+{edge_condition}
+The priority function must return a numeric value (int or float). Higher priority nodes are added first.
+{prompt_style}
+"""

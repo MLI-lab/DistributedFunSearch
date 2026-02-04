@@ -1,0 +1,11 @@
+{problem_description}
+
+Available imports:
+
+{imports}
+
+Below are example priority functions:
+
+{fewshot_examples}
+
+Compare these functions and explain in 1-3 sentences why the second outperforms the first.

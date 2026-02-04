@@ -1,0 +1,14 @@
+I need help designing a priority function for constructing large {error_type}-correcting codes.
+
+The problem is formulated as finding a maximum independent set in a graph G, where:
+- Nodes are {string_type} strings of length n
+- {edge_condition}
+- A larger independent set corresponds to a better code
+
+I construct independent sets greedily:
+1. Compute priority(node) for all nodes in G
+2. Select the highest-priority node and add it to the independent set
+3. Remove that node and all its neighbors from G
+4. Repeat until G is empty
+
+A better priority function constructs a larger independent set.

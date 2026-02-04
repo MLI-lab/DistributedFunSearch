@@ -1,0 +1,12 @@
+{problem_description}
+
+Available imports:
+
+{imports}
+
+Below are example priority functions:
+
+{fewshot_examples}
+
+Your task is to design an improved priority function.
+Describe your new heuristic and its main steps in 1-3 sentences.
