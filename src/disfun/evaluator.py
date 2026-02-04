@@ -59,10 +59,19 @@ _graph_cache = {}
 _graph_cache_lock = Lock()
 
 
-def get_cached_graph(n, s, q, graph_dir, graph_prefix="graph_d"):
+def _build_graph_path(graph_dir, graph_type, s, n, q):
+    """Build graph path: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb"""
+    subdir = "deletion" if graph_type in ("deletion", "deletions", "d", "graph_d") else "ids"
+    alphabet = "binary" if q == 2 else "quaternary" if q == 4 else f"q{q}"
+    prefix = "graph_d" if subdir == "deletion" else "graph_ids"
+    return os.path.join(graph_dir, subdir, alphabet, f"s{s}", f"{prefix}_s{s}_n{n}_q{q}.lmdb")
+
+
+def get_cached_graph(n, s, q, graph_dir, graph_type="deletion"):
     """Get graph from cache or load and cache it.
 
     Thread-safe. Forked children inherit the cached graphs.
+    Path structure: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb
     """
     key = (n, s, q)
 
@@ -70,7 +79,7 @@ def get_cached_graph(n, s, q, graph_dir, graph_prefix="graph_d"):
         if key in _graph_cache:
             return _graph_cache[key]
 
-    graph_path = os.path.join(graph_dir, f"{graph_prefix}_s{s}_n{n}_q{q}.lmdb")
+    graph_path = _build_graph_path(graph_dir, graph_type, s, n, q)
     if not os.path.exists(graph_path):
         logger.warning(f"Graph not found: {graph_path}")
         return None
@@ -421,7 +430,7 @@ class Evaluator:
         self.prefetch_count = evaluator_config.prefetch_count
         self._conn = connection_manager
         self.graph_dir = evaluator_config.graph_dir
-        self.graph_prefix = getattr(evaluator_config, 'graph_prefix', 'graph_d')
+        self.graph_type = getattr(evaluator_config, 'graph_type', 'deletion')
 
         # Sandbox and thread pool for parallel evaluation.
         # Graphs are cached here. Forked children inherit via copy-on-write.
@@ -440,7 +449,7 @@ class Evaluator:
         Forked children inherit the cached graph via copy-on-write.
         """
         n, s, q = input_tuple[:3]
-        G = get_cached_graph(n, s, q, self.graph_dir, self.graph_prefix)
+        G = get_cached_graph(n, s, q, self.graph_dir, self.graph_type)
         if G is not None:
             return (n, s, q, G)
         return input_tuple

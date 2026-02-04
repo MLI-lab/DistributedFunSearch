@@ -88,8 +88,8 @@ class EvaluatorConfig:
     timeout: int = 30
     max_workers: int = 2  # Parallel CPU processes per evaluator
     q: int = 4  # Alphabet size (2 for binary, 4 for DNA)
-    graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
-    graph_prefix: str = "graph_ids"  # "graph_d" for deletions, "graph_ids" for IDS
+    graph_dir: str = "/mnt/Graphs"
+    graph_type: str = "ids"  # "deletion" or "ids"
     prefetch_count: int = 15
     sandbox_memory_limit_gb: float = 1.0
 
