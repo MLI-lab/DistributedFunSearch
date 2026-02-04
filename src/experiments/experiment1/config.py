@@ -102,7 +102,7 @@ class PromptConfig:
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/templates/instruction_thought.txt"
+    funsearch_template: str = "funsearch/templates/single_turn/thought.txt"
     funsearch_problem_desc: str = "funsearch/templates/single_turn/thought.txt"
     funsearch_system_message: str | None = "funsearch/system_messages/single_turn/thought.txt" #"funsearch/system_messages/basic.txt"
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
