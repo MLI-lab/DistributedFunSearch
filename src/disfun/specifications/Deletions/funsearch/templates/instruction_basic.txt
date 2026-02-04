@@ -8,7 +8,5 @@ Below are example priority functions:
 
 {fewshot_examples}
 
-Improve on these functions.
+Improve on these functions. 
 The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
-
-Respond with only: <code>your implementation</code>. No reasoning, explanation, or other text.

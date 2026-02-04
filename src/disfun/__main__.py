@@ -95,12 +95,9 @@ def _warm_graph_cache(graph_dir, s_values, start_n_list, end_n_list, q):
 
 
 def _cleanup_sandbox_processes():
-    """Kill any remaining sandbox processes (container_main.py).
+    """No-op. Fork-based sandbox children are reaped automatically by parent.
 
-    Called:
-    1. Explicitly by _shutdown() during normal Ctrl+C shutdown.
-    2. Automatically via atexit if main crashes or exits abnormally without
-       going through _shutdown().
+    Kept for API compatibility.
     """
     cleanup_orphaned_sandbox_processes(max_age_seconds=0)
 

@@ -14,24 +14,25 @@
 # ==============================================================================
 
 
-"""Evaluator: executes LLM-generated functions in isolated sandboxes.
+"""Evaluator: executes LLM-generated functions in fork-based sandboxes.
 
 Flow:
-1. Parse LLM output (XML tags, markdown fences, or raw code)
-2. Integrate into evaluation template (replace priority function body)
-3. Compile in ProcessPoolExecutor worker (base is cached, only priority recompiled)
-4. Pickle compiled function to disk
-5. Spawn sandbox subprocess with resource limits (memory, timeout)
-6. Sandbox loads pickle, executes, writes result
-7. Publish scores to database queue
+1. Parse LLM output from XML tags, markdown fences, or raw code
+2. Integrate into evaluation template by replacing priority function body
+3. Compile in worker thread with caching: base is cached, only priority recompiled
+4. Fork child process (inherits parent memory via copy-on-write)
+5. Child sets memory limits, runs evaluation, returns result via pipe
+6. Publish scores to database queue
 
-See docs/EVALUATOR.md for details.
+Graphs are loaded lazily from LMDB and cached. Forked children inherit the cache
+via copy-on-write, so graphs are never reloaded. See docs/EVALUATOR.md for details.
 """
 
 
 import ast
 import copy
 import logging
+import os
 from disfun.utils import code_manipulation
 from disfun.utils.profiling import async_time_execution
 from disfun import sandbox
@@ -41,13 +42,49 @@ import sys
 import asyncio
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock  # For shared state between ThreadPoolExecutor workers
+from threading import Lock
 import gc
 import psutil
 import re
 
+from disfun.utils.fast_graph import load_graph_from_lmdb
+
 
 logger = logging.getLogger('main_logger')
+
+
+# Graph cache shared across evaluator threads.
+# Forked children inherit this cache via copy-on-write.
+_graph_cache = {}
+_graph_cache_lock = Lock()
+
+
+def get_cached_graph(n, s, q, graph_dir):
+    """Get graph from cache or load and cache it.
+
+    Thread-safe. Forked children inherit the cached graphs.
+    """
+    key = (n, s, q)
+
+    with _graph_cache_lock:
+        if key in _graph_cache:
+            return _graph_cache[key]
+
+    # Build path: graph_dir/graph_d_s{s}_n{n}_q{q}.lmdb
+    graph_path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
+
+    if not os.path.exists(graph_path):
+        logger.warning(f"Graph not found: {graph_path}")
+        return None
+
+    logger.info(f"Loading graph n={n}, s={s}, q={q} from {graph_path}")
+    G = load_graph_from_lmdb(graph_path)
+
+    with _graph_cache_lock:
+        _graph_cache[key] = G
+        logger.info(f"Cached graph n={n}, s={s}, q={q}, nodes={G.number_of_nodes()}, edges={G.number_of_edges()}")
+
+    return G
 
 
 def extract_evaluation_result(test_output, problem_instance):
@@ -348,17 +385,8 @@ def _sample_to_program(
   return evolved_function, str(program), description
 
 
-def run_evaluation(sandbox, program, function_to_run, input, timeout_seconds, call_count, call_count_lock):
-    with call_count_lock:  # Ensures lock is released once the block exits
-        count = call_count[0]
-        call_count[0] += 1
-
-    result, runs_ok, cpu_time, call_data_folder, input_path, error_file = sandbox.run(program, function_to_run, input, timeout_seconds, count)
-
-    # Clean up sandbox call directory to save disk space
-    sandbox.cleanup_call_directories(count)
-
-    return result, runs_ok, cpu_time, call_data_folder, input_path, error_file
+def run_evaluation(sandbox, program, function_to_run, input):
+    return sandbox.run(program, function_to_run, input)
 
 
 class Evaluator:
@@ -394,22 +422,29 @@ class Evaluator:
         self.timeout_seconds = evaluator_config.timeout
         self.prefetch_count = evaluator_config.prefetch_count
         self._conn = connection_manager
+        self.graph_dir = evaluator_config.graph_dir
 
-        # Sandbox and thread pool for parallel evaluation
-        # Using ThreadPoolExecutor instead of ProcessPoolExecutor to avoid memory copying
-        # (threads share memory, so graphs loaded in evaluator are shared across threads)
-        self.call_count = [0]  # Use list to allow mutation in threads
-        self.call_count_lock = Lock()
+        # Sandbox and thread pool for parallel evaluation.
+        # Graphs are cached here. Forked children inherit via copy-on-write.
         self.sandbox = sandbox.ExternalProcessSandbox(
-            base_path=sandbox_base_path,
             timeout_secs=evaluator_config.timeout,
-            python_path=sys.executable,
-            local_id=self.local_id,
             graph_dir=evaluator_config.graph_dir,
             memory_limit_gb=evaluator_config.sandbox_memory_limit_gb
         )
         self.executor = ThreadPoolExecutor(max_workers=evaluator_config.max_workers)
         self.cumulative_cpu_time = 0.0
+
+    def _get_input_with_graph(self, input_tuple):
+        """Augment input tuple with cached graph.
+
+        Loads graph on first access, caches for reuse.
+        Forked children inherit the cached graph via copy-on-write.
+        """
+        n, s, q = input_tuple[:3]
+        G = get_cached_graph(n, s, q, self.graph_dir)
+        if G is not None:
+            return (n, s, q, G)
+        return input_tuple
 
     async def consume_and_process(self):
         """Main consume loop with automatic connection recovery."""
@@ -480,10 +515,10 @@ class Evaluator:
             # Log parsed function body
             logger.info(f"Evaluator: Parsed function for island {data['island_id']}:\n{new_function.body}")
 
-            # Submit evaluation tasks to ProcessPoolExecutor (one per test input)
+            # Submit evaluation tasks with cached graphs (forked children inherit cache)
             tasks = {
                 self.executor.submit(run_evaluation, self.sandbox, program, self.function_to_run,
-                                     input, self.timeout_seconds, self.call_count, self.call_count_lock): input
+                                     self._get_input_with_graph(input)): input
                 for input in self.inputs
             }
 
@@ -494,7 +529,7 @@ class Evaluator:
             for future in as_completed(tasks):
                 input = tasks[future]
                 try:
-                    test_output, runs_ok, cpu_time, _, _, _ = future.result(timeout=self.timeout_seconds)
+                    test_output, runs_ok, cpu_time = future.result(timeout=self.timeout_seconds)
                     self.cumulative_cpu_time += cpu_time
 
                     if runs_ok and test_output[0] is not None:

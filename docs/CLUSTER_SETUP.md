@@ -47,6 +47,13 @@ python3 -m venv --system-site-packages /data/ws/your-workspace/venv
 source /data/ws/your-workspace/venv/bin/activate
 pip install --upgrade pip setuptools
 pip install -e /path/to/DistributedFunSearch
+
+# Build FastGraph C++ module (optional, for graph problems)
+cd /path/to/DistributedFunSearch/src/disfun/utils/_fast_graph_cpp_src
+pip install pybind11 lmdb
+python setup.py build_ext --inplace
+cp fast_graph_cpp*.so ../
+
 wandb login
 ```
 

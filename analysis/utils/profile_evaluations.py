@@ -1,68 +1,17 @@
 #!/usr/bin/env python3
 """
-Profile Evaluation Performance: Graph-based vs No-Graph
+Profile Evaluation Performance
 
-Compares two evaluation approaches:
-1. Graph-based: Load pre-computed LMDB graph, fast neighbor lookups
-2. No-graph: Compute neighbors on-the-fly using LCS (no disk I/O)
+Compares three evaluation approaches:
+1. NetworkX: Load LMDB,  NetworkX Graph, Python greedy (baseline)
+2. FastGraph C++: Load LMDB, CSR format, C++ greedy (optimized)
+3. No-graph: Generate nodes, compute LCS neighbors on-the-fly
 
-Measures both time and peak memory usage to help decide which approach fits your constraints.
-
-Outputs (saved incrementally after each n):
-- profile_s<s>_q<q>_<type>_<timestamp>.json  - Full results (programmatic access)
-- profile_s<s>_q<q>_<type>_<timestamp>.txt   - Human-readable summary
-
-Usage Examples:
-    # Default: quaternary IDS (q=4, type=ids), saves to auto-generated filename
-    python profile_evaluations.py
-
-    # Binary deletion codes
-    python profile_evaluations.py --q 2 --graph-type deletion
-
-    # Quaternary deletion codes
-    python profile_evaluations.py --q 4 --graph-type deletion
-
-    # IDS codes (binary)
-    python profile_evaluations.py --q 2 --graph-type ids
-
-    # Specific n values
-    python profile_evaluations.py --n-values 6,7,8,9
-
-    # Custom output filename
-    python profile_evaluations.py --n-values 6,7,8 -o ./my_profile
-
-    # Console only (no file output)
-    python profile_evaluations.py --n-values 6,7,8 --no-output
-
-    # Only profile no-graph mode (skip graph loading)
-    python profile_evaluations.py --no-graph-only
-
-    # Only profile graph-based mode (skip no-graph)
-    python profile_evaluations.py --graph-only
-
-    # Custom graph directory
-    python profile_evaluations.py --graph-dir /path/to/graphs
-
-Arguments:
-    --n-values        Comma-separated n values (default: 6,7,8,9,10,11)
-    --s               Number of errors to correct (default: 1)
-    --q               Alphabet size: 2=binary, 4=quaternary (default: 4)
-    --graph-type      Graph type: 'deletion' or 'ids' (default: ids)
-    --graph-dir       Directory with LMDB graphs (default: /mnt/Graphs)
-    --output, -o      Output file path (default: auto-generated with timestamp)
-    --no-output       Disable file output (console only)
-    --no-graph-only   Only profile no-graph mode
-    --graph-only      Only profile graph-based mode
-
-Interpretation:
-    TIMING:
-    - Graph-based wins for repeated evaluations (load once, evaluate many)
-    - No-graph wins for single evaluation if graph loading is slow
-
-    MEMORY:
-    - Graph-based: High memory (stores full adjacency list)
-    - No-graph: Low memory (just node strings + temporary sets)
-    - Use no-graph if memory-constrained
+Usage:
+    python profile_evaluations.py                           # All methods, IDS q=4
+    python profile_evaluations.py --q 2 --graph-type deletion  # Deletion binary
+    python profile_evaluations.py --fastgraph-only          # Only FastGraph C++
+    python profile_evaluations.py --n-values 6,7,8 --no-output  # Specific n, no file
 """
 
 import argparse
@@ -112,6 +61,13 @@ try:
 except ImportError:
     HAS_GRAPH_DEPS = False
 
+# Optional import for C++ FastGraph
+try:
+    from disfun.utils.fast_graph import FastGraph, load_graph_from_lmdb, USING_CPP
+    HAS_FASTGRAPH = USING_CPP
+except ImportError:
+    HAS_FASTGRAPH = False
+
 
 # =============================================================================
 # Priority functions (simple O(1) for fair comparison)
@@ -122,7 +78,61 @@ def priority_simple(node, *args):
 
 
 # =============================================================================
-# Graph-based evaluation (loads pre-computed graph)
+# C++ FastGraph evaluation (memory-efficient CSR format)
+# =============================================================================
+def load_fastgraph_with_memory(graph_db_path):
+    """Load graph using C++ FastGraph. Returns (G, peak_memory_mb, mem_after)."""
+    gc.collect()
+    mem_before = get_process_memory_mb()
+    tracemalloc.start()
+
+    G = load_graph_from_lmdb(graph_db_path)
+
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    mem_after = get_process_memory_mb()
+    process_delta = mem_after - mem_before
+    peak_mb = max(peak / (1024 * 1024), process_delta)
+
+    return G, peak_mb, mem_after
+
+
+def solve_with_fastgraph(G, n, s):
+    """Evaluate using C++ FastGraph with built-in greedy solver. Returns (score, timings)."""
+    process = psutil.Process(os.getpid())
+
+    cpu_start = process.cpu_times()
+    wall_start = time.perf_counter()
+
+    # Priority computation
+    t0 = time.perf_counter()
+    priorities = {node: priority_simple(node) for node in G.nodes}
+    t_priority = time.perf_counter() - t0
+
+    # C++ greedy independent set (includes sort internally)
+    t0 = time.perf_counter()
+    independent_set = G.greedy_independent_set(priorities)
+    t_greedy = time.perf_counter() - t0
+
+    cpu_end = process.cpu_times()
+    wall_end = time.perf_counter()
+
+    wall_time = wall_end - wall_start
+    cpu_time = (cpu_end.user - cpu_start.user) + (cpu_end.system - cpu_start.system)
+
+    return len(independent_set), {
+        'priority': t_priority,
+        'sort': 0.0,  # Included in greedy
+        'greedy': t_greedy,
+        'total': t_priority + t_greedy,
+        'cpu': cpu_time,
+        'wall': wall_time,
+    }
+
+
+# =============================================================================
+# NetworkX Graph-based evaluation (loads pre-computed graph)
 # =============================================================================
 def load_graph_with_memory(graph_db_path):
     """Load graph from LMDB database into NetworkX Graph. Returns (G, peak_memory_mb)."""
@@ -293,11 +303,11 @@ def solve_no_graph(n, s, q):
 # =============================================================================
 # Main profiling
 # =============================================================================
-def profile_comparison(n_values, s, q, graph_type, graph_dir, skip_graph=False, skip_no_graph=False, output_path=None):
-    """Profile both approaches and compare."""
+def profile_comparison(n_values, s, q, graph_type, graph_dir, skip_graph=False, skip_no_graph=False, skip_fastgraph=False, output_path=None):
+    """Profile all approaches and compare."""
 
     print("=" * 90)
-    print("  Evaluation Profiling: Graph-based vs No-Graph")
+    print("  Evaluation Profiling: NetworkX vs FastGraph (C++) vs No-Graph")
     print("=" * 90)
     print(f"  Parameters: s={s}, q={q}, type={graph_type}")
     print(f"  Graph directory: {graph_dir}")
@@ -355,18 +365,67 @@ def profile_comparison(n_values, s, q, graph_type, graph_dir, skip_graph=False, 
                     'process_memory_mb': mem_after_load,
                 }
 
-                # Free the graph to not affect no-graph memory measurement
+                # Free the graph to not affect other memory measurements
                 del G
                 gc.collect()
             else:
-                print(f"\n[GRAPH-BASED] Graph not found for n={n}")
+                print(f"\n[NETWORKX] Graph not found for n={n}")
                 result['graph'] = None
         elif skip_graph:
-            print(f"\n[GRAPH-BASED] Skipped (--no-graph-only)")
+            print(f"\n[NETWORKX] Skipped (--skip-networkx)")
             result['graph'] = None
         else:
-            print(f"\n[GRAPH-BASED] Skipped (missing lmdb/networkx)")
+            print(f"\n[NETWORKX] Skipped (missing lmdb/networkx)")
             result['graph'] = None
+
+        # --- C++ FastGraph evaluation ---
+        if not skip_fastgraph and HAS_FASTGRAPH:
+            path = get_graph_path(graph_type, s, n, q, graph_dir=graph_dir)
+
+            if path:
+                print(f"\n[FASTGRAPH C++] Loading: {path}")
+
+                # Time graph loading with memory tracking
+                t0 = time.perf_counter()
+                G, peak_mem_load, mem_after_load = load_fastgraph_with_memory(path)
+                t_load = time.perf_counter() - t0
+
+                num_edges = G.number_of_edges()
+                print(f"  Graph load: {format_time(t_load)} ({num_edges:,} edges)")
+                print(f"  Peak memory (load): {format_memory(peak_mem_load)}")
+                print(f"  Process memory after load: {format_memory(mem_after_load)}")
+
+                # Time evaluation
+                score, timings = solve_with_fastgraph(G, n, s)
+
+                print(f"  Evaluation: priority={format_time(timings['priority'])}, "
+                      f"greedy={format_time(timings['greedy'])}")
+                print(f"  Total (eval only): {format_time(timings['total'])}")
+                print(f"  Total (with load): {format_time(t_load + timings['total'])}")
+                print(f"  Score: {score}")
+
+                result['fastgraph'] = {
+                    'load': t_load,
+                    'eval': timings['total'],
+                    'total': t_load + timings['total'],
+                    'score': score,
+                    'edges': num_edges,
+                    'peak_memory_mb': peak_mem_load,
+                    'process_memory_mb': mem_after_load,
+                }
+
+                # Free the graph to not affect other memory measurements
+                del G
+                gc.collect()
+            else:
+                print(f"\n[FASTGRAPH C++] Graph not found for n={n}")
+                result['fastgraph'] = None
+        elif skip_fastgraph:
+            print(f"\n[FASTGRAPH C++] Skipped (--skip-fastgraph)")
+            result['fastgraph'] = None
+        else:
+            print(f"\n[FASTGRAPH C++] Skipped (C++ module not available)")
+            result['fastgraph'] = None
 
         # --- No-graph evaluation ---
         if not skip_no_graph:
@@ -413,64 +472,47 @@ def profile_comparison(n_values, s, q, graph_type, graph_dir, skip_graph=False, 
             writer.add_result(result)
 
     # --- Summary ---
-    print("\n" + "=" * 110)
+    print("\n" + "=" * 130)
     print("  TIMING SUMMARY")
-    print("=" * 110)
-    print(f"{'n':>4} | {'Nodes':>10} | {'Graph (load+eval)':>22} | {'No-Graph':>22} | {'Winner':>12} | {'Speedup':>8}")
+    print("=" * 130)
+    print(f"{'n':>4} | {'Nodes':>10} | {'NetworkX':>18} | {'FastGraph C++':>18} | {'No-Graph':>18} | {'Best':>12}")
+    print("-" * 130)
+
+    for r in results:
+        n = r['n']
+        nodes = r['num_nodes']
+
+        nx_time = format_time(r['graph']['total']) if r.get('graph') else "N/A"
+        fg_time = format_time(r['fastgraph']['total']) if r.get('fastgraph') else "N/A"
+        ng_time = format_time(r['no_graph']['total']) if r.get('no_graph') else "N/A"
+
+        # Find best
+        times = []
+        if r.get('graph'): times.append(('NetworkX', r['graph']['total']))
+        if r.get('fastgraph'): times.append(('FastGraph', r['fastgraph']['total']))
+        if r.get('no_graph'): times.append(('No-Graph', r['no_graph']['total']))
+        best = min(times, key=lambda x: x[1])[0] if times else "-"
+
+        print(f"{n:>4} | {nodes:>10,} | {nx_time:>18} | {fg_time:>18} | {ng_time:>18} | {best:>12}")
+
+    # --- Memory Summary ---
+    print("\n" + "=" * 100)
+    print("  MEMORY SUMMARY (Peak Memory Usage in GiB)")
+    print("=" * 100)
+    print(f"{'n':>4} | {'Nodes':>10} | {'NetworkX':>15} | {'FastGraph C++':>15} | {'No-Graph':>15}")
     print("-" * 100)
 
     for r in results:
         n = r['n']
         nodes = r['num_nodes']
 
-        if r.get('graph'):
-            graph_time = format_time(r['graph']['total'])
-        else:
-            graph_time = "N/A"
+        nx_mem = format_memory(r['graph']['peak_memory_mb']) if r.get('graph') and 'peak_memory_mb' in r['graph'] else "N/A"
+        fg_mem = format_memory(r['fastgraph']['peak_memory_mb']) if r.get('fastgraph') and 'peak_memory_mb' in r['fastgraph'] else "N/A"
+        ng_mem = format_memory(r['no_graph']['peak_memory_mb']) if r.get('no_graph') and 'peak_memory_mb' in r['no_graph'] else "N/A"
 
-        if r.get('no_graph'):
-            no_graph_time = format_time(r['no_graph']['total'])
-        else:
-            no_graph_time = "N/A"
+        print(f"{n:>4} | {nodes:>10,} | {nx_mem:>15} | {fg_mem:>15} | {ng_mem:>15}")
 
-        winner = r.get('winner', '-')
-        speedup = f"{r.get('speedup', 0):.1f}x" if r.get('speedup') else "-"
-
-        print(f"{n:>4} | {nodes:>10,} | {graph_time:>22} | {no_graph_time:>22} | {winner:>12} | {speedup:>8}")
-
-    # --- Memory Summary ---
-    print("\n" + "=" * 110)
-    print("  MEMORY SUMMARY (Peak Memory Usage in GiB)")
-    print("=" * 110)
-    print(f"{'n':>4} | {'Nodes':>10} | {'Graph-based':>15} | {'No-Graph':>15} | {'Ratio':>10}")
-    print("-" * 70)
-
-    for r in results:
-        n = r['n']
-        nodes = r['num_nodes']
-
-        if r.get('graph') and 'peak_memory_mb' in r['graph']:
-            graph_mem = format_memory(r['graph']['peak_memory_mb'])
-        else:
-            graph_mem = "N/A"
-
-        if r.get('no_graph') and 'peak_memory_mb' in r['no_graph']:
-            no_graph_mem = format_memory(r['no_graph']['peak_memory_mb'])
-        else:
-            no_graph_mem = "N/A"
-
-        # Calculate ratio
-        if (r.get('graph') and 'peak_memory_mb' in r['graph'] and
-            r.get('no_graph') and 'peak_memory_mb' in r['no_graph'] and
-            r['no_graph']['peak_memory_mb'] > 0):
-            ratio = r['graph']['peak_memory_mb'] / r['no_graph']['peak_memory_mb']
-            ratio_str = f"{ratio:.1f}x"
-        else:
-            ratio_str = "-"
-
-        print(f"{n:>4} | {nodes:>10,} | {graph_mem:>15} | {no_graph_mem:>15} | {ratio_str:>10}")
-
-    print("=" * 110)
+    print("=" * 100)
 
     return results
 
@@ -526,55 +568,46 @@ class ResultsWriter:
 
             # Timing summary
             f.write("TIMING SUMMARY\n")
-            f.write("-" * 100 + "\n")
-            f.write(f"{'n':>4} | {'Nodes':>12} | {'Graph':>22} | {'No-Graph':>22} | {'Winner':>12} | {'Speedup':>8}\n")
-            f.write("-" * 100 + "\n")
+            f.write("-" * 120 + "\n")
+            f.write(f"{'n':>4} | {'Nodes':>12} | {'NetworkX':>18} | {'FastGraph C++':>18} | {'No-Graph':>18} | {'Best':>12}\n")
+            f.write("-" * 120 + "\n")
 
             for r in self.results:
                 n = r['n']
                 nodes = r['num_nodes']
 
-                graph_time = format_time(r['graph']['total']) if r.get('graph') else "N/A"
-                no_graph_time = format_time(r['no_graph']['total']) if r.get('no_graph') else "N/A"
-                winner = r.get('winner', '-')
-                speedup = f"{r.get('speedup', 0):.1f}x" if r.get('speedup') else "-"
+                nx_time = format_time(r['graph']['total']) if r.get('graph') else "N/A"
+                fg_time = format_time(r['fastgraph']['total']) if r.get('fastgraph') else "N/A"
+                ng_time = format_time(r['no_graph']['total']) if r.get('no_graph') else "N/A"
 
-                f.write(f"{n:>4} | {nodes:>12,} | {graph_time:>22} | {no_graph_time:>22} | {winner:>12} | {speedup:>8}\n")
+                # Find best
+                times = []
+                if r.get('graph'): times.append(('NetworkX', r['graph']['total']))
+                if r.get('fastgraph'): times.append(('FastGraph', r['fastgraph']['total']))
+                if r.get('no_graph'): times.append(('No-Graph', r['no_graph']['total']))
+                best = min(times, key=lambda x: x[1])[0] if times else "-"
+
+                f.write(f"{n:>4} | {nodes:>12,} | {nx_time:>18} | {fg_time:>18} | {ng_time:>18} | {best:>12}\n")
 
             f.write("\n")
 
             # Memory summary
             f.write("MEMORY SUMMARY (Peak GiB)\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"{'n':>4} | {'Nodes':>12} | {'Graph (GiB)':>15} | {'No-Graph (GiB)':>15} | {'Ratio':>10}\n")
-            f.write("-" * 80 + "\n")
+            f.write("-" * 100 + "\n")
+            f.write(f"{'n':>4} | {'Nodes':>12} | {'NetworkX':>15} | {'FastGraph C++':>15} | {'No-Graph':>15}\n")
+            f.write("-" * 100 + "\n")
 
             for r in self.results:
                 n = r['n']
                 nodes = r['num_nodes']
 
-                if r.get('graph') and 'peak_memory_mb' in r['graph']:
-                    graph_mem = format_memory(r['graph']['peak_memory_mb'])
-                else:
-                    graph_mem = "N/A"
+                nx_mem = format_memory(r['graph']['peak_memory_mb']) if r.get('graph') and 'peak_memory_mb' in r['graph'] else "N/A"
+                fg_mem = format_memory(r['fastgraph']['peak_memory_mb']) if r.get('fastgraph') and 'peak_memory_mb' in r['fastgraph'] else "N/A"
+                ng_mem = format_memory(r['no_graph']['peak_memory_mb']) if r.get('no_graph') and 'peak_memory_mb' in r['no_graph'] else "N/A"
 
-                if r.get('no_graph') and 'peak_memory_mb' in r['no_graph']:
-                    no_graph_mem = format_memory(r['no_graph']['peak_memory_mb'])
-                else:
-                    no_graph_mem = "N/A"
+                f.write(f"{n:>4} | {nodes:>12,} | {nx_mem:>15} | {fg_mem:>15} | {ng_mem:>15}\n")
 
-                # Calculate ratio
-                if (r.get('graph') and 'peak_memory_mb' in r['graph'] and
-                    r.get('no_graph') and 'peak_memory_mb' in r['no_graph'] and
-                    r['no_graph']['peak_memory_mb'] > 0):
-                    ratio = r['graph']['peak_memory_mb'] / r['no_graph']['peak_memory_mb']
-                    ratio_str = f"{ratio:.1f}x"
-                else:
-                    ratio_str = "-"
-
-                f.write(f"{n:>4} | {nodes:>12,} | {graph_mem:>15} | {no_graph_mem:>15} | {ratio_str:>10}\n")
-
-            f.write("=" * 80 + "\n")
+            f.write("=" * 100 + "\n")
 
 
 def main():
@@ -593,10 +626,14 @@ def main():
                         help='Graph type (default: ids)')
     parser.add_argument('--graph-dir', default=DEFAULT_GRAPH_DIR,
                         help=f'Graph directory (default: {DEFAULT_GRAPH_DIR})')
-    parser.add_argument('--no-graph-only', action='store_true',
-                        help='Only profile no-graph mode (skip graph loading)')
-    parser.add_argument('--graph-only', action='store_true',
-                        help='Only profile graph-based mode (skip no-graph)')
+    parser.add_argument('--skip-networkx', action='store_true',
+                        help='Skip NetworkX profiling')
+    parser.add_argument('--skip-fastgraph', action='store_true',
+                        help='Skip FastGraph C++ profiling')
+    parser.add_argument('--skip-no-graph', action='store_true',
+                        help='Skip no-graph (on-the-fly LCS) profiling')
+    parser.add_argument('--fastgraph-only', action='store_true',
+                        help='Only profile FastGraph C++ mode')
     parser.add_argument('--output', '-o', type=str, default='auto',
                         help='Output file path for results (JSON format). '
                              'Also creates a .txt summary. Default: auto-generated filename')
@@ -606,6 +643,11 @@ def main():
     args = parser.parse_args()
 
     n_values = [int(x.strip()) for x in args.n_values.split(',')]
+
+    # Determine which modes to run
+    skip_graph = args.skip_networkx or args.fastgraph_only
+    skip_fastgraph = args.skip_fastgraph
+    skip_no_graph = args.skip_no_graph or args.fastgraph_only
 
     # Determine output path
     if args.no_output:
@@ -623,8 +665,9 @@ def main():
         q=args.q,
         graph_type=args.graph_type,
         graph_dir=args.graph_dir,
-        skip_graph=args.no_graph_only,
-        skip_no_graph=args.graph_only,
+        skip_graph=skip_graph,
+        skip_no_graph=skip_no_graph,
+        skip_fastgraph=skip_fastgraph,
         output_path=output_path,
     )
 

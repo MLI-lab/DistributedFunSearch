@@ -42,6 +42,13 @@ sudo systemctl start rabbitmq-server
 
 # 5. Install DistributedFunSearch
 pip install . # or pip install -e . for development mode
+
+# 6. Build FastGraph C++ module (optional, for graph problems)
+cd src/disfun/utils/_fast_graph_cpp_src
+pip install pybind11 lmdb
+python setup.py build_ext --inplace
+cp fast_graph_cpp*.so ../
+cd ../../../..
 ```
 
 See [Docker Setup](docs/DOCKER_SETUP.md) for container based installation or [Cluster Setup](docs/CLUSTER_SETUP.md) for cluster execution.

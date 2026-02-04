@@ -1,90 +1,33 @@
+"""Fork-based sandbox for executing LLM-generated code.
+
+Uses os.fork() for process isolation. Child inherits parent's memory (copy-on-write),
+so cached graphs are available without reload. Child runs evaluation, writes result
+to pipe, exits. Parent waits with timeout.
+
+This is much faster than subprocess-based sandboxing because:
+1. Fork is ~1ms vs subprocess ~50ms
+2. Child already has graphs in memory (no LMDB reload)
+3. No pickle serialization of function or input needed
+"""
+
 import ast
 import os
-import pathlib
-from typing import Any
+import signal
+import resource
 import time
-import subprocess
 import cloudpickle
-import hashlib
-import psutil
-import shutil
-
-
-# Define the main container path
-CONTAINER_MAIN = (pathlib.Path(__file__).parent / "container" / "container_main.py").absolute()
-
-
-def ensure_dir_exists(path: pathlib.Path) -> pathlib.Path:
-    """Ensure the directory exists."""
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def cleanup_orphaned_sandbox_processes(logger=None, max_age_seconds=300):
-    """Kill orphaned container_main.py processes.
-
-    Args:
-        logger: Optional logger for status messages
-        max_age_seconds: Only kill processes older than this (default 300s).
-                         Set to 0 or None to kill all sandbox processes regardless of age.
-
-    Returns the number of processes killed.
-    """
-    killed_count = 0
-    try:
-        for proc in psutil.process_iter(['pid', 'cmdline', 'cpu_percent', 'create_time']):
-            try:
-                cmdline = proc.info.get('cmdline')
-                if not cmdline:
-                    continue
-
-                # Check if this is a container_main.py process
-                if 'container_main.py' in ' '.join(cmdline):
-                    # Check age if max_age_seconds is set
-                    if max_age_seconds:
-                        uptime = time.time() - proc.info['create_time']
-                        if uptime <= max_age_seconds:
-                            continue
-                        if logger:
-                            logger.warning(f"Killing orphaned sandbox process PID {proc.info['pid']} (uptime: {uptime:.0f}s)")
-                    proc.kill()
-                    killed_count += 1
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-    except Exception as e:
-        if logger:
-            logger.error(f"Error during orphaned process cleanup: {e}")
-
-    return killed_count
-
-
-def _kill_process_tree(process):
-    """Kill a process and its entire process group.
-
-    Attempts to kill via process group first, then falls back to direct kill.
-    """
-    if process is None:
-        return
-
-    try:
-        os.killpg(os.getpgid(process.pid), 9)
-    except (ProcessLookupError, PermissionError):
-        pass
-
-    try:
-        process.kill()
-        process.wait(timeout=1)
-    except Exception:
-        pass
+    """No-op. Fork-based sandbox children are reaped by parent via waitpid."""
+    return 0
 
 
 class ExternalProcessSandbox:
-    """Sandbox that executes generated code in a separate Python process.
+    """Sandbox using fork() for fast, isolated execution.
 
-    Uses subprocess isolation with process groups for proper cleanup on timeout.
-    Caches compiled base namespace (imports, helpers) and only recompiles
-    the priority function for each evaluation.
+    Child process inherits parent's memory via copy-on-write, so graphs
+    cached in the evaluator are available without reloading.
     """
 
     # Cache for compiled base namespace (spec without priority), per process
@@ -93,20 +36,13 @@ class ExternalProcessSandbox:
 
     def __init__(
         self,
-        base_path: pathlib.Path,
         timeout_secs: int = 30,
-        python_path: str = "python",
-        local_id=None,
-        graph_dir=None,
+        graph_dir: str = None,
         memory_limit_gb: float = 1.0,
     ):
-        self.local_id = local_id
-        self.output_path = ensure_dir_exists(pathlib.Path(base_path) / f"sandbox{self.local_id}")
         self.timeout_secs = timeout_secs
-        self.python_path = python_path
         self.graph_dir = graph_dir
         self.memory_limit_gb = memory_limit_gb
-        self.input_path = ensure_dir_exists(self.output_path / "inputs")
 
     @staticmethod
     def compile_code(program: str):
@@ -142,154 +78,121 @@ class ExternalProcessSandbox:
 
         return ExternalProcessSandbox._cached_namespace
 
-    def _exec(self, call_data_path: pathlib.Path, input_path: pathlib.Path, error_file_path: pathlib.Path) -> bool:
-        """Execute the Python container in a subprocess.
-
-        The container (CONTAINER_MAIN) executes the LLM generated method from prog.pickle
-        using input.pickle as input, writing the output to output.pickle.
-
-        Process group management ensures that if this process dies, all child processes are killed.
-        """
-        prog_path = call_data_path / "prog.pickle"
-        output_file = call_data_path / "output.pickle"
-
-        # Ensure directories exist
-        ensure_dir_exists(call_data_path)
-        ensure_dir_exists(input_path.parent)
-        ensure_dir_exists(error_file_path.parent)
-
-        # Construct the command
-        cmd = [
-            self.python_path,
-            str(CONTAINER_MAIN),
-            str(prog_path),
-            str(input_path),
-            str(output_file)
-        ]
-
-        process = None
-        try:
-            # Prepare environment variables
-            env = os.environ.copy()
-            if self.graph_dir:
-                env['GRAPH_DIR'] = str(self.graph_dir)
-            env['SANDBOX_MEMORY_LIMIT_GB'] = str(self.memory_limit_gb)
-
-            # Use Popen with start_new_session to create a new process group.
-            # This allows killing the entire process tree if needed.
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=os.getcwd(),
-                env=env,
-                start_new_session=True
-            )
-
-            # Wait for process with timeout
-            stdout, stderr = process.communicate(timeout=self.timeout_secs)
-
-            # Write stderr output to error file (includes debug info like graph file paths)
-            if stderr:
-                with open(error_file_path, "wb") as ef:
-                    ef.write(stderr)
-
-            return process.returncode == 0
-
-        except subprocess.TimeoutExpired:
-            _kill_process_tree(process)
-            return False
-
-        except Exception:
-            if process and process.poll() is None:
-                _kill_process_tree(process)
-            return False
-
-    def _hash_input(self, test_input) -> str:
-        """Hash the serialized input using SHA256.
-
-        This is more stable than Python's built in hash().
-        """
-        serialized = cloudpickle.dumps(test_input)
-        hash_obj = hashlib.sha256(serialized)
-        return hash_obj.hexdigest()
-
     def run(
         self,
         program: str,
         function_to_run: str,
         test_input,
-        timeout_seconds: int,
-        count: int
-    ) -> tuple[Any, bool, float, pathlib.Path, pathlib.Path, pathlib.Path]:
-        """Execute the function in a sandboxed environment.
+    ) -> tuple:
+        """Execute function in fork-based sandbox.
+
+        Child inherits parent's memory (including cached graphs) via copy-on-write.
+        Sets memory limits in child, runs evaluation, returns result via pipe.
 
         Returns:
-            result: The function result, or None if execution failed.
-            success: Boolean indicating whether execution succeeded.
-            cpu_time: CPU time measured in the sandbox.
-            output_path: Path to the output directory.
-            input_file: Path to the input file.
-            error_file: Path to the error file.
+            (result, success, cpu_time)
         """
-        call_data_folder = ensure_dir_exists((self.output_path / f"call{count}").absolute())
-
-        # Create an input filename using SHA256 hash
-        input_hash = self._hash_input(test_input)
-        input_file = (self.input_path / f"{input_hash}.pickle").absolute()
-        ensure_dir_exists(self.input_path)
-
-        # Create the input file if it does not exist
-        if not input_file.exists():
-            with open(input_file, "wb") as f:
-                cloudpickle.dump(test_input, f)
-
-        error_file = self.output_path / f"stderr_{count}.log"
         try:
+            # Compile in parent - child will inherit compiled namespace
             namespace = ExternalProcessSandbox.compile_code(program)
-            prog_file = (call_data_folder / "prog.pickle").absolute()
-            with open(prog_file, "wb+") as f:
-                cloudpickle.dump(namespace[function_to_run], f)
-
-            retcode = self._exec(call_data_folder, input_file, error_file)
-            if not retcode:
-                return None, False, 0.0, self.output_path, input_file, error_file
-
-            output_file = call_data_folder / "output.pickle"
-            with open(output_file, "rb") as f:
-                result_data = cloudpickle.load(f)
-                result = result_data.get("result", None)
-                cpu_time = result_data.get("cpu_time", 0.0)
-                return result, True, cpu_time, self.output_path, input_file, error_file
+            func = namespace[function_to_run]
         except Exception:
-            return None, False, 0.0, self.output_path, input_file, error_file
+            return None, False, 0.0
 
-    def cleanup_call_directories(self, count: int):
-        """Clean up call directory after evaluation to save disk space.
+        # Create pipe for result communication
+        read_fd, write_fd = os.pipe()
 
-        Removes the call{count} directory including prog.pickle and output.pickle.
-        Also removes stderr logs. Input files are kept (reused via hash).
-        """
-        try:
-            call_data_folder = self.output_path / f"call{count}"
-            if call_data_folder.exists():
-                shutil.rmtree(call_data_folder, ignore_errors=True)
-            # Also remove stderr log file
-            stderr_file = self.output_path / f"stderr_{count}.log"
-            if stderr_file.exists():
-                stderr_file.unlink()
-        except Exception:
-            # Do not fail evaluation if cleanup fails
-            pass
+        pid = os.fork()
+
+        if pid == 0:
+            # === CHILD PROCESS ===
+            os.close(read_fd)
+
+            try:
+                # Set memory limit
+                mem_bytes = int(self.memory_limit_gb * 1024 * 1024 * 1024)
+                try:
+                    resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+                except (ValueError, resource.error):
+                    pass
+
+                # Run evaluation
+                start_cpu = time.process_time()
+                result = func(test_input, self.graph_dir)
+                cpu_time = time.process_time() - start_cpu
+
+                # Serialize and write result
+                result_bytes = cloudpickle.dumps({
+                    "result": result,
+                    "cpu_time": cpu_time
+                })
+                os.write(write_fd, result_bytes)
+                os.close(write_fd)
+                os._exit(0)
+
+            except Exception:
+                os._exit(1)
+
+        else:
+            # === PARENT PROCESS ===
+            os.close(write_fd)
+
+            try:
+                # Wait for child with timeout
+                deadline = time.time() + self.timeout_secs
+                child_done = False
+
+                while time.time() < deadline:
+                    pid_result, status = os.waitpid(pid, os.WNOHANG)
+                    if pid_result != 0:
+                        child_done = True
+                        break
+                    time.sleep(0.01)
+
+                if not child_done:
+                    # Timeout - kill child
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                        os.waitpid(pid, 0)
+                    except (ProcessLookupError, ChildProcessError):
+                        pass
+                    os.close(read_fd)
+                    return None, False, 0.0
+
+                # Check exit status
+                if not (os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0):
+                    os.close(read_fd)
+                    return None, False, 0.0
+
+                # Read result from pipe
+                result_chunks = []
+                while True:
+                    chunk = os.read(read_fd, 65536)
+                    if not chunk:
+                        break
+                    result_chunks.append(chunk)
+                os.close(read_fd)
+
+                if not result_chunks:
+                    return None, False, 0.0
+
+                result_bytes = b''.join(result_chunks)
+                result_data = cloudpickle.loads(result_bytes)
+                return result_data["result"], True, result_data["cpu_time"]
+
+            except Exception:
+                # Clean up child if still running
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    os.waitpid(pid, 0)
+                except (ProcessLookupError, ChildProcessError):
+                    pass
+                try:
+                    os.close(read_fd)
+                except OSError:
+                    pass
+                return None, False, 0.0
 
     def cleanup_all(self):
-        """Clean up the entire sandbox directory for this evaluator.
-
-        Call this during evaluator shutdown.
-        """
-        try:
-            if self.output_path.exists():
-                shutil.rmtree(self.output_path, ignore_errors=True)
-        except Exception:
-            # Do not fail if cleanup fails
-            pass
+        """No-op. Fork-based sandbox doesn't create files."""
+        pass

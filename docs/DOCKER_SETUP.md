@@ -37,6 +37,16 @@ cd /workspace/DistributedFunSearch
 pip install .  # or pip install -e . for development mode
 ```
 
+**Build FastGraph C++ module (optional, for graph problems):**
+
+```bash
+cd src/disfun/utils/_fast_graph_cpp_src
+pip install pybind11 lmdb
+python setup.py build_ext --inplace
+cp fast_graph_cpp*.so ../
+cd ../../../..
+```
+
 **Install C compiler (required for local models):**
 
 If using local models with vLLM, install gcc/g++ (required for Triton to compile CUDA kernels):

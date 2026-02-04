@@ -2,59 +2,36 @@
 """
 Random Greedy Independent Set Baseline
 
-Runs multiple trials with different random seeds, building maximal independent
-sets by shuffling node order and greedily selecting nodes.
+Runs random greedy trials to find maximal independent sets. Uses C++ FastGraph
+for speedup when --graph-dir is provided (recommended).
 
-Outputs:
-- greedy_<type>_s<s>_n<n>_q<q>_best.txt  - Best solution found (one codeword per line)
-- greedy_summary.json                     - Statistics for all n values
-
-Usage Examples:
-    # Binary deletion codes (default: q=2, type=deletion)
-    python random_greedy.py --n-values 6,7,8,9,10 --trials 100000
-
-    # Quaternary deletion codes
-    python random_greedy.py --n-values 6,7,8,9,10 --q 4 --graph-dir /mnt/Graphs
-
-    # IDS (Insertion/Deletion/Substitution) codes
-    python random_greedy.py --n-values 6,7,8,9,10 --graph-type ids --graph-dir /mnt/Graphs
-
-    # Quaternary IDS codes
-    python random_greedy.py --n-values 6,7,8,9,10,11 --q 4 --graph-type ids \\
-        --graph-dir /mnt/Graphs --trials 100000
-
-    # Specify number of parallel workers
-    python random_greedy.py --n-values 6,7,8 --workers 16
-
-    # Custom output directory
-    python random_greedy.py --n-values 6,7,8 --output ./my_results
-
-    # Custom random seed
-    python random_greedy.py --n-values 6,7,8 --seed 12345
-
-    # Memory-efficient mode for large graphs (n >= 15)
-    python random_greedy.py --n-values 15,16,17 --memory-efficient --graph-dir /mnt/Graphs
-
-    # Build graphs on-the-fly (no pre-computed graphs needed, slower)
-    python random_greedy.py --n-values 6,7,8 --trials 1000
+Usage:
+    python random_greedy.py --n-values 6,7,8,9,10 --q 4 --graph-type ids --graph-dir /mnt/Graphs
 
 Arguments:
     --n-values          Comma-separated n values (required)
     --s                 Number of errors to correct (default: 1)
     --q                 Alphabet size: 2=binary, 4=quaternary (default: 2)
     --graph-type        Graph type: 'deletion' or 'ids' (default: deletion)
-    --graph-dir         Directory with pre-computed LMDB graphs (default: None, builds on-the-fly)
+    --graph-dir         Directory with LMDB graphs. Enables C++ mode (fastest)
     --trials            Number of random trials per n (default: 100000)
     --seed              Base random seed (default: 42)
-    --workers, -w       Number of parallel workers (default: cpu_count)
-    --output, -o        Output directory for solutions (default: ./greedy_results)
-    --memory-efficient  Use LMDB-backed mode for large graphs (auto for n >= 15)
+    --output, -o        Output directory (default: ./greedy_results)
 
-Graph Path Structure (with --graph-dir /mnt/Graphs):
-    /mnt/Graphs/deletion/binary/s1/graph_d_s1_n10_q2.lmdb
-    /mnt/Graphs/deletion/quaternary/s1/graph_d_s1_n10_q4.lmdb
-    /mnt/Graphs/ids/binary/s1/graph_ids_s1_n10_q2.lmdb
-    /mnt/Graphs/ids/quaternary/s1/graph_ids_s1_n10_q4.lmdb
+    Python-only options (ignored in C++ mode):
+    --workers, -w       Parallel workers (default: cpu_count)
+    --no-cpp            Disable C++ mode, use Python multiprocessing
+    --memory-efficient  LMDB-backed Python mode for huge graphs
+
+Outputs:
+    greedy_<type>_s<s>_n<n>_q<q>_best.txt  - Best solution
+    greedy_summary.json                     - Statistics
+
+Performance (C++ mode with --graph-dir):
+    IDS n=8 (65k nodes):   100k trials in ~4 min
+    IDS n=9 (262k nodes):  100k trials in ~15 min
+    IDS n=10 (1M nodes):   100k trials in ~1 hour
+    IDS n=11 (4M nodes):   100k trials in ~4-5 hours (includes 75 min load time)
 """
 
 import argparse
@@ -75,6 +52,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.helpers import are_neighbors
 from utils.graph_paths import get_graph_path
+
+# Try to import C++ FastGraph for massive speedup
+try:
+    from disfun.utils.fast_graph import load_graph_from_lmdb as load_fastgraph
+    HAS_FASTGRAPH = True
+except ImportError:
+    HAS_FASTGRAPH = False
 
 
 # Global variables for multiprocessing (initialized per worker)
@@ -358,6 +342,43 @@ def run_trials_lmdb(
     return sizes, best_size, best_solution
 
 
+def run_trials_cpp(
+    graph_path: str,
+    num_trials: int,
+    base_seed: int,
+) -> Tuple[List[int], int, List[str]]:
+    """
+    Run multiple random greedy trials using C++ FastGraph (fastest method).
+
+    All trials run in C++ with no Python overhead. Much faster than Python multiprocessing.
+
+    Args:
+        graph_path: Path to LMDB graph database
+        num_trials: Number of random trials to run
+        base_seed: Base random seed (each trial uses base_seed + i)
+
+    Returns:
+        (sizes, best_size, best_solution)
+    """
+    if not HAS_FASTGRAPH:
+        raise ImportError("C++ FastGraph not available. Install with: pip install -e .")
+
+    # Load graph using C++ FastGraph
+    G = load_fastgraph(graph_path)
+
+    # Run all trials in C++ (returns list of sizes)
+    print(f"  Running {num_trials:,} trials in C++...")
+    sizes = list(G.random_greedy_trials(num_trials, base_seed))
+
+    # Find best and get its solution
+    best_size = max(sizes)
+    best_idx = sizes.index(best_size)
+    best_seed = base_seed + best_idx
+    best_solution = list(G.random_greedy_independent_set(best_seed))
+
+    return sizes, best_size, best_solution
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Random greedy independent set baseline',
@@ -385,6 +406,11 @@ def main():
     parser.add_argument('--memory-efficient', action='store_true',
                         help='Use LMDB-backed mode (slower but uses much less memory). '
                              'Auto-enabled for n >= 15 with pre-computed graphs.')
+    parser.add_argument('--cpp', action='store_true',
+                        help='Use C++ FastGraph for massive speedup (recommended). '
+                             'Requires pre-computed LMDB graphs.')
+    parser.add_argument('--no-cpp', action='store_true',
+                        help='Disable C++ even if available (use Python multiprocessing).')
 
     args = parser.parse_args()
 
@@ -393,6 +419,9 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     num_workers = args.workers or cpu_count()
 
+    # Determine if C++ will be used
+    use_cpp = (args.cpp or HAS_FASTGRAPH) and not args.no_cpp and args.graph_dir
+
     print("=" * 70)
     print("  Random Greedy Baseline")
     print("=" * 70)
@@ -400,8 +429,13 @@ def main():
     print(f"n values: {n_values}")
     print(f"s={args.s}, q={args.q}, type={args.graph_type}")
     print(f"Trials per n: {args.trials}")
-    print(f"Workers: {num_workers}")
+    if use_cpp:
+        print(f"Mode: C++ FastGraph (fastest)")
+    else:
+        print(f"Workers: {num_workers}")
     print(f"Output: {output_dir}")
+    if HAS_FASTGRAPH and not use_cpp:
+        print(f"Note: C++ FastGraph available but not used. Add --graph-dir to enable.")
     print()
 
     results = []
@@ -411,50 +445,50 @@ def main():
         print(f"Processing n={n}")
         print("=" * 60)
 
-        # Determine if we should use memory-efficient mode
+        # Determine mode: C++ (fastest) > LMDB-backed > in-memory
+        use_cpp = (args.cpp or HAS_FASTGRAPH) and not args.no_cpp and args.graph_dir
         use_lmdb_mode = args.memory_efficient or (args.graph_dir and n >= 15)
         graph_path = None
 
-        # Load or build graph
+        # Get graph path if using pre-computed graphs
         if args.graph_dir:
             graph_path = get_graph_path(args.graph_type, args.s, n, args.q, graph_dir=args.graph_dir)
 
-            if graph_path:
-                if use_lmdb_mode:
-                    # Memory-efficient: only load node names, not full graph
-                    print(f"Using LMDB-backed mode (memory efficient): {graph_path}")
-                    graph = LMDBGraph(graph_path)
-                    nodes = graph.get_nodes()
-                    graph.close()
-                    neighbors = None  # Not loaded into memory
-                    print(f"Nodes: {len(nodes)}")
-                else:
-                    print(f"Loading graph into memory: {graph_path}")
-                    neighbors = load_graph_from_lmdb(graph_path)
-                    nodes = None
-                    print(f"Nodes: {len(neighbors)}")
+        # Run trials with appropriate method
+        if use_cpp and graph_path and HAS_FASTGRAPH:
+            # C++ FastGraph: fastest method
+            print(f"Using C++ FastGraph (fastest): {graph_path}")
+            start_time = time.time()
+            sizes, best_size, best_solution = run_trials_cpp(graph_path, args.trials, args.seed)
+        elif graph_path:
+            if use_lmdb_mode:
+                # Memory-efficient: only load node names, not full graph
+                print(f"Using LMDB-backed mode (memory efficient): {graph_path}")
+                graph = LMDBGraph(graph_path)
+                nodes = graph.get_nodes()
+                graph.close()
+                print(f"  Nodes: {len(nodes)}")
+                print(f"  Running {args.trials} trials with {num_workers} workers...")
+                start_time = time.time()
+                sizes, best_size, best_solution = run_trials_lmdb(graph_path, nodes, args.trials, args.seed, num_workers)
             else:
-                print(f"Graph not found at {graph_path}, building on-the-fly...")
-                nodes = [''.join(seq) for seq in itertools.product(map(str, range(args.q)), repeat=n)]
-                neighbors = build_neighbor_dict(nodes, n, args.s)
-                use_lmdb_mode = False
-                graph_path = None
-                print(f"Nodes: {len(neighbors)}")
+                print(f"Loading graph into memory: {graph_path}")
+                neighbors = load_graph_from_lmdb(graph_path)
+                print(f"  Nodes: {len(neighbors)}")
+                print(f"  Running {args.trials} trials with {num_workers} workers...")
+                start_time = time.time()
+                sizes, best_size, best_solution = run_trials(neighbors, args.trials, args.seed, num_workers)
         else:
-            print("Building graph on-the-fly...")
+            # Build graph on-the-fly (no pre-computed graph)
+            if graph_path is None and args.graph_dir:
+                print(f"Graph not found, building on-the-fly...")
+            else:
+                print("Building graph on-the-fly...")
             nodes = [''.join(seq) for seq in itertools.product(map(str, range(args.q)), repeat=n)]
             print(f"  Nodes: {len(nodes)}")
             neighbors = build_neighbor_dict(nodes, n, args.s)
-            use_lmdb_mode = False
             print(f"  Graph built")
-
-        # Run trials
-        if use_lmdb_mode:
-            print(f"Running {args.trials} trials with {num_workers} workers (LMDB-backed)...")
-            start_time = time.time()
-            sizes, best_size, best_solution = run_trials_lmdb(graph_path, nodes, args.trials, args.seed, num_workers)
-        else:
-            print(f"Running {args.trials} trials with {num_workers} workers (in-memory)...")
+            print(f"  Running {args.trials} trials with {num_workers} workers...")
             start_time = time.time()
             sizes, best_size, best_solution = run_trials(neighbors, args.trials, args.seed, num_workers)
         elapsed = time.time() - start_time

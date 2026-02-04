@@ -1,45 +1,15 @@
-"""Evaluation script for Deletions problem using NetworkX.
+"""Evaluation script for Deletions problem.
 
-This is the simpler version for LLMs as NetworkX allows direct node access without conversion.
-Slower than graph tool, but easier for LLMs to use correctly.
+Graph is pre-loaded by evaluator and passed via params. Uses FastGraph with
+NetworkX-compatible API: G.neighbors(node), G.degree(node), G.nodes
 """
 
-import os
 import hashlib
-import ujson as json
-import lmdb
-
-# Imports available to priority function (must match imports/networkx.txt)
-import networkx as nx
 import math
 import itertools
 from collections import Counter
 import numpy as np
 import random
-
-
-def load_graph(graph_db_path):
-    """Load graph from LMDB database into NetworkX Graph."""
-    # max_readers is concurrent read slots for parallel evaluators
-    env = lmdb.open(graph_db_path, readonly=True, lock=False, readahead=True, max_readers=126)
-
-    edges = []
-    nodes = []
-
-    with env.begin(buffers=True) as txn:
-        for key, value in txn.cursor():
-            node = bytes(key).decode()
-            nodes.append(node)
-            for neighbor in json.loads(bytes(value).decode()):
-                if node < neighbor:  # Add each edge only once
-                    edges.append((node, neighbor))
-
-    env.close()
-
-    G = nx.Graph()
-    G.add_nodes_from(nodes)
-    G.add_edges_from(edges)
-    return G
 
 
 def hash_priority_mapping(priorities, nodes):
@@ -49,35 +19,21 @@ def hash_priority_mapping(priorities, nodes):
 
 
 def evaluate(params, graph_dir):
-    # Support both old format (n, s, q) and new format (n, s, q, graph)
-    if len(params) == 4:
-        n, s, q, G = params
-    else:
-        n, s, q = params
-        G = None
-    independent_set, hash_value = solve(n, s, q, graph_dir, G)
+    n, s, q, G = params
+    independent_set, hash_value = solve(n, s, q, G)
     return (len(independent_set), hash_value)
 
 
-def solve(n, s, q, graph_dir, G=None):
-    """Find a large independent set using NetworkX."""
-    # Use pre-loaded graph if provided, otherwise load from disk
-    if G is None:
-        path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
-        G = load_graph(path)
-        # Freeze graph to protect against LLM modifications (instant, no copy needed).
-        # If LLM tries to modify G, it raises NetworkXError and evaluation fails.
-        # Note: Pre-loaded graphs are already frozen during startup.
-        nx.freeze(G)
-
-    # Seed random for deterministic evaluation (same code always gets same score)
+def solve(n, s, q, G):
+    """Find a large independent set."""
+    # Seed random for deterministic evaluation
     random.seed(1)
     np.random.seed(1)
 
-    # Compute priorities (G is frozen, read only)
+    # Compute priorities
     priorities = {node: priority(node, G, n, s) for node in G.nodes}
 
-    # Sort nodes by priority (descending), lexicographic tie breaking
+    # Sort nodes by priority descending, lexicographic tie breaking
     nodes_sorted = sorted(G.nodes, key=lambda x: (-priorities[x], x))
 
     # Greedy independent set construction
@@ -90,8 +46,7 @@ def solve(n, s, q, graph_dir, G=None):
         removed.add(node)
         removed.update(G.neighbors(node))
 
-    # Compute hash for deduplication (only for smallest n)
-    # Note: "n == start_n" gets replaced with actual value (e.g. "n == 6") at runtime by __main__.py
+    # Compute hash for deduplication only for smallest n
     hash_value = None
     if n == start_n:
         hash_value = hash_priority_mapping(priorities, G.nodes)
