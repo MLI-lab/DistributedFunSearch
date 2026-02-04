@@ -89,6 +89,7 @@ class EvaluatorConfig:
     max_workers: int = 2  # Parallel CPU processes per evaluator
     q: int = 4  # Alphabet size (2 for binary, 4 for DNA)
     graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
+    graph_prefix: str = "graph_ids"  # "graph_d" for deletions, "graph_ids" for IDS
     prefetch_count: int = 15
     sandbox_memory_limit_gb: float = 1.0
 
@@ -103,7 +104,7 @@ class PromptConfig:
 
     # FunSearch
     funsearch_template: str = "funsearch/templates/single_turn/thought.txt"
-    funsearch_problem_desc: str = "funsearch/templates/single_turn/thought.txt"
+    funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
     funsearch_string_hint: str | None = None  # e.g., "funsearch/problem_descriptions/string_hint.txt"
     funsearch_system_message: str | None = "funsearch/system_messages/single_turn/thought.txt" #"funsearch/system_messages/basic.txt"
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt

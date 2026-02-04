@@ -59,7 +59,7 @@ _graph_cache = {}
 _graph_cache_lock = Lock()
 
 
-def get_cached_graph(n, s, q, graph_dir):
+def get_cached_graph(n, s, q, graph_dir, graph_prefix="graph_d"):
     """Get graph from cache or load and cache it.
 
     Thread-safe. Forked children inherit the cached graphs.
@@ -70,9 +70,7 @@ def get_cached_graph(n, s, q, graph_dir):
         if key in _graph_cache:
             return _graph_cache[key]
 
-    # Build path: graph_dir/graph_d_s{s}_n{n}_q{q}.lmdb
-    graph_path = os.path.join(graph_dir, f"graph_d_s{s}_n{n}_q{q}.lmdb")
-
+    graph_path = os.path.join(graph_dir, f"{graph_prefix}_s{s}_n{n}_q{q}.lmdb")
     if not os.path.exists(graph_path):
         logger.warning(f"Graph not found: {graph_path}")
         return None
@@ -423,6 +421,7 @@ class Evaluator:
         self.prefetch_count = evaluator_config.prefetch_count
         self._conn = connection_manager
         self.graph_dir = evaluator_config.graph_dir
+        self.graph_prefix = getattr(evaluator_config, 'graph_prefix', 'graph_d')
 
         # Sandbox and thread pool for parallel evaluation.
         # Graphs are cached here. Forked children inherit via copy-on-write.
@@ -441,7 +440,7 @@ class Evaluator:
         Forked children inherit the cached graph via copy-on-write.
         """
         n, s, q = input_tuple[:3]
-        G = get_cached_graph(n, s, q, self.graph_dir)
+        G = get_cached_graph(n, s, q, self.graph_dir, self.graph_prefix)
         if G is not None:
             return (n, s, q, G)
         return input_tuple
