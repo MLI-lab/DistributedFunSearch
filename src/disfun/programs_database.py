@@ -878,7 +878,8 @@ class ProgramsDatabase:
             return [], np.array([])
 
         clusters = island['clusters']
-        scores = np.array([clusters[s]['score'] for s in signatures])
+        raw_scores = np.array([clusters[s]['score'] for s in signatures])
+        scores = raw_scores.copy()
 
         # Normalize scores relative to baseline for better softmax behavior (if enabled)
         # Skip for relative_difference mode (already uses its own baseline from config)
@@ -888,12 +889,14 @@ class ProgramsDatabase:
             self._baseline_score > 0 and
             self.evaluator_config.mode != "relative_difference"):
             scores = (scores - self._baseline_score) / self._baseline_score
+            logger.debug(f"Softmax normalization: raw={raw_scores.tolist()}, baseline={self._baseline_score}, normalized={scores.tolist()}")
 
         if temperature is None:
             temperature = self._compute_temperature(island)
 
         try:
             probs = _softmax(scores, temperature)
+            logger.debug(f"Softmax probabilities: temp={temperature:.4f}, probs={probs.tolist()}")
         except Exception as e:
             logger.warning(f"Softmax failed: {e}, using uniform")
             return signatures, np.ones(len(signatures)) / len(signatures)

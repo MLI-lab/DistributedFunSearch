@@ -161,7 +161,6 @@ class TestEvaluatorShutdown:
                     evaluator = Evaluator(
                         template=mock_template,
                         inputs=[(7, 2, 5)],
-                        sandbox_base_path="/tmp/sandbox",
                         local_id=12345,
                         evaluator_config=Mock(
                             timeout=30,

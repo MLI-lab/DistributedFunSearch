@@ -36,7 +36,6 @@ class ScalingContext:
     template: Any = None
     inputs: Any = None
     target_signatures: Any = None
-    sandbox_base_path: str = None
     # Limits
     max_evaluators: int = 0
     min_evaluators: int = 1
@@ -342,7 +341,7 @@ class ResourceManager:
         proc = mp_ctx.Process(
             target=ctx.evaluator_entry_function,
             args=(ctx.config_path, ctx.template, ctx.inputs, ctx.target_signatures,
-                  ctx.log_dir, ctx.sandbox_base_path, ctx.log_filename, True),
+                  ctx.log_dir, ctx.log_filename, True),
             name=f"Evaluator-{len(ctx.evaluator_processes)}"
         )
         proc.start()

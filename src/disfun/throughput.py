@@ -24,12 +24,11 @@ from disfun.startup import sampler_process_entry, evaluator_process_entry, initi
 class ThroughputRunner:
     """Measures throughput (iterations/hour) for a single configuration."""
 
-    def __init__(self, config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path=None):
+    def __init__(self, config, config_path, log_dir, specification, inputs, target_signatures, checkpoint_path=None):
         self.config = config
         self.throughput_config = config.throughput
         self.config_path = config_path
         self.log_dir = log_dir
-        self.sandbox_base_path = sandbox_base_path
         self.inputs = inputs
         self.target_signatures = target_signatures
         self.template = code_manipulation.text_to_program(specification)
@@ -370,7 +369,7 @@ class ThroughputRunner:
 
         for i in range(config.num_evaluators):
             proc = ctx.Process(target=evaluator_process_entry,
-                args=(self.config_path, self.template, self.inputs, self.target_signatures, self.log_dir, self.sandbox_base_path, self.log_filename))
+                args=(self.config_path, self.template, self.inputs, self.target_signatures, self.log_dir, self.log_filename))
             proc.start()
             self.evaluator_processes.append(proc)
 
@@ -498,9 +497,9 @@ class ThroughputRunner:
         print(f"{'='*60}\nSaved: {path}")
 
 
-async def run_throughput(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path=None):
+async def run_throughput(config, config_path, log_dir, specification, inputs, target_signatures, checkpoint_path=None):
     """Main entry point for throughput measurement."""
-    runner = ThroughputRunner(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path)
+    runner = ThroughputRunner(config, config_path, log_dir, specification, inputs, target_signatures, checkpoint_path)
     try:
         results = await runner.run()
         runner.save_results(results)
@@ -581,14 +580,14 @@ def _apply_sweep_params(base_config, sweep_params):
     )
 
 
-async def run_sweep(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path=None, start_idx=0):
+async def run_sweep(config, config_path, log_dir, specification, inputs, target_signatures, checkpoint_path=None, start_idx=0):
     """Run parameter sweep across all combinations in config.sweep."""
     import cloudpickle
 
     combinations = _generate_sweep_combinations(config)
     if not combinations:
         print("No sweep parameters configured. Run single measurement instead.")
-        return await run_throughput(config, config_path, log_dir, sandbox_base_path, specification, inputs, target_signatures, checkpoint_path)
+        return await run_throughput(config, config_path, log_dir, specification, inputs, target_signatures, checkpoint_path)
 
     total = len(combinations)
     tc = config.throughput
@@ -621,7 +620,7 @@ async def run_sweep(config, config_path, log_dir, sandbox_base_path, specificati
 
         try:
             result = await run_throughput(
-                modified_config, sweep_config_path, config_log_dir, sandbox_base_path,
+                modified_config, sweep_config_path, config_log_dir,
                 specification, inputs, target_signatures, checkpoint_path
             )
             result["sweep_params"] = sweep_params

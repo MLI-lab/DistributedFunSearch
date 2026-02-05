@@ -164,7 +164,6 @@ class WandbConfig:
 class PathsConfig:
     """File system paths."""
     log_dir: str = "./logs"
-    sandbox_base_path: str = "/mnt/disfun/sandbox"
     backup_enabled: bool = False
     backup_dir: str = "./code_backups"
 

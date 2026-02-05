@@ -131,11 +131,6 @@ def parse_args():
         "--log-dir", type=str,
         default=os.path.join(os.getcwd(), "logs"),
         help="Directory for logs. Defaults to './logs'.")
-    parser.add_argument(
-        "--sandbox_base_path", type=str,
-        default=os.path.join(os.getcwd(), "sandbox"),
-        help="Path to sandbox directory. Defaults to './sandbox'.")
-
     # Resource scaling
     parser.add_argument(
         "--no-dynamic-scaling", action="store_true",
@@ -173,6 +168,14 @@ def parse_args():
         "--attach", type=str, choices=["evaluators", "samplers"], default=None,
         help="Attach workers to running experiment instead of starting full experiment.")
 
+    # Worker counts (override config)
+    parser.add_argument(
+        "--num_evaluators", type=int, default=None,
+        help="Number of evaluators to start (overrides config).")
+    parser.add_argument(
+        "--num_samplers", type=int, default=None,
+        help="Number of samplers to start (overrides config).")
+
     return parser.parse_args()
 
 
@@ -180,9 +183,7 @@ def merge_config_with_args(args, config):
     """Merge CLI arguments with config. CLI overrides config when explicitly set."""
     # Paths
     default_log_dir = os.path.join(os.getcwd(), "logs")
-    default_sandbox = os.path.join(os.getcwd(), "sandbox")
     log_dir = args.log_dir if args.log_dir != default_log_dir else config.paths.log_dir
-    sandbox_base_path = args.sandbox_base_path if args.sandbox_base_path != default_sandbox else config.paths.sandbox_base_path
     backup_enabled = args.backup or config.paths.backup_enabled
 
     # Scaling
@@ -226,7 +227,6 @@ def merge_config_with_args(args, config):
 
     return {
         'log_dir': log_dir,
-        'sandbox_base_path': sandbox_base_path,
         'backup_enabled': backup_enabled,
         'enable_dynamic_scaling': enable_dynamic_scaling,
         'termination_config': termination_config,
@@ -330,13 +330,12 @@ async def cleanup_rabbitmq(task_manager):
 
 
 class TaskManager:
-    def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, termination_config, config_path, sandbox_base_path, attach_mode=None):
+    def __init__(self, specification: str, inputs: Sequence[Any], config, log_dir, termination_config, config_path, attach_mode=None):
         self.template = code_manipulation.text_to_program(specification)
         self.inputs = inputs
         self.config = config
         self.config_path = config_path
         self.log_dir = log_dir
-        self.sandbox_base_path = sandbox_base_path
         self.attach_mode = attach_mode  # None=full, "evaluators"=evaluators only, "samplers"=samplers only
 
         pid = os.getpid()
@@ -503,7 +502,6 @@ class TaskManager:
                 template=self.template if is_eval else None,
                 inputs=self.inputs if is_eval else None,
                 target_signatures=self.termination_config.target_solutions if is_eval else None,
-                sandbox_base_path=self.sandbox_base_path if is_eval else None,
                 max_evaluators=self.config.scaling.max_evaluators if is_eval else 0,
                 max_samplers=0 if is_eval else self.config.scaling.max_samplers,
                 check_interval=self.config.scaling.check_interval,
@@ -524,7 +522,6 @@ class TaskManager:
             template=self.template,
             inputs=self.inputs,
             target_signatures=self.termination_config.target_solutions,
-            sandbox_base_path=self.sandbox_base_path,
             max_evaluators=scaling.max_evaluators if scaling else 1000,
             max_samplers=scaling.max_samplers if scaling else 1000,
             check_interval=scaling.check_interval if scaling else 120,
@@ -761,7 +758,7 @@ class TaskManager:
         for i in range(self.config.num_evaluators):
             proc = ctx.Process(
                 target=evaluator_process_entry,
-                args=(self.config_path, self.template, self.inputs, self.termination_config.target_solutions, self.log_dir, self.sandbox_base_path, self.log_filename),
+                args=(self.config_path, self.template, self.inputs, self.termination_config.target_solutions, self.log_dir, self.log_filename),
                 name=f"Evaluator-{i}"
             )
             proc.start()
@@ -780,8 +777,14 @@ if __name__ == "__main__":
 
     # Merge CLI args with config (CLI overrides config when explicitly set)
     merged = merge_config_with_args(args, config)
+
+    # Override worker counts if specified
+    if args.num_evaluators is not None:
+        config.num_evaluators = args.num_evaluators
+    if args.num_samplers is not None:
+        config.num_samplers = args.num_samplers
+
     log_dir = merged['log_dir']
-    sandbox_base_path = merged['sandbox_base_path']
     enable_dynamic_scaling = merged['enable_dynamic_scaling']
     termination_config = merged['termination_config']
     target_signatures = merged['target_signatures']
@@ -835,7 +838,6 @@ if __name__ == "__main__":
                     config=config,
                     config_path=args.config_path,
                     log_dir=log_dir,
-                    sandbox_base_path=sandbox_base_path,
                     specification=specification,
                     inputs=inputs,
                     target_signatures=target_signatures,
@@ -852,7 +854,6 @@ if __name__ == "__main__":
                     config=config,
                     config_path=args.config_path,
                     log_dir=log_dir,
-                    sandbox_base_path=sandbox_base_path,
                     specification=specification,
                     inputs=inputs,
                     target_signatures=target_signatures,
@@ -867,7 +868,6 @@ if __name__ == "__main__":
             log_dir=log_dir,
             termination_config=termination_config,
             config_path=args.config_path,
-            sandbox_base_path=sandbox_base_path,
             attach_mode=args.attach,
         )
         main.task_manager = task_manager

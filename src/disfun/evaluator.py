@@ -402,7 +402,6 @@ class Evaluator:
     Args:
         template: Program template with function to evolve
         inputs: List of test inputs for evaluation
-        sandbox_base_path: Base directory for sandbox files
         local_id: Unique identifier for this evaluator (usually PID)
         evaluator_config: EvaluatorConfig with timeout, max_workers, etc.
         connection_manager: RabbitMQ ConnectionManager for queue access
@@ -412,7 +411,6 @@ class Evaluator:
         self,
         template,
         inputs,
-        sandbox_base_path,
         local_id,
         evaluator_config,
         connection_manager,

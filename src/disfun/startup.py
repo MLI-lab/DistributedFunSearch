@@ -313,7 +313,7 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
         sys.exit(0)
 
 
-def evaluator_process_entry(config_path, template, inputs, target_signatures, log_dir, sandbox_base_path, log_filename, use_parent_log=False):
+def evaluator_process_entry(config_path, template, inputs, target_signatures, log_dir, log_filename, use_parent_log=False):
     """Standalone evaluator process entry point (spawn-compatible)."""
     from disfun.utils import rabbitmq
     import disfun.evaluator as evaluator_module
@@ -354,7 +354,6 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
             state.instance = evaluator_module.Evaluator(
                 template=template,
                 inputs=inputs,
-                sandbox_base_path=sandbox_base_path,
                 local_id=local_id,
                 evaluator_config=config.evaluator,
                 connection_manager=connection_manager,
