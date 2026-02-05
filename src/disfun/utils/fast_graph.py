@@ -59,10 +59,32 @@ class AdjacencyView:
 
 
 # Try C++ implementation first
+# Supports FASTGRAPH_CPP_PATH env var for architecture-specific builds (e.g., HPC hetjobs)
+import os
+import importlib.util
+
+def _load_cpp_module():
+    """Load fast_graph_cpp from custom path or default location."""
+    custom_path = os.environ.get('FASTGRAPH_CPP_PATH')
+    if custom_path:
+        # Load from custom path (for HPC with different CPU architectures)
+        import glob
+        so_files = glob.glob(os.path.join(custom_path, 'fast_graph_cpp*.so'))
+        if so_files:
+            spec = importlib.util.spec_from_file_location('fast_graph_cpp', so_files[0])
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+    # Default: import from package
+    from disfun.utils import fast_graph_cpp
+    return fast_graph_cpp
+
 try:
-    from disfun.utils.fast_graph_cpp import FastGraphCpp as _FastGraphCppBase, load_graph_from_lmdb as _load_graph_from_lmdb_cpp
+    _cpp_module = _load_cpp_module()
+    _FastGraphCppBase = _cpp_module.FastGraphCpp
+    _load_graph_from_lmdb_cpp = _cpp_module.load_graph_from_lmdb
     USING_CPP = True
-except ImportError:
+except (ImportError, AttributeError, FileNotFoundError):
     USING_CPP = False
 
 

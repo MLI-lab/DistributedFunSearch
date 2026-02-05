@@ -418,35 +418,68 @@ class ResourceManager:
 
         return avg_cpu_usage < cpu_threshold and normalized_load < load_threshold
 
+    def _assign_mig_device(self, visible_str, assigned_gpus):
+        """Handle MIG GPU assignment. MIG devices don't support NVML, so we skip checks.
+
+        Args:
+            visible_str: CUDA_VISIBLE_DEVICES value containing MIG UUID(s)
+            assigned_gpus: Set of already assigned devices
+
+        Returns:
+            (index, device_str) tuple if available, None if all assigned
+        """
+        mig_devices = [x.strip() for x in visible_str.split(",") if x.strip()]
+        num_mig = len(mig_devices)
+        self.resource_logger.info(f"Detected {num_mig} MIG device(s)")
+
+        for i in range(num_mig):
+            device = f"cuda:{i}"
+            if device not in assigned_gpus:
+                assigned_gpus.add(device)
+                self.resource_logger.info(f"Assigning MIG device as {device}")
+                return i, device
+
+        self.resource_logger.info("All MIG devices already assigned")
+        return None
+
     def assign_gpu_device(self, min_free_memory_gib, max_utilization, assigned_gpus=None):
         """Assigns a GPU with sufficient free memory and low utilization."""
+        if assigned_gpus is None:
+            assigned_gpus = set(self.process_to_device_map.values())
+
+        # Check for MIG devices FIRST (before cpu_only check)
+        # MIG devices don't need NVML so they work even if NVML init failed
+        visible_str = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        self.resource_logger.info(f"CUDA_VISIBLE_DEVICES = '{visible_str}'")
+
+        if visible_str and "MIG-" in visible_str:
+            self.resource_logger.info("Detected MIG device, using MIG path")
+            return self._assign_mig_device(visible_str, assigned_gpus)
+
+        self.resource_logger.info(f"Not MIG path. cpu_only={self.cpu_only}")
+
+        # For non-MIG GPUs, we need NVML
         if self.cpu_only:
             return None
 
         try:
-            # Get visible GPUs
-            visible_str = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+            # Normal GPUs: parse indices and query NVML
             if visible_str:
                 try:
                     visible_devices = [int(x.strip()) for x in visible_str.split(",") if x.strip()]
                 except ValueError:
-                    self.resource_logger.error("Failed to parse CUDA_VISIBLE_DEVICES.")
+                    self.resource_logger.error(f"Failed to parse CUDA_VISIBLE_DEVICES: {visible_str}")
                     return None
             else:
                 visible_devices = list(range(pynvml.nvmlDeviceGetCount()))
 
             # Map host GPU index to container-visible index
             id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
-
-            # Use assigned_gpus passed from the caller, otherwise fallback to existing assignments
-            if assigned_gpus is None:
-                assigned_gpus = set(self.process_to_device_map.values())
-
             available_gpus = []
 
             for host_gpu in visible_devices:
                 container_device = f"cuda:{id_to_container_index[host_gpu]}"
-            
+
                 if container_device in assigned_gpus:
                     continue  # Skip GPUs that are already assigned in this loop
 
@@ -480,6 +513,17 @@ class ResourceManager:
 
             return host_gpu, container_device
         except Exception as e:
+            # "Not Supported" error typically means MIG device where NVML doesn't work
+            # Fall back to using cuda:0 if available
+            if "Not Supported" in str(e):
+                self.resource_logger.warning(f"NVML failed (likely MIG device): {e}")
+                if "cuda:0" not in assigned_gpus:
+                    assigned_gpus.add("cuda:0")
+                    self.resource_logger.info("Falling back to cuda:0 for MIG device")
+                    return 0, "cuda:0"
+                else:
+                    self.resource_logger.info("cuda:0 already assigned")
+                    return None
             self.resource_logger.error(f"Error in assign_gpu_device: {e}")
             return None
 
