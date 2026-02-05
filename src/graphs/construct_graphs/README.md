@@ -40,11 +40,22 @@ python construct_deletions_graphs.py
 
 ### Output
 
-Graphs saved to `src/graphs/` as LMDB databases:
-- Format: `graph_d_s{s}_n{n}_q{q}.lmdb`
-- Example: `graph_d_s1_n7_q4.lmdb` (DNA code, n=7, s=1)
+Graphs are saved with automatic directory structure:
 
-**Changing output directory:** For large graphs (n >= 10), you may want to save to a different location with more storage. Edit `OUTPUT_DIR` in `__main__`:
+```
+{base_dir}/deletion/{alphabet}/s{s}/graph_d_s{s}_n{n}_q{q}.lmdb
+```
+
+Where `{alphabet}` is `binary` (q=2), `quaternary` (q=4), or `q{n}` for other values.
+
+**Examples:**
+```
+/mnt/Graphs/deletion/binary/s1/graph_d_s1_n7_q2.lmdb
+/mnt/Graphs/deletion/quaternary/s1/graph_d_s1_n7_q4.lmdb
+src/graphs/deletion/binary/s2/graph_d_s2_n10_q2.lmdb
+```
+
+**Changing output directory:** Use `--output` to specify a different base directory:
 
 ```python
 # Default: saves to src/graphs/
@@ -54,7 +65,7 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
 OUTPUT_DIR = "/mnt/large_storage/graphs"
 ```
 
-> **Note:** Construction can be slow for large n or q due to computing pairwise LCS for all q^n sequences. 
+> **Note:** Construction can be slow for large n or q due to computing pairwise LCS for all q^n sequences.
 
 ---
 
@@ -94,9 +105,20 @@ python construct_ids_graphs.py
 
 ### Output
 
-Graphs saved to `src/graphs/` as LMDB databases:
-- Format: `graph_ids_s{s}_n{n}_q{q}.lmdb`
-- Example: `graph_ids_s2_n10_q4.lmdb` (DNA code, n=10, s=2, min distance 5)
+Graphs are saved with automatic directory structure:
+
+```
+{base_dir}/ids/{alphabet}/s{s}/graph_ids_s{s}_n{n}_q{q}.lmdb
+```
+
+Where `{alphabet}` is `binary` (q=2), `quaternary` (q=4), or `q{n}` for other values.
+
+**Examples:**
+```
+/mnt/Graphs/ids/binary/s1/graph_ids_s1_n8_q2.lmdb
+/mnt/Graphs/ids/quaternary/s2/graph_ids_s2_n10_q4.lmdb
+src/graphs/ids/binary/s1/graph_ids_s1_n7_q2.lmdb
+```
 
 **Changing output directory:** For large graphs (n >= 10), you may want to save to a different location with more storage. Edit `OUTPUT_DIR` in `__main__`:
 
@@ -108,7 +130,7 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
 OUTPUT_DIR = "/mnt/large_storage/graphs"
 ```
 
-> **Note:** Construction can be slow for large n or q due to computing pairwise edit distances for all q^n sequences. 
+> **Note:** Construction can be slow for large n or q due to computing pairwise edit distances for all q^n sequences.
 
 ---
 

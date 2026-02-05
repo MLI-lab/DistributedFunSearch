@@ -13,7 +13,7 @@ Arguments:
     --s         Number of errors to correct, requires distance >= 2s+1 (required)
     --q         Alphabet size: 2=binary, 4=DNA (default: 4)
     --workers   Parallel workers (default: all CPUs)
-    --output    Output directory (default: /mnt/Graphs/ids/{alphabet}/s{s})
+    --output    Base output directory (default: /mnt/Graphs). Structure: {base}/ids/{alphabet}/s{s}/
     --stream    Force streaming mode (writes edges to disk instead of memory)
     --no-stream Force in-memory mode even for large n
 
@@ -771,9 +771,12 @@ def construct_and_save_graph(n, s, q, output_dir, max_workers=None, stream_to_di
         max_workers: Number of parallel workers (default: cpu_count())
         stream_to_disk: If True, use streaming mode. If None, auto-enable for n >= 19.
     """
-    # Create output path
+    # Create output path with hierarchical structure: {base}/ids/{alphabet}/s{s}/
+    alphabet_name = "binary" if q == 2 else "quaternary" if q == 4 else f"q{q}"
+    subdir = os.path.join(output_dir, "ids", alphabet_name, f"s{s}")
+    os.makedirs(subdir, exist_ok=True)
     graph_name = f"graph_ids_s{s}_n{n}_q{q}.lmdb"
-    output_path = os.path.join(output_dir, graph_name)
+    output_path = os.path.join(subdir, graph_name)
 
     # Check if LMDB already exists and is complete
     expected_entries = q ** n
@@ -847,7 +850,7 @@ Memory efficiency:
     parser.add_argument('--workers', '-w', type=int, default=None,
                         help='Number of parallel workers (default: all CPU cores)')
     parser.add_argument('--output', '-o', type=str, default=None,
-                        help='Output directory (default: /mnt/Graphs/ids/{quaternary|binary}/s{s})')
+                        help='Base output directory (default: /mnt/Graphs). Structure: {base}/ids/{alphabet}/s{s}/')
 
     # Streaming mode options
     stream_group = parser.add_mutually_exclusive_group()
@@ -865,12 +868,8 @@ if __name__ == "__main__":
     # Parse n values
     n_values = [int(x.strip()) for x in args.n.split(',')]
 
-    # Set default output directory based on parameters
-    if args.output:
-        output_dir = args.output
-    else:
-        alphabet_name = "binary" if args.q == 2 else "quaternary" if args.q == 4 else f"q{args.q}"
-        output_dir = f"/mnt/Graphs/ids/{alphabet_name}/s{args.s}"
+    # Set default output directory (structure created automatically in construct_and_save_graph)
+    output_dir = args.output if args.output else "/mnt/Graphs"
 
     os.makedirs(output_dir, exist_ok=True)
 
