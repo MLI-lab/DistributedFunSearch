@@ -104,6 +104,11 @@ if USING_CPP:
         def nodes(self):
             return self._cpp_graph.nodes
 
+        @property
+        def node(self):
+            """Deprecated alias for nodes (NetworkX compatibility)."""
+            return {n: {} for n in self._cpp_graph.nodes}
+
         def neighbors(self, node):
             return self._cpp_graph.neighbors(node)
 
@@ -201,6 +206,11 @@ else:
         @property
         def nodes(self):
             return self._nodes
+
+        @property
+        def node(self):
+            """Deprecated alias for nodes (NetworkX compatibility)."""
+            return {n: {} for n in self._nodes}
 
         def neighbors(self, node) -> tuple:
             return self._neighbors[node]
