@@ -130,7 +130,13 @@ class ExternalProcessSandbox:
                 os.close(write_fd)
                 os._exit(0)
 
-            except Exception:
+            except Exception as e:
+                import traceback
+                import sys
+                # Write error to stderr so it shows in job logs
+                sys.stderr.write(f"SANDBOX ERROR: {type(e).__name__}: {e}\n")
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
                 os._exit(1)
 
         else:

@@ -80,7 +80,7 @@ LOCAL_LIB="/tmp/fastgraph_lib_\${SLURM_JOB_ID}"
 
 # Copy source to local /tmp and build there (avoids shared filesystem issues)
 mkdir -p "\${LOCAL_BUILD}" "\${LOCAL_LIB}"
-cp "${CPP_SRC}"/*.cpp "${CPP_SRC}"/*.hpp "${CPP_SRC}"/setup.py "\${LOCAL_BUILD}/"
+cp "\${CPP_SRC}"/*.cpp "\${CPP_SRC}"/*.hpp "\${CPP_SRC}"/setup.py "\${LOCAL_BUILD}/"
 cd "\${LOCAL_BUILD}"
 echo "DEBUG: Building in \${LOCAL_BUILD}"
 python3 setup.py build_ext --inplace
