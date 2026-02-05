@@ -67,41 +67,6 @@ from disfun.startup import sampler_process_entry, evaluator_process_entry, load_
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-def _build_graph_path(graph_dir, graph_type, s, n, q):
-    """Build graph path: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb"""
-    subdir = "deletion" if graph_type in ("deletion", "deletions", "d", "graph_d") else "ids"
-    alphabet = "binary" if q == 2 else "quaternary" if q == 4 else f"q{q}"
-    prefix = "graph_d" if subdir == "deletion" else "graph_ids"
-    return os.path.join(graph_dir, subdir, alphabet, f"s{s}", f"{prefix}_s{s}_n{n}_q{q}.lmdb")
-
-
-def _warm_graph_cache(graph_dir, graph_type, s_values, start_n_list, end_n_list, q):
-    """Warm OS file cache by reading graph files.
-
-    This reads graph files into the OS page cache so that when evaluators
-    load them lazily, they read from memory instead of disk. Much faster
-    than pre-loading into Python objects (which requires pickling to each
-    evaluator subprocess).
-
-    Returns:
-        int: Number of graph files found and warmed
-    """
-    count = 0
-    for s, start_n, end_n in zip(s_values, start_n_list, end_n_list, strict=True):
-        for n in range(start_n, end_n + 1):
-            path = _build_graph_path(graph_dir, graph_type, s, n, q)
-            if os.path.exists(path):
-                # Read LMDB data file to warm OS cache (LMDB stores data in data.mdb)
-                data_file = os.path.join(path, "data.mdb")
-                if os.path.exists(data_file):
-                    with open(data_file, 'rb') as f:
-                        _ = f.read()  # Read into OS page cache, discard
-                    count += 1
-            else:
-                print(f"Warning: Graph not found at {path}")
-    return count
-
-
 def _cleanup_sandbox_processes():
     """No-op. Fork-based sandbox children are reaped automatically by parent.
 
@@ -247,21 +212,7 @@ def merge_config_with_args(args, config):
         target_solutions=target_signatures
     )
 
-    # Warm OS file cache for graph files (optional, speeds up first evaluation)
-    # Evaluators load graphs lazily - this just ensures they're in OS page cache
-    print("Warming OS cache for graph files...")
-    graph_count = _warm_graph_cache(
-        graph_dir=config.evaluator.graph_dir,
-        graph_type=config.evaluator.graph_type,
-        s_values=config.evaluator.s_values,
-        start_n_list=config.evaluator.start_n,
-        end_n_list=config.evaluator.end_n,
-        q=config.evaluator.q
-    )
-    print(f"Warmed {graph_count} graph files into OS cache")
-
-    # Evaluation inputs - graphs are loaded lazily by each evaluator
-    # This avoids expensive pickle serialization at startup (was ~4s per evaluator)
+    # Evaluation inputs - graphs are preloaded by each evaluator during init
     inputs = [
         (n, s, config.evaluator.q)
         for s, start_n, end_n in zip(
@@ -806,6 +757,7 @@ class TaskManager:
         if self.attach_mode == "samplers":
             return
 
+        startup_delay = getattr(self.config.evaluator, 'startup_delay', 0)
         for i in range(self.config.num_evaluators):
             proc = ctx.Process(
                 target=evaluator_process_entry,
@@ -815,6 +767,10 @@ class TaskManager:
             proc.start()
             self.logger.debug(f"Started Evaluator {i} PID={proc.pid}")
             self.evaluator_processes.append(proc)
+
+            # Stagger evaluator starts to avoid memory spike during graph loading
+            if startup_delay > 0 and i < self.config.num_evaluators - 1:
+                time.sleep(startup_delay)
 
 
 if __name__ == "__main__":

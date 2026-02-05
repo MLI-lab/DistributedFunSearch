@@ -111,19 +111,24 @@ Each evaluator process loads and caches graphs. All values measured with C++ Fas
 
 ### IDS Quaternary s=1
 
-| n | Nodes | Edges | Memory | Total Time |
-|---|-------|-------|--------|------------|
-| 6 | 4,096 | 392,358 | < 1 GB | 0.1 s |
-| 7 | 16,384 | 2,206,374 | < 1 GB | 0.7 s |
-| 8 | 65,536 | 11,815,590 | < 1 GB | 3.4 s |
-| 9 | 262,144 | 60,992,166 | 0.5 GB | 19.7 s |
-| 10 | 1,048,576 | 305,965,734 | 2.5 GB | 2.2 min |
-| 11 | 4,194,304 | 1,500,162,726 | 12.2 GB | 75 min |
+Memory has two values: **Final** (after loading, in-use) and **Peak** (during LMDB parsing spike).
 
-**IDS n=10 feasible with single-pass loader. IDS n=11 uses streaming loader (slower but fits in memory).**
+| n | Nodes | Edges | Final Memory | Peak Memory | Eval Time |
+|---|-------|-------|--------------|-------------|-----------|
+| 6 | 4,096 | 392,358 | 40 MB | 40 MB | 0.1 s |
+| 7 | 16,384 | 2,206,374 | 90 MB | 350 MB | 0.7 s |
+| 8 | 65,536 | 11,815,590 | 200 MB | 1.4 GB | 3.4 s |
+| 9 | 262,144 | 60,992,166 | 620 MB | 5.0 GB | 19.7 s |
+| 10 | 1,048,576 | 305,965,734 | 2.5 GB | 20 GB | 2.2 min |
+| 11 | 4,194,304 | 1,500,162,726 | 12.2 GB | ~50 GB | 75 min |
 
-**Total for n=6 to n=10: ~3 GB per evaluator**
-**Total for n=6 to n=11: ~13 GB per evaluator**
+**Cumulative for n=6 to n=9: ~1.2 GB final, ~6.5 GB peak during loading**
+**Cumulative for n=6 to n=10: ~3.5 GB final, ~25 GB peak during loading**
+
+**WARNING**: Peak memory during LMDB loading is much higher than final memory. When starting multiple evaluators simultaneously, the peak spikes can cause OOM. Solutions:
+1. **Stagger evaluator startup** - don't start all at once
+2. **Pre-load graphs in main process** before forking evaluators
+3. **Start with fewer evaluators** and scale up after graphs are cached
 
 ## Configuration
 

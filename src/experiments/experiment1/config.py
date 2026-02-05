@@ -37,13 +37,14 @@ class ProgramsDatabaseConfig:
     """ProgramsDatabase settings."""
     num_islands: int = 10
     reset_programs: int = 1200  # Programs per island before weak islands reset
-    cluster_sampling_temperature_init: float = 1 #0.1
+    cluster_sampling_temperature_init: float = 0.1 #0.1
     cluster_sampling_temperature_period: int = 30_000
     no_deduplication: bool = False
-    save_lineage: bool = False  # Track parent/child relationships
+    save_lineage: bool = True  # Track parent/child relationships
     initial_program_copies: int = 1
     batch_size: int = 1
     batch_timeout: float = 0.01
+    normalize_scores_for_sampling: bool = True  # Normalize cluster scores by baseline before softmax
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,16 +56,16 @@ class SamplerConfig:
     samples_per_prompt_mutation: int = 5  # Override for ReEvo mutation phase
     temperature_period = None  # Programs until LLM temperature decays (exploration to exploitation), None for fixed
     temperature: float = 0.9444444444444444
-    max_new_tokens: int = 1024 #246 for starcoder2-15b, 1024 for qwen3-8b
+    max_new_tokens: int = 246 #246 for starcoder2-15b, 1024 for qwen3-8b
     top_p: float = 0.7777777777777778
     repetition_penalty: float = 1.222222
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "Qwen/Qwen3-8B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
-    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-8b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+    model: str = "bigcode/starcoder2-15b"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
+    cost_model: str = "fireworks_ai/accounts/fireworks/models/starcoder2-15b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
-    use_chat_api: bool = True  # True to use vLLM chat() instead of generate(), use when providing system/user messages
+    use_chat_api: bool = False  # True to use vLLM chat() instead of generate(), use when providing system/user messages
     enable_thinking: bool = False  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
     model_params_billions: float = None # For FLOP estimation, None to disable
     api_base: str = None
@@ -73,7 +74,7 @@ class SamplerConfig:
     gpu_memory_utilization: float = 0.85
     prefetch_multiplier: int = 2
     tensor_parallel_size: int | str = "auto"  # "auto" or explicit 1, 2, 4, 8 for multi-GPU
-    enforce_eager: bool = True  # True to skip CUDA graph compilation (faster startup, required for multi-GPU)
+    enforce_eager: bool = False  # True to skip CUDA graph compilation (faster startup, required for multi-GPU)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,15 +84,16 @@ class EvaluatorConfig:
     initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/initial_functions/graph_networkx"
     s_values: List[int] = dataclasses.field(default_factory=lambda: [1])  # Deletions to correct 
     start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Shortest code length to evaluate
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [10])  # Longest code length to evaluate
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Longest code length to evaluate
     mode: str = "last"  # last, average, weighted, relative_difference
     timeout: int = 30
     max_workers: int = 2  # Parallel CPU processes per evaluator
-    q: int = 4  # Alphabet size (2 for binary, 4 for DNA)
+    q: int = 2  # Alphabet size (2 for binary, 4 for DNA)
     graph_dir: str = "/mnt/Graphs"
-    graph_type: str = "ids"  # "deletion" or "ids"
+    graph_type: str = "deletion"  # "deletion" or "ids"
     prefetch_count: int = 15
-    sandbox_memory_limit_gb: float = 1.0
+    sandbox_memory_limit_gb: float = 1 # 1 for deletions, 20 for ids
+    startup_delay: float = 3.0  # Seconds between evaluator starts (staggers graph loading to prevent OOM)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,14 +101,14 @@ class PromptConfig:
     """Prompt building settings."""
     strategy: str = "funsearch"  # funsearch, eoh, reevo
     spec_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC"
-    variant: str = "ids"  # ECC variant: "deletions" or "ids"
+    variant: str = "deletions"  # ECC variant: "deletions" or "ids"
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/templates/single_turn/thought.txt"
-    funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
+    funsearch_template: str = "funsearch/templates/completion.txt"
+    funsearch_problem_desc: str = "funsearch/problem_descriptions/completion.txt"
     funsearch_string_hint: str | None = None  # e.g., "funsearch/problem_descriptions/string_hint.txt"
-    funsearch_system_message: str | None = "funsearch/system_messages/single_turn/thought.txt" #"funsearch/system_messages/basic.txt"
+    funsearch_system_message: str | None = None #"funsearch/system_messages/basic.txt"
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
@@ -148,14 +150,14 @@ class PromptConfig:
 @dataclasses.dataclass(frozen=True)
 class WandbConfig:
     """Weights & Biases settings."""
-    enabled: bool = False
-    project: str = "disfun_s2_qwen8b"
+    enabled: bool = True
+    project: str = "disfun_d_test"
     entity: str = "franziweindel-technical-university-of-munich"
     run_name: str = None  # None for auto-generated
-    run_name_tag: str = "desc_evolve_code_last_scoring"
+    run_name_tag: str = "run1"
     log_interval: int = 300  # Seconds
     tags: List[str] = dataclasses.field(default_factory=list)
-    checkpoints_base_path: str = "/mnt/disfun/checkpoints/s2"
+    checkpoints_base_path: str = "/mnt/disfun/checkpoints/s1"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -202,8 +204,8 @@ class ScalingConfig:
 @dataclasses.dataclass(frozen=True)
 class TerminationConfig:
     """Experiment termination conditions."""
-    termination_mode: str = "cost"  # "iterations" or "cost"
-    iteration_limit: int = None #400_000  # Used when termination_mode="iterations"
+    termination_mode: str = "iterations"  # "iterations" or "cost"
+    iteration_limit: int = 400_000 #400_000  # Used when termination_mode="iterations"
     cost_limit: float = 120  # Max cost in USD, used when termination_mode="cost"
     stop_on_optimal: bool = False  # If True, stop early after finding optimal solution
     optimal_solution_programs: int = 20_000  # Extra iterations after optimal found (only if stop_on_optimal=True)

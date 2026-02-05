@@ -78,6 +78,11 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
     database.next_sampler_id = checkpoint_data.get("next_sampler_id", 0)
     logger.info(f"Restored next_sampler_id from checkpoint: {database.next_sampler_id}")
 
+    # Restore baseline score for softmax normalization
+    database._baseline_score = checkpoint_data.get("_baseline_score", None)
+    if database._baseline_score is not None:
+        logger.info(f"Restored baseline score from checkpoint: {database._baseline_score}")
+
     # Restore ReEvo reflection state
     reevo_state = checkpoint_data.get("reevo_state")
     if reevo_state:
@@ -196,6 +201,8 @@ def serialize_checkpoint(database) -> dict:
         # ReEvo reflection state
         "reevo_state": database.reevo_state,
         "_pending_reflection_type": {str(k): v for k, v in database._pending_reflection_type.items()},
+        # Baseline score for softmax normalization
+        "_baseline_score": database._baseline_score,
         # Final metrics (computed at end of search)
         "final_metrics": getattr(database, 'final_metrics', None),
         "islands_state": []

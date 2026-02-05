@@ -442,10 +442,22 @@ class Evaluator:
         self.executor = ThreadPoolExecutor(max_workers=evaluator_config.max_workers)
         self.cumulative_cpu_time = 0.0
 
+        # Pre-load graphs during init. Combined with staggered startup, this prevents
+        # memory spikes from all evaluators loading simultaneously on first message.
+        self._preload_graphs()
+
+    def _preload_graphs(self):
+        """Pre-load all graphs into cache during initialization."""
+        unique_inputs = {(inp[0], inp[1], inp[2]) for inp in self.inputs if len(inp) >= 3}
+        logger.info(f"Evaluator {self.local_id}: Pre-loading {len(unique_inputs)} graphs...")
+        for n, s, q in sorted(unique_inputs):
+            get_cached_graph(n, s, q, self.graph_dir, self.graph_type)
+        logger.info(f"Evaluator {self.local_id}: Pre-load complete.")
+
     def _get_input_with_graph(self, input_tuple):
         """Augment input tuple with cached graph.
 
-        Loads graph on first access, caches for reuse.
+        Graphs are preloaded during init, this just retrieves from cache.
         Forked children inherit the cached graph via copy-on-write.
         """
         n, s, q = input_tuple[:3]

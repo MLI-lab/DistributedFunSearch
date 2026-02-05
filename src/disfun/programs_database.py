@@ -224,6 +224,9 @@ class ProgramsDatabase:
 
         self.best_known_solutions = best_known_solutions or {}
 
+        # Baseline score from initial/seed function for softmax normalization
+        self._baseline_score = None
+
         self.cumulative_evaluator_cpu_time = 0.0
         self.cumulative_sampler_gpu_time = 0.0
 
@@ -498,6 +501,15 @@ class ProgramsDatabase:
 
         # Calculate score once and reuse
         score = _reduce_score(scores_per_test, self.evaluator_config.mode, self.best_known_solutions)
+
+        # Capture baseline score from first program (initial/seed function) for softmax normalization
+        # Only if enabled via config, and skip for relative_difference mode (uses its own baseline)
+        normalize = getattr(self._config, 'normalize_scores_for_sampling', False)
+        if (normalize and
+            self._baseline_score is None and
+            self.evaluator_config.mode != "relative_difference"):
+            self._baseline_score = score
+            logger.info(f"Captured baseline score for softmax normalization: {score}")
 
         # Assign lineage tracking information
         if parent_ids is None:
@@ -867,6 +879,15 @@ class ProgramsDatabase:
 
         clusters = island['clusters']
         scores = np.array([clusters[s]['score'] for s in signatures])
+
+        # Normalize scores relative to baseline for better softmax behavior (if enabled)
+        # Skip for relative_difference mode (already uses its own baseline from config)
+        normalize = getattr(self._config, 'normalize_scores_for_sampling', False)
+        if (normalize and
+            self._baseline_score is not None and
+            self._baseline_score > 0 and
+            self.evaluator_config.mode != "relative_difference"):
+            scores = (scores - self._baseline_score) / self._baseline_score
 
         if temperature is None:
             temperature = self._compute_temperature(island)

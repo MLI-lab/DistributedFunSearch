@@ -279,6 +279,7 @@ def build_wandb_init_config(
         "cluster_sampling_temperature_init": config.cluster_sampling_temperature_init,
         "cluster_sampling_temperature_period": config.cluster_sampling_temperature_period,
         "no_deduplication": config.no_deduplication,
+        "normalize_scores_for_sampling": getattr(config, 'normalize_scores_for_sampling', False),
         # Evaluator config
         "mode": evaluator_config.mode if evaluator_config else None,
         "q": evaluator_config.q if evaluator_config else None,
