@@ -72,7 +72,11 @@ def get_cached_graph(n, s, q, graph_dir, graph_type="deletion"):
 
     Thread-safe. Forked children inherit the cached graphs.
     Path structure: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb
+    Returns None if graph_dir is not configured (no-graph mode).
     """
+    if not graph_dir:
+        return None
+
     key = (n, s, q)
 
     with _graph_cache_lock:
@@ -446,6 +450,9 @@ class Evaluator:
 
     def _preload_graphs(self):
         """Pre-load all graphs into cache during initialization."""
+        if not self.graph_dir:
+            logger.info(f"Evaluator {self.local_id}: No graph_dir configured, skipping graph preload (no-graph mode)")
+            return
         unique_inputs = {(inp[0], inp[1], inp[2]) for inp in self.inputs if len(inp) >= 3}
         logger.info(f"Evaluator {self.local_id}: Pre-loading {len(unique_inputs)} graphs...")
         for n, s, q in sorted(unique_inputs):

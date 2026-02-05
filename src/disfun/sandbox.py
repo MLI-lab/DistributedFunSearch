@@ -16,6 +16,7 @@ import signal
 import resource
 import time
 import cloudpickle
+import threading
 
 
 def cleanup_orphaned_sandbox_processes(logger=None, max_age_seconds=300):
@@ -33,6 +34,7 @@ class ExternalProcessSandbox:
     # Cache for compiled base namespace (spec without priority), per process
     _cached_namespace = None
     _cached_base_hash = None
+    _compile_lock = threading.Lock()  # Thread synchronization for cache
 
     def __init__(
         self,
@@ -50,6 +52,7 @@ class ExternalProcessSandbox:
 
         Separates the program into base (imports, helpers) and priority function.
         The base is cached and reused across evaluations.
+        Thread-safe: uses lock to prevent race conditions in cache access.
         """
         tree = ast.parse(program)
 
@@ -66,17 +69,19 @@ class ExternalProcessSandbox:
         base_tree = ast.Module(body=base_nodes, type_ignores=[])
         base_hash = hash(ast.dump(base_tree))
 
-        if ExternalProcessSandbox._cached_base_hash != base_hash:
-            ExternalProcessSandbox._cached_namespace = {}
-            exec(compile(base_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
-            ExternalProcessSandbox._cached_base_hash = base_hash
+        # Thread-safe cache check and update
+        with ExternalProcessSandbox._compile_lock:
+            if ExternalProcessSandbox._cached_base_hash != base_hash:
+                ExternalProcessSandbox._cached_namespace = {}
+                exec(compile(base_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
+                ExternalProcessSandbox._cached_base_hash = base_hash
 
-        # Always compile and inject new priority into cached namespace
-        if priority_node:
-            priority_tree = ast.Module(body=[priority_node], type_ignores=[])
-            exec(compile(priority_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
+            # Always compile and inject new priority into cached namespace
+            if priority_node:
+                priority_tree = ast.Module(body=[priority_node], type_ignores=[])
+                exec(compile(priority_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
 
-        return ExternalProcessSandbox._cached_namespace
+            return ExternalProcessSandbox._cached_namespace.copy()  # Return copy to avoid mutation
 
     def run(
         self,
@@ -96,7 +101,12 @@ class ExternalProcessSandbox:
             # Compile in parent - child will inherit compiled namespace
             namespace = ExternalProcessSandbox.compile_code(program)
             func = namespace[function_to_run]
-        except Exception:
+        except Exception as e:
+            import traceback
+            import sys
+            sys.stderr.write(f"SANDBOX COMPILE ERROR: {type(e).__name__}: {e}\n")
+            traceback.print_exc(file=sys.stderr)
+            sys.stderr.flush()
             return None, False, 0.0
 
         # Create pipe for result communication

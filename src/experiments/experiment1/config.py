@@ -44,7 +44,7 @@ class ProgramsDatabaseConfig:
     initial_program_copies: int = 1
     batch_size: int = 1
     batch_timeout: float = 0.01
-    normalize_scores_for_sampling: bool = True  # Normalize cluster scores by baseline before softmax
+    normalize_scores_for_sampling: bool = False  # Normalize cluster scores by baseline before softmax
 
 
 @dataclasses.dataclass(frozen=True)

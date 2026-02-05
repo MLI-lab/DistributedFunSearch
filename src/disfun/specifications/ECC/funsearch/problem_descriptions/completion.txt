@@ -5,6 +5,5 @@ The priority function must return a numeric value (int or float).
 
 Improve the `priority_v{version}` function over its previous version(s) below.
 Keep the code short and comment for easy understanding.
-
 {string_hint}
 """
