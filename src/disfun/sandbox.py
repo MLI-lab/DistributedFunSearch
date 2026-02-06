@@ -76,6 +76,17 @@ class ExternalProcessSandbox:
                 exec(compile(base_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
                 ExternalProcessSandbox._cached_base_hash = base_hash
 
+                # Pre-load lazy modules so child inherits them (avoids mmap in sandbox)
+                # numpy.random is lazy-loaded and uses ~2GB VMS when mmap'd fresh
+                ns = ExternalProcessSandbox._cached_namespace
+                if 'np' in ns or 'numpy' in ns:
+                    np_module = ns.get('np') or ns.get('numpy')
+                    if np_module is not None:
+                        try:
+                            _ = np_module.random.rand(1)  # Force numpy.random load
+                        except Exception:
+                            pass
+
             # Always compile and inject new priority into cached namespace
             if priority_node:
                 priority_tree = ast.Module(body=[priority_node], type_ignores=[])
@@ -101,7 +112,12 @@ class ExternalProcessSandbox:
             # Compile in parent - child will inherit compiled namespace
             namespace = ExternalProcessSandbox.compile_code(program)
             func = namespace[function_to_run]
-        except Exception:
+        except Exception as e:
+            import traceback
+            import sys
+            sys.stderr.write(f"SANDBOX COMPILE ERROR: {type(e).__name__}: {e}\n")
+            traceback.print_exc(file=sys.stderr)
+            sys.stderr.flush()
             return None, False, 0.0
 
         # Create pipe for result communication
@@ -114,10 +130,12 @@ class ExternalProcessSandbox:
             os.close(read_fd)
 
             try:
-                # Set memory limit
+                # Set memory limit (virtual address space)
+                # Note: Use RLIMIT_AS, not RLIMIT_DATA - the latter breaks mmap
+                # for shared libraries like numpy ("failed to map segment")
                 mem_bytes = int(self.memory_limit_gb * 1024 * 1024 * 1024)
                 try:
-                    resource.setrlimit(resource.RLIMIT_DATA, (mem_bytes, mem_bytes))
+                    resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
                 except (ValueError, resource.error):
                     pass
 
@@ -135,7 +153,12 @@ class ExternalProcessSandbox:
                 os.close(write_fd)
                 os._exit(0)
 
-            except Exception:
+            except Exception as e:
+                import traceback
+                import sys
+                sys.stderr.write(f"SANDBOX ERROR: {type(e).__name__}: {e}\n")
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
                 os._exit(1)
 
         else:
