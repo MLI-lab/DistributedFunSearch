@@ -137,6 +137,7 @@ EvaluatorConfig(
     timeout=30,                    # Seconds before sandbox killed
     max_workers=2,                 # Parallel workers per evaluator
     sandbox_memory_limit_gb=1.0,   # Memory limit per sandbox
+    sandbox_debug=False,           # True to log sandbox errors to stderr
     prefetch_count=15,             # RabbitMQ message buffer
 
     evaluation_script_path="...",  # Path to evaluation script with evaluate and priority
@@ -151,6 +152,16 @@ EvaluatorConfig(
 ## Debugging
 
 Graphs are cached in memory. No files written to disk during evaluation (fork-based).
+
+To see why sandbox evaluations fail (compile errors, runtime exceptions), enable `sandbox_debug` in your config:
+
+```python
+EvaluatorConfig(
+    sandbox_debug=True,  # Default: False. Logs errors with full tracebacks to stderr.
+)
+```
+
+This prints `SANDBOX COMPILE ERROR` and `SANDBOX ERROR` messages to stderr (visible in SLURM `.err` logs). Off by default to avoid excessive output during normal runs.
 
 ```bash
 # Check memory usage (graphs cached in evaluator)
