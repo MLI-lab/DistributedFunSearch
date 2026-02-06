@@ -137,7 +137,7 @@ class ConnectionManager:
 
         self.logger.info(f"{self.component_name}: Connecting to RabbitMQ...")
         try:
-            await self.close()
+            await self.close(shutdown=False)
             self.connection = await create_connection(self.config, timeout=self.timeout)
             self.channel = await self.connection.channel()
 
@@ -193,16 +193,22 @@ class ConnectionManager:
                 self.logger.warning(
                     f"{self.component_name}: {type(e).__name__}: {e}. Retrying in {delay:.1f}s..."
                 )
-                await self.close()
+                await self.close(shutdown=False)
                 await asyncio.sleep(delay)
                 delay = min(delay * 1.5, max_delay)
 
         self.logger.info(f"{self.component_name}: Shutdown requested, stopping connection attempts")
         return False
 
-    async def close(self):
-        """Close connection and channel. Also sets shutdown flag to stop reconnection."""
-        self.request_shutdown()
+    async def close(self, shutdown=True):
+        """Close connection and channel.
+
+        Args:
+            shutdown: If True (default), also sets shutdown flag to prevent reconnection.
+                      Use shutdown=False when closing for reconnection.
+        """
+        if shutdown:
+            self.request_shutdown()
         try:
             if self.channel and not self.channel.is_closed:
                 await self.channel.close()

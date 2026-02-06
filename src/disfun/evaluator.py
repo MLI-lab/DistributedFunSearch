@@ -473,24 +473,37 @@ class Evaluator:
         return input_tuple
 
     async def consume_and_process(self):
-        """Main consume loop with automatic connection recovery."""
+        """Main consume loop with automatic connection recovery.
 
-        while True:
+        Uses connect_with_retry() for exponential backoff (config: reconnect_delay, max_reconnect_delay).
+        Gives up after max_reconnects consecutive failures to avoid infinite loops.
+        """
+        max_reconnects = 10
+        reconnect_count = 0
+
+        while reconnect_count < max_reconnects:
             try:
-                # Connect with retry (handles exponential backoff internally)
                 if not await self._conn.connect_with_retry():
                     break  # Shutdown requested
 
+                loop_start = asyncio.get_event_loop().time()
                 await self._consume_loop()
-                break  # Normal exit
+                # Only reset if it actually ran for a while (processed messages)
+                if asyncio.get_event_loop().time() - loop_start > 60:
+                    reconnect_count = 0
 
             except asyncio.CancelledError:
                 logger.info(f"Evaluator {self.local_id}: Cancelled, exiting...")
                 break
 
             except Exception as e:
-                logger.warning(f"Evaluator {self.local_id}: {type(e).__name__}: {e}. Reconnecting...")
-                await self._conn.close()
+                logger.warning(f"Evaluator {self.local_id}: {type(e).__name__}: {e}")
+                await self._conn.close(shutdown=False)
+
+            reconnect_count += 1
+            logger.info(f"Evaluator {self.local_id}: Reconnecting ({reconnect_count}/{max_reconnects})...")
+        else:
+            logger.error(f"Evaluator {self.local_id}: {max_reconnects} consecutive reconnect failures, exiting.")
 
     async def _consume_loop(self):
         """Inner consume loop that processes messages from queue."""

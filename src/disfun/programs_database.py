@@ -307,25 +307,37 @@ class ProgramsDatabase:
             return
 
     async def consume_and_process(self) -> None:
-        """Main consume loop with automatic connection recovery."""
-        logger.info("ProgramsDatabase: consume_and_process started")
+        """Main consume loop with automatic connection recovery.
 
-        while True:
+        Uses connect_with_retry() for exponential backoff (config: reconnect_delay, max_reconnect_delay).
+        Gives up after max_reconnects consecutive failures to avoid infinite loops.
+        """
+        logger.info("ProgramsDatabase: consume_and_process started")
+        max_reconnects = 10
+        reconnect_count = 0
+
+        while reconnect_count < max_reconnects:
             try:
-                # Connect with retry (handles exponential backoff internally)
                 if not await self._conn.connect_with_retry():
                     break  # Shutdown requested
 
+                loop_start = asyncio.get_event_loop().time()
                 await self._consume_loop()
-                break  # Normal exit
+                if asyncio.get_event_loop().time() - loop_start > 60:
+                    reconnect_count = 0
 
             except asyncio.CancelledError:
                 logger.info("ProgramsDatabase: Cancelled, exiting...")
                 break
 
             except Exception as e:
-                logger.warning(f"ProgramsDatabase: {type(e).__name__}: {e}. Reconnecting...")
-                await self._conn.close()
+                logger.warning(f"ProgramsDatabase: {type(e).__name__}: {e}")
+                await self._conn.close(shutdown=False)
+
+            reconnect_count += 1
+            logger.info(f"ProgramsDatabase: Reconnecting ({reconnect_count}/{max_reconnects})...")
+        else:
+            logger.error(f"ProgramsDatabase: {max_reconnects} consecutive reconnect failures, exiting.")
 
     async def _consume_loop(self):
         """Inner consume loop, processes messages from the queue."""
