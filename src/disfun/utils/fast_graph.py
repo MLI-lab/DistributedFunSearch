@@ -6,12 +6,94 @@ Usage:
     G = load_graph_from_lmdb(path)
     G.neighbors(node)  # returns tuple of neighbors
     G.degree(node)     # returns int (also G.degree[node] for NetworkX compat)
-    G.nodes            # returns tuple of all nodes
+    G.nodes            # returns tuple of all nodes (also G.nodes() for compat)
 
 LLM-generated priority functions work unchanged:
     def priority(node, G, n, s):
         return G.degree(node) + sum(G.degree(nb) for nb in G.neighbors(node))
 """
+
+
+class NodeView:
+    """NetworkX-compatible node view supporting both G.nodes and G.nodes()."""
+
+    __slots__ = ('_nodes',)
+
+    def __init__(self, nodes):
+        self._nodes = nodes
+
+    def __call__(self, data=False, default=None):
+        """G.nodes() or G.nodes(data=True) -> nodes with optional attributes."""
+        if data:
+            return [(n, {}) for n in self._nodes]
+        return self._nodes
+
+    def __iter__(self):
+        return iter(self._nodes)
+
+    def __len__(self):
+        return len(self._nodes)
+
+    def __contains__(self, node):
+        return node in self._nodes
+
+    def __getitem__(self, idx):
+        return self._nodes[idx]
+
+    def keys(self):
+        """G.nodes.keys() -> nodes"""
+        return self._nodes
+
+    def values(self):
+        """G.nodes.values() -> empty attribute dicts"""
+        return [{} for _ in self._nodes]
+
+    def items(self):
+        """G.nodes.items() -> (node, attr_dict) pairs"""
+        return [(n, {}) for n in self._nodes]
+
+    def data(self, data=True, default=None):
+        """G.nodes.data() -> (node, attr_dict) pairs"""
+        return [(n, {}) for n in self._nodes]
+
+    def __repr__(self):
+        return f"NodeView({self._nodes})"
+
+
+class EdgesView:
+    """NetworkX-compatible edges view supporting both G.edges and G.edges()."""
+
+    __slots__ = ('_graph', '_cached_edges')
+
+    def __init__(self, graph, cached_edges=None):
+        self._graph = graph
+        self._cached_edges = cached_edges  # For pure Python version
+
+    def __call__(self, nbunch=None, data=False, default=None):
+        """G.edges() -> iterator of edges (NetworkX compatibility)."""
+        return iter(self)
+
+    def __iter__(self):
+        if self._cached_edges is not None:
+            return iter(self._cached_edges)
+        # For C++ version, generate on the fly
+        seen = set()
+        for node in self._graph._nodes_tuple:
+            for nb in self._graph.neighbors(node):
+                edge = (node, nb) if node < nb else (nb, node)
+                if edge not in seen:
+                    seen.add(edge)
+                    yield edge
+
+    def __len__(self):
+        return self._graph.number_of_edges()
+
+    def __contains__(self, edge):
+        u, v = edge
+        return self._graph.has_edge(u, v)
+
+    def __repr__(self):
+        return f"EdgesView({self._graph})"
 
 
 class DegreeView:
@@ -22,8 +104,8 @@ class DegreeView:
     def __init__(self, graph):
         self._graph = graph
 
-    def __call__(self, node=None):
-        """G.degree(node) -> int, G.degree() -> dict"""
+    def __call__(self, node=None, weight=None):
+        """G.degree(node) -> int, G.degree() -> dict. Weight param ignored (unweighted graph)."""
         return self._graph._degree_lookup(node)
 
     def __getitem__(self, node):
@@ -32,7 +114,7 @@ class DegreeView:
 
     def __iter__(self):
         """Iterate over (node, degree) pairs."""
-        for node in self._graph.nodes:
+        for node in self._graph._nodes_tuple:
             yield node, self._graph._degree_lookup(node)
 
     def __len__(self):
@@ -52,10 +134,22 @@ class AdjacencyView:
         return {nb: {} for nb in self._graph.neighbors(node)}
 
     def __iter__(self):
-        return iter(self._graph.nodes)
+        return iter(self._graph._nodes_tuple)
 
     def __len__(self):
         return self._graph.number_of_nodes()
+
+    def keys(self):
+        """G.adj.keys() -> nodes"""
+        return self._graph._nodes_tuple
+
+    def values(self):
+        """G.adj.values() -> list of neighbor dicts"""
+        return [self[node] for node in self._graph._nodes_tuple]
+
+    def items(self):
+        """G.adj.items() -> (node, neighbors_dict) pairs"""
+        return [(node, self[node]) for node in self._graph._nodes_tuple]
 
 
 # Try C++ implementation first
@@ -93,21 +187,25 @@ if USING_CPP:
     class FastGraphCpp:
         """Wrapper around C++ FastGraph with NetworkX-compatible G.degree[node] support."""
 
-        __slots__ = ('_cpp_graph', '_degree_view', '_adj_view')
+        __slots__ = ('_cpp_graph', '_degree_view', '_adj_view', '_node_view', '_edges_view', '_nodes_tuple')
 
         def __init__(self, cpp_graph):
             self._cpp_graph = cpp_graph
+            self._nodes_tuple = cpp_graph.nodes  # Cache for internal use
             self._degree_view = DegreeView(self)
             self._adj_view = AdjacencyView(self)
+            self._node_view = NodeView(self._nodes_tuple)
+            self._edges_view = EdgesView(self)
 
         @property
         def nodes(self):
-            return self._cpp_graph.nodes
+            """Returns NodeView supporting both G.nodes and G.nodes()."""
+            return self._node_view
 
         @property
         def node(self):
             """Deprecated alias for nodes (NetworkX compatibility)."""
-            return {n: {} for n in self._cpp_graph.nodes}
+            return {n: {} for n in self._nodes_tuple}
 
         def neighbors(self, node):
             return self._cpp_graph.neighbors(node)
@@ -142,6 +240,14 @@ if USING_CPP:
             """Number of edges (NetworkX alias)."""
             return self._cpp_graph.number_of_edges()
 
+        def is_directed(self):
+            """Returns False (graph is undirected)."""
+            return False
+
+        def is_multigraph(self):
+            """Returns False (no parallel edges)."""
+            return False
+
         def __contains__(self, node):
             return node in self._cpp_graph
 
@@ -161,15 +267,14 @@ if USING_CPP:
             return self._adj_view
 
         @property
+        def _adj(self):
+            """Internal adjacency dict (NetworkX compatibility for algorithms)."""
+            return self._adj_view
+
+        @property
         def edges(self):
-            """Iterate over edges as (u, v) tuples."""
-            seen = set()
-            for node in self._cpp_graph.nodes:
-                for nb in self._cpp_graph.neighbors(node):
-                    edge = (node, nb) if node < nb else (nb, node)
-                    if edge not in seen:
-                        seen.add(edge)
-                        yield edge
+            """Returns EdgesView supporting both G.edges and G.edges()."""
+            return self._edges_view
 
         def greedy_independent_set(self, priorities):
             return self._cpp_graph.greedy_independent_set(priorities)
@@ -184,11 +289,11 @@ else:
     class FastGraphCpp:
         """Graph with NetworkX-like API but efficient tuple/dict storage."""
 
-        __slots__ = ('_nodes', '_node_set', '_neighbors', '_degrees', '_num_edges', '_degree_view', '_adj_view', '_edges')
+        __slots__ = ('_nodes_tuple', '_node_set', '_neighbors', '_degrees', '_num_edges', '_degree_view', '_adj_view', '_edges_tuple', '_node_view', '_edges_view')
 
         def __init__(self, nodes: list, edges: list):
             """Build graph from node list and edge list."""
-            self._nodes = tuple(nodes)
+            self._nodes_tuple = tuple(nodes)
             self._node_set = frozenset(nodes)
 
             neighbors = {n: [] for n in nodes}
@@ -199,18 +304,21 @@ else:
             self._neighbors = {n: tuple(nbs) for n, nbs in neighbors.items()}
             self._degrees = {n: len(nbs) for n, nbs in self._neighbors.items()}
             self._num_edges = len(edges)
-            self._edges = tuple(edges)
+            self._edges_tuple = tuple(edges)
             self._degree_view = DegreeView(self)
             self._adj_view = AdjacencyView(self)
+            self._node_view = NodeView(self._nodes_tuple)
+            self._edges_view = EdgesView(self, self._edges_tuple)
 
         @property
         def nodes(self):
-            return self._nodes
+            """Returns NodeView supporting both G.nodes and G.nodes()."""
+            return self._node_view
 
         @property
         def node(self):
             """Deprecated alias for nodes (NetworkX compatibility)."""
-            return {n: {} for n in self._nodes}
+            return {n: {} for n in self._nodes_tuple}
 
         def neighbors(self, node) -> tuple:
             return self._neighbors[node]
@@ -227,7 +335,7 @@ else:
             return self._degrees[node]
 
         def number_of_nodes(self) -> int:
-            return len(self._nodes)
+            return len(self._nodes_tuple)
 
         def number_of_edges(self) -> int:
             return self._num_edges
@@ -241,20 +349,28 @@ else:
 
         def order(self) -> int:
             """Number of nodes (NetworkX alias)."""
-            return len(self._nodes)
+            return len(self._nodes_tuple)
 
         def size(self) -> int:
             """Number of edges (NetworkX alias)."""
             return self._num_edges
 
+        def is_directed(self):
+            """Returns False (graph is undirected)."""
+            return False
+
+        def is_multigraph(self):
+            """Returns False (no parallel edges)."""
+            return False
+
         def __contains__(self, node) -> bool:
             return node in self._node_set
 
         def __len__(self) -> int:
-            return len(self._nodes)
+            return len(self._nodes_tuple)
 
         def __iter__(self):
-            return iter(self._nodes)
+            return iter(self._nodes_tuple)
 
         def __getitem__(self, node):
             """G[node] -> dict of neighbors (NetworkX compatibility)."""
@@ -266,13 +382,18 @@ else:
             return self._adj_view
 
         @property
+        def _adj(self):
+            """Internal adjacency dict (NetworkX compatibility for algorithms)."""
+            return self._adj_view
+
+        @property
         def edges(self):
-            """Return edges as tuple."""
-            return self._edges
+            """Returns EdgesView supporting both G.edges and G.edges()."""
+            return self._edges_view
 
         def greedy_independent_set(self, priorities: dict) -> list:
             """Compute greedy independent set given priority dict."""
-            nodes_sorted = sorted(self._nodes, key=lambda x: (-priorities.get(x, 0), x))
+            nodes_sorted = sorted(self._nodes_tuple, key=lambda x: (-priorities.get(x, 0), x))
 
             independent_set = []
             removed = set()
