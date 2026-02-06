@@ -41,10 +41,12 @@ class ExternalProcessSandbox:
         timeout_secs: int = 30,
         graph_dir: str = None,
         memory_limit_gb: float = 1.0,
+        debug: bool = False,
     ):
         self.timeout_secs = timeout_secs
         self.graph_dir = graph_dir
         self.memory_limit_gb = memory_limit_gb
+        self.debug = debug
 
     @staticmethod
     def compile_code(program: str):
@@ -113,11 +115,12 @@ class ExternalProcessSandbox:
             namespace = ExternalProcessSandbox.compile_code(program)
             func = namespace[function_to_run]
         except Exception as e:
-            import traceback
-            import sys
-            sys.stderr.write(f"SANDBOX COMPILE ERROR: {type(e).__name__}: {e}\n")
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+            if self.debug:
+                import traceback
+                import sys
+                sys.stderr.write(f"SANDBOX COMPILE ERROR: {type(e).__name__}: {e}\n")
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
             return None, False, 0.0
 
         # Create pipe for result communication
@@ -154,11 +157,12 @@ class ExternalProcessSandbox:
                 os._exit(0)
 
             except Exception as e:
-                import traceback
-                import sys
-                sys.stderr.write(f"SANDBOX ERROR: {type(e).__name__}: {e}\n")
-                traceback.print_exc(file=sys.stderr)
-                sys.stderr.flush()
+                if self.debug:
+                    import traceback
+                    import sys
+                    sys.stderr.write(f"SANDBOX ERROR: {type(e).__name__}: {e}\n")
+                    traceback.print_exc(file=sys.stderr)
+                    sys.stderr.flush()
                 os._exit(1)
 
         else:

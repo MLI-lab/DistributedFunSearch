@@ -439,7 +439,8 @@ class Evaluator:
         self.sandbox = sandbox.ExternalProcessSandbox(
             timeout_secs=evaluator_config.timeout,
             graph_dir=evaluator_config.graph_dir,
-            memory_limit_gb=evaluator_config.sandbox_memory_limit_gb
+            memory_limit_gb=evaluator_config.sandbox_memory_limit_gb,
+            debug=getattr(evaluator_config, 'sandbox_debug', False),
         )
         self.executor = ThreadPoolExecutor(max_workers=evaluator_config.max_workers)
         self.cumulative_cpu_time = 0.0
