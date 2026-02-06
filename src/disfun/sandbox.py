@@ -101,12 +101,7 @@ class ExternalProcessSandbox:
             # Compile in parent - child will inherit compiled namespace
             namespace = ExternalProcessSandbox.compile_code(program)
             func = namespace[function_to_run]
-        except Exception as e:
-            import traceback
-            import sys
-            sys.stderr.write(f"SANDBOX COMPILE ERROR: {type(e).__name__}: {e}\n")
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+        except Exception:
             return None, False, 0.0
 
         # Create pipe for result communication
@@ -122,7 +117,7 @@ class ExternalProcessSandbox:
                 # Set memory limit
                 mem_bytes = int(self.memory_limit_gb * 1024 * 1024 * 1024)
                 try:
-                    resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+                    resource.setrlimit(resource.RLIMIT_DATA, (mem_bytes, mem_bytes))
                 except (ValueError, resource.error):
                     pass
 
@@ -140,13 +135,7 @@ class ExternalProcessSandbox:
                 os.close(write_fd)
                 os._exit(0)
 
-            except Exception as e:
-                import traceback
-                import sys
-                # Write error to stderr so it shows in job logs
-                sys.stderr.write(f"SANDBOX ERROR: {type(e).__name__}: {e}\n")
-                traceback.print_exc(file=sys.stderr)
-                sys.stderr.flush()
+            except Exception:
                 os._exit(1)
 
         else:
