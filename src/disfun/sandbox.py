@@ -132,6 +132,14 @@ class ExternalProcessSandbox:
             # === CHILD PROCESS ===
             os.close(read_fd)
 
+            # Suppress stdout/stderr from LLM-generated code (e.g. print statements)
+            # to prevent unbounded growth of SBATCH .out/.err files.
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, 1)  # stdout
+            if not self.debug:
+                os.dup2(devnull, 2)  # stderr (keep if debug mode)
+            os.close(devnull)
+
             try:
                 # Set memory limit (virtual address space)
                 # Note: Use RLIMIT_AS, not RLIMIT_DATA - the latter breaks mmap
