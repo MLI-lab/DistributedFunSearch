@@ -387,6 +387,57 @@ class TaskManager:
                     self.logger.error("Max retries reached. Failed to publish initial program.")
                     raise e  # Re-raise the exception after max retries
 
+    async def monitor_evaluator_health(self, check_interval=60):
+        """Monitor evaluator processes and respawn any that have crashed.
+
+        This runs even when dynamic scaling is disabled, ensuring crashed
+        evaluators are restarted to maintain throughput.
+        """
+        startup_delay = getattr(self.config.evaluator, 'startup_delay', 0)
+        ctx = mp.get_context('spawn')
+
+        while not self.shutting_down:
+            await asyncio.sleep(check_interval)
+
+            if self.shutting_down:
+                break
+
+            # Check each evaluator process
+            dead_evaluators = []
+            for i, proc in enumerate(self.evaluator_processes):
+                if not proc.is_alive():
+                    dead_evaluators.append((i, proc))
+
+            if not dead_evaluators:
+                continue
+
+            self.logger.warning(f"Detected {len(dead_evaluators)} dead evaluator(s), respawning...")
+
+            for i, old_proc in dead_evaluators:
+                if self.shutting_down:
+                    break
+
+                try:
+                    proc = ctx.Process(
+                        target=evaluator_process_entry,
+                        args=(self.config_path, self.template, self.inputs,
+                              self.termination_config.target_solutions,
+                              self.log_dir, self.log_filename),
+                        name=f"Evaluator-respawn-{old_proc.pid}"
+                    )
+                    proc.start()
+
+                    # Update tracking
+                    self.evaluator_processes[i] = proc
+                    self.logger.info(f"Respawned evaluator PID={proc.pid} (was {old_proc.pid})")
+
+                    # Stagger restarts to avoid memory spike during graph loading
+                    if startup_delay > 0 and len(dead_evaluators) > 1:
+                        await asyncio.sleep(startup_delay)
+
+                except Exception as e:
+                    self.logger.error(f"Failed to respawn evaluator: {e}")
+
     async def monitor_sampler_health(self, check_interval=60):
         """Monitor sampler processes and respawn any that have crashed.
 
@@ -630,6 +681,7 @@ class TaskManager:
             database_task, checkpoint_task, wandb_logging_task,
             asyncio.create_task(self.resource_manager.log_resource_stats_periodically()),
             asyncio.create_task(self.monitor_sampler_health(check_interval=60)),
+            asyncio.create_task(self.monitor_evaluator_health(check_interval=60)),
             # Consume resource stats from remote attach nodes for W&B aggregation
             asyncio.create_task(wandb_logging.consume_resource_stats(self.config)),
         ]

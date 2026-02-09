@@ -340,6 +340,8 @@ def _yield_token_and_is_call(
       prev_token = token
     if prev_token:
       yield prev_token, False
+  except tokenize.TokenError:
+    raise
   except Exception as e:
     logger.warning('Failed parsing %s', code)
     raise e
@@ -348,20 +350,26 @@ def rename_function_calls(code: str, source_name: str, target_name: str) -> str:
   """Parses code into tokens, identifies function call tokens, and replaces instances of source_name with target_name."""
   if source_name not in code:
     return code
-  modified_tokens = []
-  for token, is_call in _yield_token_and_is_call(code):
-    if is_call and token.string == source_name:
-      # Replace the function name token
-      modified_token = tokenize.TokenInfo(
-          type=token.type,
-          string=target_name,
-          start=token.start,
-          end=token.end,
-          line=token.line,
-      )
-      modified_tokens.append(modified_token)
-    else:
-      # Token doesnt meet criteria for renaming, add unchanged
-      modified_tokens.append(token)
-  # Untokenize back into code
-  return _untokenize(modified_tokens)
+  try:
+    modified_tokens = []
+    for token, is_call in _yield_token_and_is_call(code):
+      if is_call and token.string == source_name:
+        # Replace the function name token
+        modified_token = tokenize.TokenInfo(
+            type=token.type,
+            string=target_name,
+            start=token.start,
+            end=token.end,
+            line=token.line,
+        )
+        modified_tokens.append(modified_token)
+      else:
+        # Token doesnt meet criteria for renaming, add unchanged
+        modified_tokens.append(token)
+    # Untokenize back into code
+    return _untokenize(modified_tokens)
+  except tokenize.TokenError:
+    # ast.parse() and tokenize have different strictness — code that passed
+    # AST validation can still fail tokenization. Return unchanged.
+    logger.warning(f"Tokenize failed during rename ({source_name} -> {target_name}), returning code unchanged")
+    return code

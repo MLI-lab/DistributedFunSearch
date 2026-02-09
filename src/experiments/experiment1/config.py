@@ -56,16 +56,16 @@ class SamplerConfig:
     samples_per_prompt_mutation: int = 5  # Override for ReEvo mutation phase
     temperature_period = None  # Programs until LLM temperature decays (exploration to exploitation), None for fixed
     temperature: float = 0.9444444444444444
-    max_new_tokens: int = 1024 #246 for starcoder2-15b, 1024 for qwen3-8b
+    max_new_tokens: int = 1024 #246 #246 for starcoder2-15b, 1024 for qwen3-8b
     top_p: float = 0.7777777777777778
     repetition_penalty: float = 1.222222
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "Qwen/Qwen3-8B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
-    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-8b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+    model: str = "bigcode/starcoder2-15b"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
+    cost_model: str = "fireworks_ai/accounts/fireworks/models/starcoder2-15b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
-    use_chat_api: bool = True  # True to use vLLM chat() instead of generate(), use when providing system/user messages
+    use_chat_api: bool = False  # True to use vLLM chat() instead of generate(), use when providing system/user messages
     enable_thinking: bool = False  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
     model_params_billions: float = None # For FLOP estimation, None to disable
     api_base: str = None
@@ -89,11 +89,11 @@ class EvaluatorConfig:
     timeout: int = 30
     max_workers: int = 2  # Parallel CPU processes per evaluator
     q: int = 2  # Alphabet size (2 for binary, 4 for DNA)
-    graph_dir: str = "/mnt/Graphs"
+    graph_dir: str = "/workspace/DistributedFunSearch/src/graphs"
     graph_type: str = "deletion"  # "deletion" or "ids"
     prefetch_count: int = 15
-    sandbox_memory_limit_gb: float = 1.0 # Virtual address space limit (1GB worked with RLIMIT_AS)
-    sandbox_debug: bool = True  # Log sandbox errors to stderr. Run with: mkdir -p logs && python -m disfun 2>&1 | tee -a logs/full_output.log    
+    sandbox_memory_limit_gb: float = 1 # 1 for deletions, 20 for ids
+    sandbox_debug: bool = False  # Log sandbox compile/runtime errors to stderr
     startup_delay: float = 3.0  # Seconds between evaluator starts (staggers graph loading to prevent OOM)
 
 
@@ -106,14 +106,14 @@ class PromptConfig:
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/templates/single_turn/reflection"
+    funsearch_template: str = "funsearch/templates/single_turn/thought.txt"
     funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
     funsearch_string_hint: str | None = None  # e.g., "funsearch/problem_descriptions/string_hint.txt"
-    funsearch_system_message: str | None = "funsearch/system_messages/single_turn/reflection.txt" #"funsearch/system_messages/basic.txt"
+    funsearch_system_message: str | None = "funsearch/system_messages/single_turn/thought.txt" #"funsearch/system_messages/basic.txt"
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
-    fewshot_include_description: bool = False  # Include <description> tags in few-shot examples (if template requests description output)
+    fewshot_include_description: bool = True  # Include <description> tags in few-shot examples (if template requests description output)
 
     # EoH
     eoh_styles_dir: str = "eoh/styles"
@@ -155,10 +155,10 @@ class WandbConfig:
     project: str = "disfun_s2_qwen8b"
     entity: str = "franziweindel-technical-university-of-munich"
     run_name: str = None  # None for auto-generated
-    run_name_tag: str = "reflection"
+    run_name_tag: str = "evol_desc_code"
     log_interval: int = 300  # Seconds
     tags: List[str] = dataclasses.field(default_factory=list)
-    checkpoints_base_path: str = "/mnt/disfun/checkpoints/s2"
+    checkpoints_base_path: str = "/mnt/disfun/checkpoints/s1"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -255,7 +255,7 @@ class Config:
     termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
     sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
-    num_samplers: int = 3
-    num_evaluators: int = 50
+    num_samplers: int = 4
+    num_evaluators: int = 60
     num_pdb: int = 1
     random_seed: int = 13  # None for non-deterministic
