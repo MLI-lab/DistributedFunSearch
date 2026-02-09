@@ -70,7 +70,10 @@ async def declare_queue(channel, queue_name: str):
     )
 
 
-async def get_queue_stats(config, queue_name: str) -> tuple[int, int]:
+_queue_stats_logger = logging.getLogger('main_logger')
+
+
+async def get_queue_stats(config, queue_name: str) -> tuple[int, int] | None:
     """Get message and consumer counts for a queue via Management API.
 
     Args:
@@ -78,7 +81,7 @@ async def get_queue_stats(config, queue_name: str) -> tuple[int, int]:
         queue_name: Name of the queue to query
 
     Returns:
-        Tuple of (message_count, consumer_count)
+        Tuple of (message_count, consumer_count), or None if the API call failed.
     """
     try:
         cfg = config.rabbitmq
@@ -92,9 +95,15 @@ async def get_queue_stats(config, queue_name: str) -> tuple[int, int]:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get('messages', 0), data.get('consumers', 0)
-                return 0, 0
-    except Exception:
-        return 0, 0
+                _queue_stats_logger.warning(
+                    f"Failed to get queue stats for '{queue_name}': HTTP {resp.status}"
+                )
+                return None
+    except Exception as e:
+        _queue_stats_logger.warning(
+            f"Failed to get queue stats for '{queue_name}': {type(e).__name__}: {e}"
+        )
+        return None
 
 
 class ConnectionManager:
@@ -285,8 +294,9 @@ class RabbitMQManager:
         """
         depths = {}
         for queue_name in QUEUE_NAMES:
-            messages, _ = await get_queue_stats(self.config, queue_name)
-            depths[queue_name] = messages
+            result = await get_queue_stats(self.config, queue_name)
+            if result is not None:
+                depths[queue_name] = result[0]
         return depths
 
     async def get_queue_consumers(self) -> dict[str, int]:
@@ -297,8 +307,9 @@ class RabbitMQManager:
         """
         consumers = {}
         for queue_name in QUEUE_NAMES:
-            _, consumer_count = await get_queue_stats(self.config, queue_name)
-            consumers[queue_name] = consumer_count
+            result = await get_queue_stats(self.config, queue_name)
+            if result is not None:
+                consumers[queue_name] = result[1]
         return consumers
 
     async def get_metrics(self) -> dict:
@@ -326,10 +337,10 @@ class RabbitMQManager:
             "queue_depths": depths,
             "queue_consumers": consumers,
             "connections": connection_status,
-            "total_messages": sum(depths.values()),
-            "sampler_queue_depth": depths.get("sampler_queue", 0),
-            "evaluator_queue_depth": depths.get("evaluator_queue", 0),
-            "database_queue_depth": depths.get("database_queue", 0),
+            "total_messages": sum(depths.values()) if depths else 0,
+            "sampler_queue_depth": depths.get("sampler_queue"),
+            "evaluator_queue_depth": depths.get("evaluator_queue"),
+            "database_queue_depth": depths.get("database_queue"),
         }
 
         self._metrics_cache = metrics

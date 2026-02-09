@@ -652,7 +652,11 @@ class ResourceManager:
         if queue is None:
             return 0, 0
 
-        messages, consumers = await get_queue_stats(self.config, queue.name)
+        result = await get_queue_stats(self.config, queue.name)
+        if result is None:
+            self.resource_logger.info(f"Queue '{queue.name}': stats unavailable (API call failed)")
+            return 0, 0
+        messages, consumers = result
         self.resource_logger.info(f"Queue '{queue.name}': messages={messages}, consumers={consumers}")
         return messages, consumers
 

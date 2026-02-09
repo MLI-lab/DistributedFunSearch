@@ -340,17 +340,23 @@ async def compute_rabbitmq_metrics(rabbitmq_manager) -> dict:
     try:
         rmq_metrics = await rabbitmq_manager.get_metrics()
 
-        # Queue depths
-        metrics["rabbitmq/sampler_queue_depth"] = rmq_metrics.get("sampler_queue_depth", 0)
-        metrics["rabbitmq/evaluator_queue_depth"] = rmq_metrics.get("evaluator_queue_depth", 0)
-        metrics["rabbitmq/database_queue_depth"] = rmq_metrics.get("database_queue_depth", 0)
+        # Queue depths (skip if Management API call failed — avoids false zeros in W&B)
+        if rmq_metrics.get("sampler_queue_depth") is not None:
+            metrics["rabbitmq/sampler_queue_depth"] = rmq_metrics["sampler_queue_depth"]
+        if rmq_metrics.get("evaluator_queue_depth") is not None:
+            metrics["rabbitmq/evaluator_queue_depth"] = rmq_metrics["evaluator_queue_depth"]
+        if rmq_metrics.get("database_queue_depth") is not None:
+            metrics["rabbitmq/database_queue_depth"] = rmq_metrics["database_queue_depth"]
         metrics["rabbitmq/total_messages"] = rmq_metrics.get("total_messages", 0)
 
-        # Queue consumers
+        # Queue consumers (skip if Management API call failed — avoids false zeros in W&B)
         queue_consumers = rmq_metrics.get("queue_consumers", {})
-        metrics["rabbitmq/sampler_consumers"] = queue_consumers.get("sampler_queue", 0)
-        metrics["rabbitmq/evaluator_consumers"] = queue_consumers.get("evaluator_queue", 0)
-        metrics["rabbitmq/database_consumers"] = queue_consumers.get("database_queue", 0)
+        if "sampler_queue" in queue_consumers:
+            metrics["rabbitmq/sampler_consumers"] = queue_consumers["sampler_queue"]
+        if "evaluator_queue" in queue_consumers:
+            metrics["rabbitmq/evaluator_consumers"] = queue_consumers["evaluator_queue"]
+        if "database_queue" in queue_consumers:
+            metrics["rabbitmq/database_consumers"] = queue_consumers["database_queue"]
 
         # Connection status (1 = connected, 0 = disconnected)
         connections = rmq_metrics.get("connections", {})
