@@ -411,6 +411,21 @@ class TaskManager:
             if not dead_evaluators:
                 continue
 
+            for _, proc in dead_evaluators:
+                ec = proc.exitcode
+                if ec is None:
+                    reason = "unknown (still running?)"
+                elif ec < 0:
+                    reason = f"killed by {signal.Signals(-ec).name} (unhandled)"
+                elif ec == 0:
+                    reason = "normal exit (consume loop finished or reconnects exhausted)"
+                elif ec == 143:
+                    reason = "received SIGTERM (handled gracefully)"
+                elif ec == 130:
+                    reason = "received SIGINT (handled gracefully)"
+                else:
+                    reason = f"exitcode {ec}"
+                self.logger.warning(f"Dead evaluator PID={proc.pid}: {reason}")
             self.logger.warning(f"Detected {len(dead_evaluators)} dead evaluator(s), respawning...")
 
             for i, old_proc in dead_evaluators:
@@ -585,6 +600,12 @@ class TaskManager:
         self.logger.info(f"Started {self.attach_mode} processes")
 
         self.tasks = [asyncio.create_task(self.resource_manager.log_resource_stats_periodically())]
+
+        # Respawn dead evaluators/samplers (runs regardless of scaling setting)
+        if self.attach_mode != "samplers":
+            self.tasks.append(asyncio.create_task(self.monitor_evaluator_health(check_interval=60)))
+        if self.attach_mode != "evaluators":
+            self.tasks.append(asyncio.create_task(self.monitor_sampler_health(check_interval=60)))
 
         # Publish resource stats to main node for W&B logging
         resource_stats_interval = getattr(self.config.scaling, 'resource_log_interval', 60)

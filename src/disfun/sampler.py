@@ -674,31 +674,36 @@ class Sampler:
         Uses connect_with_retry() for exponential backoff (config: reconnect_delay, max_reconnect_delay).
         Gives up after max_reconnects consecutive failures to avoid infinite loops.
         """
+        import os as _os
+        pid = _os.getpid()
         max_reconnects = 10
         reconnect_count = 0
 
         while reconnect_count < max_reconnects:
             try:
                 if not await self._conn.connect_with_retry():
+                    logger.warning(f"Sampler ({self._config.model}, PID {pid}): EXIT REASON: shutdown requested during connect")
                     break  # Shutdown requested
 
                 loop_start = asyncio.get_event_loop().time()
                 await self._consume_loop()
-                if asyncio.get_event_loop().time() - loop_start > 60:
+                elapsed = asyncio.get_event_loop().time() - loop_start
+                logger.info(f"Sampler ({self._config.model}, PID {pid}): consume_loop ended after {elapsed:.0f}s")
+                if elapsed > 60:
                     reconnect_count = 0
 
             except asyncio.CancelledError:
-                logger.info(f"Sampler ({self._config.model}): Cancelled, exiting...")
+                logger.warning(f"Sampler ({self._config.model}, PID {pid}): EXIT REASON: CancelledError (signal or shutdown)")
                 break
 
             except Exception as e:
-                logger.warning(f"Sampler ({self._config.model}): {type(e).__name__}: {e}")
+                logger.warning(f"Sampler ({self._config.model}, PID {pid}): {type(e).__name__}: {e}")
                 await self._conn.close(shutdown=False)
 
             reconnect_count += 1
-            logger.info(f"Sampler ({self._config.model}): Reconnecting ({reconnect_count}/{max_reconnects})...")
+            logger.info(f"Sampler ({self._config.model}, PID {pid}): Reconnecting ({reconnect_count}/{max_reconnects})...")
         else:
-            logger.error(f"Sampler ({self._config.model}): {max_reconnects} consecutive reconnect failures, exiting.")
+            logger.error(f"Sampler ({self._config.model}, PID {pid}): EXIT REASON: {max_reconnects} consecutive reconnect failures")
 
     async def _consume_loop(self):
         """Inner consume loop, processes messages from the queue."""

@@ -478,32 +478,37 @@ class Evaluator:
         Uses connect_with_retry() for exponential backoff (config: reconnect_delay, max_reconnect_delay).
         Gives up after max_reconnects consecutive failures to avoid infinite loops.
         """
+        import os as _os
+        pid = _os.getpid()
         max_reconnects = 10
         reconnect_count = 0
 
         while reconnect_count < max_reconnects:
             try:
                 if not await self._conn.connect_with_retry():
+                    logger.warning(f"Evaluator {self.local_id} (PID {pid}): EXIT REASON: shutdown requested during connect")
                     break  # Shutdown requested
 
                 loop_start = asyncio.get_event_loop().time()
                 await self._consume_loop()
+                elapsed = asyncio.get_event_loop().time() - loop_start
+                logger.info(f"Evaluator {self.local_id} (PID {pid}): consume_loop ended after {elapsed:.0f}s")
                 # Only reset if it actually ran for a while (processed messages)
-                if asyncio.get_event_loop().time() - loop_start > 60:
+                if elapsed > 60:
                     reconnect_count = 0
 
             except asyncio.CancelledError:
-                logger.info(f"Evaluator {self.local_id}: Cancelled, exiting...")
+                logger.warning(f"Evaluator {self.local_id} (PID {pid}): EXIT REASON: CancelledError (signal or shutdown)")
                 break
 
             except Exception as e:
-                logger.warning(f"Evaluator {self.local_id}: {type(e).__name__}: {e}")
+                logger.warning(f"Evaluator {self.local_id} (PID {pid}): {type(e).__name__}: {e}")
                 await self._conn.close(shutdown=False)
 
             reconnect_count += 1
-            logger.info(f"Evaluator {self.local_id}: Reconnecting ({reconnect_count}/{max_reconnects})...")
+            logger.info(f"Evaluator {self.local_id} (PID {pid}): Reconnecting ({reconnect_count}/{max_reconnects})...")
         else:
-            logger.error(f"Evaluator {self.local_id}: {max_reconnects} consecutive reconnect failures, exiting.")
+            logger.error(f"Evaluator {self.local_id} (PID {pid}): EXIT REASON: {max_reconnects} consecutive reconnect failures")
 
     async def _consume_loop(self):
         """Inner consume loop that processes messages from queue."""

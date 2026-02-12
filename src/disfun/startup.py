@@ -20,6 +20,33 @@ from logging.handlers import RotatingFileHandler
 from multiprocessing import current_process
 
 
+class _NFSSafeRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that suppresses stale file handle errors on NFS.
+
+    When multiple processes share a log file on NFS, rotation by one process
+    causes Errno 116 (Stale file handle) in others. The log data is still
+    written correctly — only the error traceback to stderr is problematic,
+    as it can produce GB-sized .err files on HPC clusters.
+    """
+
+    def handleError(self, record):
+        """Suppress Errno 116 (Stale file handle) from NFS rotation races."""
+        import errno
+        _, exc_value, _ = sys.exc_info()
+        if isinstance(exc_value, OSError) and exc_value.errno in (
+            errno.ESTALE,  # 116 - Stale file handle (NFS)
+            errno.ENOENT,  # 2 - File not found (rotation race)
+        ):
+            # Silently re-open the file on next write attempt
+            try:
+                self.close()
+                self.stream = self._open()
+            except Exception:
+                pass
+            return
+        super().handleError(record)
+
+
 @dataclass
 class ProcessState:
     """Mutable state for a worker process. Avoids nonlocal and dict hacks."""
@@ -83,7 +110,7 @@ def create_logger(name, log_dir, log_file, level=logging.DEBUG,
     logger.setLevel(level)
     os.makedirs(log_dir, exist_ok=True)
 
-    handler = RotatingFileHandler(
+    handler = _NFSSafeRotatingFileHandler(
         os.path.join(log_dir, log_file),
         mode='a',
         maxBytes=max_bytes,
@@ -296,20 +323,30 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # Signal handlers
+    # Signal handlers — track which signal killed us for exit code
     shutdown_task = None
-    def on_signal():
+    received_signal = [None]
+
+    def on_signal(signum):
         nonlocal shutdown_task
+        received_signal[0] = signum
+        ppid = os.getppid()
+        logger.warning(
+            f"Sampler {local_id} (PID {os.getpid()}): Received {signal.Signals(signum).name} "
+            f"(parent PID={ppid})"
+        )
         if shutdown_task is None:
             shutdown_task = asyncio.create_task(shutdown())
 
-    loop.add_signal_handler(signal.SIGTERM, on_signal)
-    loop.add_signal_handler(signal.SIGINT, on_signal)
+    loop.add_signal_handler(signal.SIGTERM, lambda: on_signal(signal.SIGTERM))
+    loop.add_signal_handler(signal.SIGINT, lambda: on_signal(signal.SIGINT))
 
     try:
         loop.run_until_complete(run())
     finally:
         loop.close()
+        if received_signal[0] is not None:
+            sys.exit(128 + received_signal[0])
         sys.exit(0)
 
 
@@ -374,18 +411,32 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # Signal handlers
+    # Signal handlers — track which signal killed us for exit code
     shutdown_task = None
-    def on_signal():
+    received_signal = [None]  # mutable container for nested access
+
+    def on_signal(signum):
         nonlocal shutdown_task
+        received_signal[0] = signum
+        ppid = os.getppid()
+        logger.warning(
+            f"Evaluator {local_id} (PID {os.getpid()}): Received {signal.Signals(signum).name} "
+            f"(parent PID={ppid})"
+        )
         if shutdown_task is None:
             shutdown_task = asyncio.create_task(shutdown())
 
-    loop.add_signal_handler(signal.SIGTERM, on_signal)
-    loop.add_signal_handler(signal.SIGINT, on_signal)
+    loop.add_signal_handler(signal.SIGTERM, lambda: on_signal(signal.SIGTERM))
+    loop.add_signal_handler(signal.SIGINT, lambda: on_signal(signal.SIGINT))
 
     try:
         loop.run_until_complete(run())
     finally:
         loop.close()
+        # Use distinct exit codes so health monitor can identify death cause:
+        #   0   = normal exit (consume loop finished)
+        #   130 = SIGINT  (128 + 2)
+        #   143 = SIGTERM (128 + 15)
+        if received_signal[0] is not None:
+            sys.exit(128 + received_signal[0])
         sys.exit(0)
