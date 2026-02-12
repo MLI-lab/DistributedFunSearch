@@ -151,6 +151,120 @@ class AdjacencyView:
         """G.adj.items() -> (node, neighbors_dict) pairs"""
         return [(node, self[node]) for node in self._graph._nodes_tuple]
 
+    def get(self, node, default=None):
+        """G.adj.get(node) -> neighbors dict or default"""
+        if node in self._graph:
+            return self[node]
+        return default
+
+
+class SubGraphView:
+    """Read-only subgraph view for NetworkX compatibility.
+
+    Wraps a FastGraphCpp and filters to only include specified nodes.
+    Provides same interface as FastGraphCpp but limited to subgraph nodes.
+    """
+
+    __slots__ = ('_graph', '_nodes_set', '_nodes_tuple')
+
+    def __init__(self, graph, nodes):
+        self._graph = graph
+        # Convert to set for O(1) membership, keep only nodes that exist
+        if isinstance(nodes, set):
+            self._nodes_set = nodes & set(graph._nodes_tuple)
+        else:
+            self._nodes_set = set(nodes) & set(graph._nodes_tuple)
+        self._nodes_tuple = tuple(self._nodes_set)
+
+    @property
+    def nodes(self):
+        """Returns NodeView for subgraph nodes."""
+        return NodeView(self._nodes_tuple)
+
+    def neighbors(self, node):
+        """Return neighbors of node that are also in subgraph."""
+        if node not in self._nodes_set:
+            raise KeyError(node)
+        return tuple(nb for nb in self._graph.neighbors(node) if nb in self._nodes_set)
+
+    @property
+    def degree(self):
+        """Returns DegreeView for subgraph."""
+        return DegreeView(self)
+
+    def _degree_lookup(self, node=None):
+        """Internal method for DegreeView."""
+        if node is None:
+            return {n: len(self.neighbors(n)) for n in self._nodes_tuple}
+        return len(self.neighbors(node))
+
+    def number_of_nodes(self):
+        return len(self._nodes_tuple)
+
+    def number_of_edges(self):
+        count = 0
+        for node in self._nodes_tuple:
+            count += len(self.neighbors(node))
+        return count // 2  # Each edge counted twice
+
+    def has_node(self, node):
+        return node in self._nodes_set
+
+    def has_edge(self, u, v, key=None):
+        """Check if edge exists. Key param ignored (not a multigraph)."""
+        if u not in self._nodes_set or v not in self._nodes_set:
+            return False
+        return self._graph.has_edge(u, v)
+
+    def __contains__(self, node):
+        return node in self._nodes_set
+
+    def __len__(self):
+        return len(self._nodes_tuple)
+
+    def __iter__(self):
+        return iter(self._nodes_tuple)
+
+    def __getitem__(self, node):
+        """G[node] -> dict of neighbors in subgraph."""
+        return {nb: {} for nb in self.neighbors(node)}
+
+    @property
+    def adj(self):
+        """G.adj[node] -> neighbors (NetworkX compatibility)."""
+        return AdjacencyView(self)
+
+    def get(self, node, default=None):
+        """G.get(node) -> neighbors dict or default."""
+        if node in self._nodes_set:
+            return {nb: {} for nb in self.neighbors(node)}
+        return default
+
+    def subgraph(self, nodes):
+        """Create nested subgraph."""
+        return SubGraphView(self._graph, set(nodes) & self._nodes_set)
+
+    def nbunch_iter(self, nbunch=None):
+        """Iterate over nodes in subgraph."""
+        if nbunch is None:
+            return iter(self._nodes_tuple)
+        if nbunch in self._nodes_set:
+            return iter([nbunch])
+        return (n for n in nbunch if n in self._nodes_set)
+
+    def is_directed(self):
+        """Returns False (graph is undirected)."""
+        return False
+
+    def is_multigraph(self):
+        """Returns False (no parallel edges)."""
+        return False
+
+    def adjacency(self):
+        """G.adjacency() -> iterator of (node, neighbors_dict) pairs."""
+        for node in self._nodes_tuple:
+            yield node, {nb: {} for nb in self.neighbors(node)}
+
 
 # Try C++ implementation first
 # Supports FASTGRAPH_CPP_PATH env var for architecture-specific builds (e.g., HPC hetjobs)
@@ -228,8 +342,8 @@ if USING_CPP:
         def has_node(self, node):
             return self._cpp_graph.has_node(node)
 
-        def has_edge(self, u, v):
-            """Check if edge exists (NetworkX compatibility)."""
+        def has_edge(self, u, v, key=None):
+            """Check if edge exists (NetworkX compatibility). Key param ignored (not a multigraph)."""
             return v in self._cpp_graph.neighbors(u)
 
         def order(self):
@@ -247,6 +361,11 @@ if USING_CPP:
         def is_multigraph(self):
             """Returns False (no parallel edges)."""
             return False
+
+        def adjacency(self):
+            """G.adjacency() -> iterator of (node, neighbors_dict) pairs."""
+            for node in self._nodes_tuple:
+                yield node, {nb: {} for nb in self._cpp_graph.neighbors(node)}
 
         def __contains__(self, node):
             return node in self._cpp_graph
@@ -278,6 +397,48 @@ if USING_CPP:
 
         def greedy_independent_set(self, priorities):
             return self._cpp_graph.greedy_independent_set(priorities)
+
+        def get(self, node, default=None):
+            """G.get(node) -> neighbors dict or default (NetworkX compatibility)."""
+            if node in self._cpp_graph:
+                return {nb: {} for nb in self._cpp_graph.neighbors(node)}
+            return default
+
+        def subgraph(self, nodes):
+            """G.subgraph(nodes) -> SubGraphView (NetworkX compatibility).
+
+            Returns a read-only view that filters to only the specified nodes.
+            """
+            return SubGraphView(self, nodes)
+
+        def nbunch_iter(self, nbunch=None):
+            """G.nbunch_iter(nbunch) -> iterator over nodes (NetworkX compatibility).
+
+            If nbunch is None, iterate over all nodes.
+            If nbunch is a single node, yield just that node.
+            If nbunch is iterable, yield nodes that exist in graph.
+            """
+            if nbunch is None:
+                return iter(self._nodes_tuple)
+            if nbunch in self:
+                return iter([nbunch])
+            return (n for n in nbunch if n in self)
+
+        def copy(self):
+            """G.copy() -> self (graphs are read-only, no need to copy)."""
+            return self
+
+        def values(self):
+            """G.values() -> adjacency dicts (for LLMs that treat G as a dict)."""
+            return (self[node] for node in self._nodes_tuple)
+
+        def keys(self):
+            """G.keys() -> nodes (for LLMs that treat G as a dict)."""
+            return self._nodes_tuple
+
+        def items(self):
+            """G.items() -> (node, neighbors_dict) pairs (for LLMs that treat G as a dict)."""
+            return ((node, self[node]) for node in self._nodes_tuple)
 
     def load_graph_from_lmdb(graph_path: str) -> FastGraphCpp:
         """Load graph from LMDB and wrap with NetworkX-compatible API."""
@@ -343,8 +504,8 @@ else:
         def has_node(self, node) -> bool:
             return node in self._node_set
 
-        def has_edge(self, u, v) -> bool:
-            """Check if edge exists (NetworkX compatibility)."""
+        def has_edge(self, u, v, key=None) -> bool:
+            """Check if edge exists (NetworkX compatibility). Key param ignored (not a multigraph)."""
             return v in self._neighbors.get(u, ())
 
         def order(self) -> int:
@@ -362,6 +523,11 @@ else:
         def is_multigraph(self):
             """Returns False (no parallel edges)."""
             return False
+
+        def adjacency(self):
+            """G.adjacency() -> iterator of (node, neighbors_dict) pairs."""
+            for node in self._nodes_tuple:
+                yield node, {nb: {} for nb in self._neighbors[node]}
 
         def __contains__(self, node) -> bool:
             return node in self._node_set
@@ -406,6 +572,48 @@ else:
                 removed.update(self._neighbors[node])
 
             return independent_set
+
+        def get(self, node, default=None):
+            """G.get(node) -> neighbors dict or default (NetworkX compatibility)."""
+            if node in self._node_set:
+                return {nb: {} for nb in self._neighbors[node]}
+            return default
+
+        def subgraph(self, nodes):
+            """G.subgraph(nodes) -> SubGraphView (NetworkX compatibility).
+
+            Returns a read-only view that filters to only the specified nodes.
+            """
+            return SubGraphView(self, nodes)
+
+        def nbunch_iter(self, nbunch=None):
+            """G.nbunch_iter(nbunch) -> iterator over nodes (NetworkX compatibility).
+
+            If nbunch is None, iterate over all nodes.
+            If nbunch is a single node, yield just that node.
+            If nbunch is iterable, yield nodes that exist in graph.
+            """
+            if nbunch is None:
+                return iter(self._nodes_tuple)
+            if nbunch in self:
+                return iter([nbunch])
+            return (n for n in nbunch if n in self)
+
+        def copy(self):
+            """G.copy() -> self (graphs are read-only, no need to copy)."""
+            return self
+
+        def values(self):
+            """G.values() -> adjacency dicts (for LLMs that treat G as a dict)."""
+            return (self[node] for node in self._nodes_tuple)
+
+        def keys(self):
+            """G.keys() -> nodes (for LLMs that treat G as a dict)."""
+            return self._nodes_tuple
+
+        def items(self):
+            """G.items() -> (node, neighbors_dict) pairs (for LLMs that treat G as a dict)."""
+            return ((node, self[node]) for node in self._nodes_tuple)
 
 
     def load_graph_from_lmdb(graph_path: str) -> FastGraphCpp:

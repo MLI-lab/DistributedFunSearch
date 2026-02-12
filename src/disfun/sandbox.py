@@ -89,6 +89,18 @@ class ExternalProcessSandbox:
                         except Exception:
                             pass
 
+                # Pre-load scipy to avoid "failed to map segment" errors in forked children
+                # scipy's .so files need mmap which can fail under memory limits
+                try:
+                    import scipy
+                    import scipy.stats
+                    import scipy.special
+                    import scipy.spatial
+                    # Touch lazy-loaded submodules to force their .so files to load
+                    _ = scipy.stats.norm.pdf(0)
+                except Exception:
+                    pass
+
             # Always compile and inject new priority into cached namespace
             if priority_node:
                 priority_tree = ast.Module(body=[priority_node], type_ignores=[])
