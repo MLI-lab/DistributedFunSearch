@@ -25,6 +25,7 @@ dependencies = [
   "tqdm",
   "wandb",
   "matplotlib",
+  "wordcloud",
   "pandas",
   "seaborn",
   "tabulate",

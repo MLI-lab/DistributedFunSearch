@@ -219,16 +219,42 @@ def load_initial_programs(initial_functions_dir, strip_tags=False, logger=None):
     return programs
 
 
+def get_gpu_count():
+    """Get total number of GPUs available via nvidia-smi."""
+    import subprocess
+    try:
+        result = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True)
+        return len([l for l in result.stdout.split("\n") if l.startswith("GPU")])
+    except Exception:
+        return 0
+
+
 def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id=0, use_parent_log=False):
     """Standalone sampler process entry point (spawn-compatible)."""
+    # Load config first to determine GPU assignment
+    config = load_config(config_path)
+    tp_size = int(config.sampler.tensor_parallel_size)
+
     # Set CUDA_VISIBLE_DEVICES BEFORE importing anything that touches CUDA/PyTorch
-    if device is not None:
+    if tp_size > 1:
+        # Multi-GPU tensor parallelism: sampler_id=0 with tp=2 → GPUs "0,1"
+        total_gpus = get_gpu_count()
+        base_gpu = sampler_id * tp_size
+        if base_gpu + tp_size > total_gpus:
+            raise RuntimeError(
+                f"Sampler {sampler_id} needs GPUs {base_gpu}-{base_gpu + tp_size - 1}, "
+                f"but only {total_gpus} available."
+            )
+        gpu_ids = ",".join(str(base_gpu + i) for i in range(tp_size))
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
+        print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={gpu_ids} (tp={tp_size})")
+        device = "cuda:0"
+    elif device is not None:
+        # Single GPU mode
         device_id = device.split(":")[-1] if isinstance(device, str) and ":" in device else str(device)
         os.environ["CUDA_VISIBLE_DEVICES"] = device_id
-        print(f"Sampler process: Set CUDA_VISIBLE_DEVICES={device_id}")
+        print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={device_id}")
         device = "cuda:0"
-
-    config = load_config(config_path)
 
     if hasattr(config.sampler, 'cache_dir') and config.sampler.cache_dir:
         os.environ["HF_HOME"] = config.sampler.cache_dir
@@ -415,14 +441,30 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
     shutdown_task = None
     received_signal = [None]  # mutable container for nested access
 
+    signal_count = [0]  # Track how many times signal handler fires
+
     def on_signal(signum):
         nonlocal shutdown_task
+        signal_count[0] += 1
         received_signal[0] = signum
+        pid = os.getpid()
         ppid = os.getppid()
-        logger.warning(
-            f"Evaluator {local_id} (PID {os.getpid()}): Received {signal.Signals(signum).name} "
-            f"(parent PID={ppid})"
-        )
+
+        # Only log details on first signal (avoid log spam from repeated deliveries)
+        if signal_count[0] == 1:
+            import traceback
+            pgid = os.getpgrp()
+            logger.warning(
+                f"Evaluator {local_id} (PID {pid}, PGID {pgid}): Received {signal.Signals(signum).name} "
+                f"(parent PID={ppid}) [first signal]"
+            )
+            logger.warning(f"Evaluator {local_id}: Signal stack trace:\n{''.join(traceback.format_stack())}")
+        elif signal_count[0] == 2:
+            logger.warning(
+                f"Evaluator {local_id} (PID {pid}): Received {signal.Signals(signum).name} "
+                f"again (suppressing further logs, count={signal_count[0]})"
+            )
+
         if shutdown_task is None:
             shutdown_task = asyncio.create_task(shutdown())
 

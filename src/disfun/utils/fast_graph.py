@@ -120,6 +120,25 @@ class DegreeView:
     def __len__(self):
         return self._graph.number_of_nodes()
 
+    def get(self, node, default=None):
+        """G.degree.get(node) -> degree or default (NetworkX compatibility)."""
+        if node in self._graph:
+            return self._graph._degree_lookup(node)
+        return default
+
+    def values(self):
+        """G.degree.values() -> iterator of degrees."""
+        for node in self._graph._nodes_tuple:
+            yield self._graph._degree_lookup(node)
+
+    def keys(self):
+        """G.degree.keys() -> iterator of nodes."""
+        return iter(self._graph._nodes_tuple)
+
+    def items(self):
+        """G.degree.items() -> iterator of (node, degree) pairs."""
+        return iter(self)
+
 
 class AdjacencyView:
     """NetworkX-compatible adjacency view supporting G.adj[node] and G[node]."""
@@ -264,6 +283,15 @@ class SubGraphView:
         """G.adjacency() -> iterator of (node, neighbors_dict) pairs."""
         for node in self._nodes_tuple:
             yield node, {nb: {} for nb in self.neighbors(node)}
+
+    @property
+    def _adj(self):
+        """Internal adjacency dict (NetworkX compatibility for algorithms)."""
+        return AdjacencyView(self)
+
+    def copy(self):
+        """G.copy() -> self (subgraph views are read-only)."""
+        return self
 
 
 # Try C++ implementation first
@@ -440,6 +468,51 @@ if USING_CPP:
             """G.items() -> (node, neighbors_dict) pairs (for LLMs that treat G as a dict)."""
             return ((node, self[node]) for node in self._nodes_tuple)
 
+        @property
+        def graph(self):
+            """G.graph -> empty dict (graph-level attributes, NetworkX compatibility)."""
+            return {}
+
+        def reverse(self, copy=True):
+            """G.reverse() -> self (undirected graph, reverse is no-op)."""
+            return self
+
+        def to_undirected(self, as_view=False):
+            """G.to_undirected() -> self (already undirected)."""
+            return self
+
+        def to_directed(self, as_view=False):
+            """G.to_directed() -> self (treat as directed for compatibility)."""
+            return self
+
+        def out_degree(self, nbunch=None, weight=None):
+            """G.out_degree() -> same as degree for undirected graph."""
+            return self._degree_view(nbunch)
+
+        def in_degree(self, nbunch=None, weight=None):
+            """G.in_degree() -> same as degree for undirected graph."""
+            return self._degree_view(nbunch)
+
+        def out_edges(self, nbunch=None, data=False, default=None):
+            """G.out_edges(node) -> edges from node (same as edges for undirected)."""
+            if nbunch is None:
+                return self._edges_view
+            if nbunch in self:
+                return [(nbunch, nb) for nb in self._cpp_graph.neighbors(nbunch)]
+            return [(n, nb) for n in nbunch if n in self for nb in self._cpp_graph.neighbors(n)]
+
+        def in_edges(self, nbunch=None, data=False, default=None):
+            """G.in_edges(node) -> edges to node (same as out_edges for undirected)."""
+            return self.out_edges(nbunch, data, default)
+
+        def successors(self, node):
+            """G.successors(node) -> neighbors (same as neighbors for undirected)."""
+            return self._cpp_graph.neighbors(node)
+
+        def predecessors(self, node):
+            """G.predecessors(node) -> neighbors (same as neighbors for undirected)."""
+            return self._cpp_graph.neighbors(node)
+
     def load_graph_from_lmdb(graph_path: str) -> FastGraphCpp:
         """Load graph from LMDB and wrap with NetworkX-compatible API."""
         return FastGraphCpp(_load_graph_from_lmdb_cpp(graph_path))
@@ -614,6 +687,51 @@ else:
         def items(self):
             """G.items() -> (node, neighbors_dict) pairs (for LLMs that treat G as a dict)."""
             return ((node, self[node]) for node in self._nodes_tuple)
+
+        @property
+        def graph(self):
+            """G.graph -> empty dict (graph-level attributes, NetworkX compatibility)."""
+            return {}
+
+        def reverse(self, copy=True):
+            """G.reverse() -> self (undirected graph, reverse is no-op)."""
+            return self
+
+        def to_undirected(self, as_view=False):
+            """G.to_undirected() -> self (already undirected)."""
+            return self
+
+        def to_directed(self, as_view=False):
+            """G.to_directed() -> self (treat as directed for compatibility)."""
+            return self
+
+        def out_degree(self, nbunch=None, weight=None):
+            """G.out_degree() -> same as degree for undirected graph."""
+            return self._degree_view(nbunch)
+
+        def in_degree(self, nbunch=None, weight=None):
+            """G.in_degree() -> same as degree for undirected graph."""
+            return self._degree_view(nbunch)
+
+        def out_edges(self, nbunch=None, data=False, default=None):
+            """G.out_edges(node) -> edges from node (same as edges for undirected)."""
+            if nbunch is None:
+                return self._edges_view
+            if nbunch in self:
+                return [(nbunch, nb) for nb in self._neighbors[nbunch]]
+            return [(n, nb) for n in nbunch if n in self for nb in self._neighbors[n]]
+
+        def in_edges(self, nbunch=None, data=False, default=None):
+            """G.in_edges(node) -> edges to node (same as out_edges for undirected)."""
+            return self.out_edges(nbunch, data, default)
+
+        def successors(self, node):
+            """G.successors(node) -> neighbors (same as neighbors for undirected)."""
+            return self._neighbors[node]
+
+        def predecessors(self, node):
+            """G.predecessors(node) -> neighbors (same as neighbors for undirected)."""
+            return self._neighbors[node]
 
 
     def load_graph_from_lmdb(graph_path: str) -> FastGraphCpp:

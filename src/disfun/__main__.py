@@ -60,7 +60,7 @@ from disfun.sandbox import cleanup_orphaned_sandbox_processes
 from disfun.utils import code_manipulation, prompt_builder, wandb_logging
 from disfun.utils import checkpointing as checkpoint
 from disfun.utils.resource_manager import ResourceManager, ScalingContext
-from disfun.startup import sampler_process_entry, evaluator_process_entry, load_config, initialize_logger, load_initial_programs
+from disfun.startup import sampler_process_entry, evaluator_process_entry, load_config, initialize_logger, load_initial_programs, get_gpu_count
 
 # Disable multi-threaded tokenization.
 # Our prompts are short and we run many parallel processes so single-threaded tokenization is faster
@@ -775,35 +775,37 @@ class TaskManager:
             use_local = self.config.sampler.use_local_vllm
 
             if use_local:
-                self.logger.info(f"Starting {self.config.num_samplers} sampler(s) with LOCAL model: {self.config.sampler.model}")
-                assigned_gpus = set()
+                tp_size = int(self.config.sampler.tensor_parallel_size)
+                gpus_needed = self.config.num_samplers * tp_size
+                total_gpus = get_gpu_count()
+
+                if gpus_needed > total_gpus:
+                    raise RuntimeError(
+                        f"Not enough GPUs: need {gpus_needed} ({self.config.num_samplers} samplers × {tp_size} tp), "
+                        f"but only {total_gpus} available."
+                    )
+
+                self.logger.info(
+                    f"Starting {self.config.num_samplers} sampler(s) with LOCAL model: {self.config.sampler.model} "
+                    f"(tp={tp_size}, using {gpus_needed}/{total_gpus} GPUs)"
+                )
 
                 for i in range(self.config.num_samplers):
-                    assignment = self.resource_manager.assign_gpu_device(
-                        min_free_memory_gib=20,
-                        max_utilization=50,
-                        assigned_gpus=assigned_gpus
-                    )
-                    if assignment is None:
-                        self.logger.error(f"Cannot start sampler {i}: No suitable GPU available")
-                        continue
-
-                    host_gpu, device = assignment
-                    assigned_gpus.add(device)
                     sampler_id = next_sampler_id
                     next_sampler_id += 1
+                    base_gpu = sampler_id * tp_size
 
+                    # GPU assignment handled in startup.py based on sampler_id
                     proc = ctx.Process(
                         target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename, sampler_id),
+                        args=(self.config_path, None, self.log_dir, self.log_filename, sampler_id),
                         name=f"Sampler-{sampler_id}"
                     )
                     proc.start()
-                    self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid} on GPU {device}")
+                    self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid} on GPUs {base_gpu}-{base_gpu + tp_size - 1}")
                     self.sampler_processes.append(proc)
-                    self.process_to_device_map[proc.pid] = device
+                    self.process_to_device_map[proc.pid] = base_gpu  # Track base GPU for resource manager
 
-                    # Stagger starts to avoid model loading race conditions
                     if i < self.config.num_samplers - 1:
                         time.sleep(90)
             else:

@@ -1,26 +1,36 @@
 #!/usr/bin/env python3
 """
-Step 3: Evaluate Functions on Extended Inputs
+Evaluate extracted priority functions on extended inputs.
 
-This script takes the deduplicated functions from extract_successful_functions.py
-and evaluates them on larger inputs (n=6 through n=16).
+Takes the JSON from extract.py and evaluates each function on a range of n values
+using the greedy independent set algorithm. Auto-detects function signature type.
 
-It automatically detects the function signature and uses the appropriate evaluation:
-- no_graph: priority(node, n, s, q)
-- graph_gt: priority(node, G_gt, node_to_vertex, vertex_to_node, n, s)
-- graph_networkx: priority(node, G, n, s)
+Arguments:
+  functions_json                 Path to JSON file from extract.py
 
-Features:
-- Incremental checkpoint saving after each function (crash-safe)
-- Resume from checkpoint with --resume
-- Real-time logging of codebook sizes
-
-Usage:
-    python test/evaluate.py <functions_json> [options]
+  -o, --output DIR               Output directory (default: ./evaluate_<timestamp>/)
+  --min-n N                      Minimum n value to evaluate (default: 6)
+  --max-n N                      Maximum n value to evaluate (default: 16)
+  --s S                          s parameter, i.e. deletion distance (default: 1)
+  --q Q                          q parameter, i.e. alphabet size (default: 2)
+  -w, --workers N                Number of parallel workers (default: all CPUs)
+  -l, --limit N                  Only evaluate first N functions
+  --force-signature TYPE         Force no_graph / graph_gt / graph_networkx
+  -g, --graph-dir DIR            Directory with pre-computed LMDB graphs
+  --resume                       Resume from checkpoint if available
+  --checkpoint-interval N        Save checkpoint every N evaluations (default: 1)
+  --no-checkpoint                Disable checkpoint saving
 
 Examples:
-    python test/evaluate.py ./successful_functions/successful_functions.json --max-n 16
-    python test/evaluate.py ./successful_functions/successful_functions.json --resume
+    # s=1 functions, evaluate up to n=16
+    python functions/evaluate.py ./extract/successful_functions.json --max-n 16
+
+    # s=2 functions, evaluate n=7..18 with 16 workers
+    python functions/evaluate.py ./extract/top50_gap_functions.json \
+        --s 2 --min-n 7 --max-n 18 --workers 16
+
+    # Resume interrupted evaluation
+    python functions/evaluate.py ./extract/successful_functions.json --resume
 """
 
 import argparse
@@ -48,6 +58,12 @@ from utils.helpers import (
     build_graph_gt,
 )
 from utils.graph_paths import get_graph_path as find_graph_path, DEFAULT_GRAPH_DIR
+
+# Per-worker caches (populated once per (n, s, q) per worker process)
+_nodes_cache = {}       # (n, q) -> list of node strings
+_neighbors_cache = {}   # (n, s, q, graph_dir) -> dict or None
+_graph_gt_cache = {}    # (n, s, q) -> (G_gt, node_to_vertex, vertex_to_node)
+_graph_nx_cache = {}    # (n, s, q) -> NetworkX Graph
 
 
 def load_neighbors_from_lmdb(graph_path: str) -> Dict[str, Set[str]]:
@@ -93,6 +109,30 @@ def get_graph_path(graph_dir: str, n: int, s: int, q: int) -> Optional[str]:
         return None
 
     return find_graph_path("deletion", s, n, q, graph_dir=graph_dir)
+
+
+def _get_nodes(n: int, q: int) -> List[str]:
+    """Return cached list of all q-ary strings of length n."""
+    key = (n, q)
+    if key not in _nodes_cache:
+        _nodes_cache[key] = [''.join(seq) for seq in itertools.product(map(str, range(q)), repeat=n)]
+    return _nodes_cache[key]
+
+
+def _get_neighbors(n: int, s: int, q: int, graph_dir: str) -> Optional[Dict[str, Set[str]]]:
+    """Return cached neighbor dict from LMDB, or None if unavailable."""
+    key = (n, s, q, graph_dir)
+    if key not in _neighbors_cache:
+        graph_path = get_graph_path(graph_dir, n, s, q)
+        if graph_path:
+            try:
+                _neighbors_cache[key] = load_neighbors_from_lmdb(graph_path)
+            except Exception as e:
+                print(f"Warning: Failed to load graph from {graph_path}: {e}", file=sys.stderr)
+                _neighbors_cache[key] = None
+        else:
+            _neighbors_cache[key] = None
+    return _neighbors_cache[key]
 
 
 # =============================================================================
@@ -164,8 +204,9 @@ def log_progress(log_path: Path, func_index: int, n: int, size: int,
 
 def create_priority_function(body: str, signature: str):
     """Create a callable priority function from body string with appropriate signature."""
-    clean_body = body.strip()
-    if not clean_body.startswith('    ') and not clean_body.startswith('\t'):
+    # Only strip trailing whitespace - preserve leading indentation from checkpoint
+    clean_body = body.rstrip().expandtabs(4)
+    if not clean_body.startswith('    '):
         clean_body = textwrap.indent(clean_body, '    ')
 
     if signature == SIGNATURE_NO_GRAPH:
@@ -206,9 +247,11 @@ def solve_no_graph(priority_func, nodes: List[str], n: int, s: int, q: int,
 def solve_graph_networkx(priority_func, nodes: List[str], n: int, s: int, q: int,
                          neighbors: Dict[str, Set[str]] = None) -> Tuple[Set[str], Dict[str, float]]:
     """Solve using graph_networkx signature."""
-    # Build NetworkX graph (needed for priority function)
-    # If we have pre-computed neighbors, build graph from them (faster)
-    if neighbors is not None:
+    # Build NetworkX graph (needed for priority function), cached per worker
+    cache_key = (n, s, q)
+    if cache_key in _graph_nx_cache:
+        G = _graph_nx_cache[cache_key]
+    elif neighbors is not None:
         try:
             import networkx as nx
         except ImportError:
@@ -219,8 +262,10 @@ def solve_graph_networkx(priority_func, nodes: List[str], n: int, s: int, q: int
             for neigh in neighs:
                 if node < neigh:  # Avoid duplicate edges
                     G.add_edge(node, neigh)
+        _graph_nx_cache[cache_key] = G
     else:
         G = build_graph_networkx(nodes, n, s)
+        _graph_nx_cache[cache_key] = G
 
     priorities = {}
     for node in nodes:
@@ -239,8 +284,11 @@ def solve_graph_gt(priority_func, nodes: List[str], n: int, s: int, q: int,
                    graph_dir: str = None,
                    neighbors: Dict[str, Set[str]] = None) -> Tuple[Set[str], Dict[str, float]]:
     """Solve using graph_gt signature."""
-    # If we have pre-computed neighbors, build graph-tool graph from them (faster)
-    if neighbors is not None:
+    # Build graph-tool graph, cached per worker
+    cache_key = (n, s, q)
+    if cache_key in _graph_gt_cache:
+        G_gt, node_to_vertex, vertex_to_node = _graph_gt_cache[cache_key]
+    elif neighbors is not None:
         try:
             import graph_tool.all as gt
         except ImportError:
@@ -263,8 +311,10 @@ def solve_graph_gt(priority_func, nodes: List[str], n: int, s: int, q: int,
                     edges.append((v1, v2))
         if edges:
             G_gt.add_edge_list(edges)
+        _graph_gt_cache[cache_key] = (G_gt, node_to_vertex, vertex_to_node)
     else:
         G_gt, node_to_vertex, vertex_to_node = build_graph_gt(nodes, n, s, graph_dir)
+        _graph_gt_cache[cache_key] = (G_gt, node_to_vertex, vertex_to_node)
 
     priorities = {}
     for node in nodes:
@@ -276,7 +326,7 @@ def solve_graph_gt(priority_func, nodes: List[str], n: int, s: int, q: int,
         except Exception:
             priorities[node] = 0.0
 
-    return greedy_independent_set_with_graph_gt(nodes, priorities, G_gt, node_to_vertex)
+    return greedy_independent_set_with_graph_gt(nodes, priorities, G_gt, node_to_vertex, vertex_to_node)
 
 
 def greedy_independent_set(nodes: List[str], priorities: Dict[str, float],
@@ -341,11 +391,13 @@ def greedy_independent_set_with_graph_nx(nodes: List[str], priorities: Dict[str,
 
 
 def greedy_independent_set_with_graph_gt(nodes: List[str], priorities: Dict[str, float],
-                                          G_gt, node_to_vertex: Dict) -> Tuple[Set[str], Dict[str, float]]:
+                                          G_gt, node_to_vertex: Dict,
+                                          vertex_to_node: Dict = None) -> Tuple[Set[str], Dict[str, float]]:
     """Build independent set using greedy algorithm with graph-tool graph."""
     nodes_sorted = sorted(nodes, key=lambda x: (-priorities[x], x))
 
-    vertex_to_node = {v: k for k, v in node_to_vertex.items()}
+    if vertex_to_node is None:
+        vertex_to_node = {v: k for k, v in node_to_vertex.items()}
     independent_set = set()
     removed_nodes = set()
 
@@ -381,18 +433,11 @@ def solve_with_priority(priority_func, signature: str, n: int, s: int, q: int,
     # Use default graph dir if not specified
     effective_graph_dir = graph_dir if graph_dir is not None else DEFAULT_GRAPH_DIR
 
-    # Generate all q-ary strings of length n
-    nodes = [''.join(seq) for seq in itertools.product(map(str, range(q)), repeat=n)]
+    # Generate all q-ary strings of length n (cached per worker)
+    nodes = _get_nodes(n, q)
 
-    # Try to load pre-computed neighbors for fast greedy algorithm
-    neighbors = None
-    graph_path = get_graph_path(effective_graph_dir, n, s, q)
-    if graph_path:
-        try:
-            neighbors = load_neighbors_from_lmdb(graph_path)
-        except Exception as e:
-            import sys
-            print(f"Warning: Failed to load graph from {graph_path}: {e}", file=sys.stderr)
+    # Load pre-computed neighbors (cached per worker)
+    neighbors = _get_neighbors(n, s, q, effective_graph_dir)
 
     if signature == SIGNATURE_NO_GRAPH:
         return solve_no_graph(priority_func, nodes, n, s, q, neighbors)

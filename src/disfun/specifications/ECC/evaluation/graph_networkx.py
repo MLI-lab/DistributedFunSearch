@@ -9,11 +9,16 @@ NetworkX-compatible API: G.neighbors(node), G.degree(node), G.nodes
 
 import hashlib
 import math
+from math import *  # Make log, exp, sqrt, etc. available directly for LLM code
 import itertools
 from collections import Counter
 import numpy as np
 import networkx as nx
 import random
+
+# Common aliases LLMs use
+mean = np.mean
+inf = float('inf')
 
 
 # Wrappers to make nx.function(G, ...) work with FastGraph

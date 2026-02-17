@@ -142,6 +142,19 @@ class ExternalProcessSandbox:
 
         if pid == 0:
             # === CHILD PROCESS ===
+            # Detach from parent's signal handling BEFORE anything else.
+            # After fork, child inherits asyncio's signal wakeup fd (a pipe shared
+            # with the parent). Any signal delivered to the child would write to this
+            # pipe, tricking the parent's event loop into thinking IT received the
+            # signal (causing spurious SIGINT shutdowns). Resetting the wakeup fd
+            # and ignoring signals prevents this.
+            try:
+                signal.set_wakeup_fd(-1)
+            except (ValueError, OSError):
+                pass
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
             os.close(read_fd)
 
             # Suppress stdout/stderr from LLM-generated code (e.g. print statements)

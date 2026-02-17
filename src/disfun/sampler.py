@@ -93,6 +93,7 @@ class LLM_model:
             model_params_billions: Optional[float] = None,  # Model size for auto tensor parallelism
             sampler_id: int = 0,  # Sampler index for GPU block allocation
             enforce_eager: bool = True,  # Skip CUDA graph compilation
+            assistant_prefix: Optional[str] = None,  # Prefix forcing: e.g. "<code>" to start output
     ) -> None:
         self.inference_time = 0.0
         self._samples_per_prompt = samples_per_prompt
@@ -124,38 +125,16 @@ class LLM_model:
         self.use_chat_api = use_chat_api
         self.enable_thinking = enable_thinking
         self.cost_model = cost_model
+        self.assistant_prefix = assistant_prefix
 
         if self.use_local_vllm:
             if not VLLM_AVAILABLE:
                 raise RuntimeError(f"use_local_vllm=True but vLLM is not installed. Install with: pip install vllm")
 
-            # Compute tensor parallel size
-            if tensor_parallel_size == "auto" and model_params_billions:
-                model_gb = model_params_billions * 2  # fp16
-                gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                available_gb = gpu_gb * gpu_memory_utilization * 0.85
-                gpus_needed = math.ceil(model_gb / available_gb)
-                tp_size = 2 ** math.ceil(math.log2(max(1, gpus_needed)))  # round to power of 2
-                logger.info(f"Auto tp={tp_size} for {model_params_billions}B model ({model_gb:.0f}GB), {gpu_gb:.0f}GB per GPU")
-            elif tensor_parallel_size == "auto":
-                tp_size = 1
-            else:
-                tp_size = int(tensor_parallel_size)
-
-            # Assign GPU block for multi-GPU inference
-            if tp_size > 1:
-                try:
-                    result = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True)
-                    total_gpus = len([l for l in result.stdout.split("\n") if l.startswith("GPU")])
-                except Exception:
-                    total_gpus = torch.cuda.device_count()
-                base_gpu = sampler_id * tp_size
-                if base_gpu + tp_size > total_gpus:
-                    raise RuntimeError(f"Sampler {sampler_id} needs GPUs {base_gpu}-{base_gpu + tp_size - 1}, only {total_gpus} available")
-                gpu_ids = ",".join(str(base_gpu + i) for i in range(tp_size))
-                os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
-                # os.environ["NCCL_P2P_DISABLE"] = "1"  # Uncomment for servers with broken GPU P2P
-                logger.info(f"Sampler {sampler_id}: GPUs {gpu_ids}")
+            # GPU assignment is handled in startup.py (sets CUDA_VISIBLE_DEVICES before import)
+            tp_size = int(tensor_parallel_size)
+            visible_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "not set")
+            logger.info(f"Sampler {sampler_id}: tensor_parallel_size={tp_size}, CUDA_VISIBLE_DEVICES={visible_gpus}")
 
             logger.info(f"Initializing vLLM model: {model} on device {device}")
             try:
@@ -403,6 +382,9 @@ class LLM_model:
                 if system_message:
                     messages.append({"role": "system", "content": system_message})
                 messages.append({"role": "user", "content": prompt})
+                # Prefix forcing: add partial assistant message to force output format
+                if self.assistant_prefix:
+                    messages.append({"role": "assistant", "content": self.assistant_prefix})
                 messages_batch.append(messages)
 
             # Create sampling params
@@ -417,10 +399,14 @@ class LLM_model:
                 sampling_params.seed = self.random_seed + self.generation_counter
                 self.generation_counter += 1
 
-            # Build chat_template_kwargs for thinking mode control
+            # Build chat_template_kwargs for thinking mode control and prefix forcing
             chat_template_kwargs = {}
             if self.enable_thinking is not None:
                 chat_template_kwargs["enable_thinking"] = self.enable_thinking
+            if self.assistant_prefix:
+                chat_template_kwargs["continue_final_message"] = True
+                chat_template_kwargs["add_generation_prompt"] = False
+                logger.info(f"vLLM chat: Using assistant prefix: {self.assistant_prefix!r}")
 
             # vLLM chat generation, run in thread pool to avoid blocking event loop
             outputs = await asyncio.to_thread(
@@ -436,6 +422,9 @@ class LLM_model:
 
             for idx, output in enumerate(outputs):
                 samples = [o.text for o in output.outputs]
+                # Prepend prefix to samples (model continues from prefix, doesn't include it)
+                if self.assistant_prefix:
+                    samples = [self.assistant_prefix + s for s in samples]
                 all_samples.append(samples)
 
                 # Log first output
@@ -661,6 +650,7 @@ class Sampler:
                 model_params_billions=getattr(self._config, 'model_params_billions', None),
                 sampler_id=sampler_id,
                 enforce_eager=getattr(self._config, 'enforce_eager', True),
+                assistant_prefix=getattr(self._config, 'assistant_prefix', None),
             )
             mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")

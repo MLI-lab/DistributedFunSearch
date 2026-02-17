@@ -198,6 +198,7 @@ def solve_mis_gurobi(
     model.Params.TimeLimit = timeout
     model.Params.Threads = threads
     model.Params.MIPGap = mip_gap
+    model.Params.Method = 1  # dual simplex (avoids OOM from barrier factorization)
 
     # Binary variable for each node: 1 if in independent set
     x = model.addVars(num_nodes, vtype=GRB.BINARY, name="x")

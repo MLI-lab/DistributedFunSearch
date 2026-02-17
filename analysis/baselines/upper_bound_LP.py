@@ -43,9 +43,10 @@ Defaults:
 
 import numpy as np
 from scipy.optimize import linprog
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, save_npz, load_npz
 from itertools import product, combinations
 from typing import Tuple, List, Dict, Set, Optional
+from pathlib import Path
 import time
 
 # Try to import OR-Tools for faster LP solving
@@ -414,7 +415,7 @@ def solve_lp_scipy(A, use_primal: bool, verbose: bool = False) -> Tuple[float, n
         b_ub = np.ones(num_vertices)
         bounds = [(0, None) for _ in range(num_hyperedges)]
 
-        result = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs-ipm',
+        result = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs-ds',
                          options={'presolve': True})
 
         if not result.success:
@@ -429,7 +430,7 @@ def solve_lp_scipy(A, use_primal: bool, verbose: bool = False) -> Tuple[float, n
         b_ub = -np.ones(num_hyperedges)
         bounds = [(0, None) for _ in range(num_vertices)]
 
-        result = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs-ipm',
+        result = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs-ds',
                          options={'presolve': True})
 
         if not result.success:
@@ -468,15 +469,20 @@ def solve_lp_bound(A, verbose: bool = False, solver: str = 'auto',
     """
     num_vertices, num_hyperedges = A.shape
 
-    # Choose formulation with fewer variables
-    use_primal = num_hyperedges < num_vertices
-
     # Choose solver (priority: gurobi > scipy > ortools for this problem type)
     if solver == 'auto':
         if GUROBI_AVAILABLE:
             solver = 'gurobi'
         else:
             solver = 'scipy'  # scipy highs-ipm is faster than ortools GLOP for our problem
+
+    # Choose formulation: fewer variables for Gurobi/OR-Tools,
+    # but for scipy prefer fewer constraints (dual) since HiGHS struggles
+    # with very large constraint counts.
+    if solver == 'scipy':
+        use_primal = num_hyperedges < num_vertices and num_vertices < 1_000_000
+    else:
+        use_primal = num_hyperedges < num_vertices
 
     if solver == 'gurobi':
         if not GUROBI_AVAILABLE:
@@ -501,7 +507,8 @@ def solve_lp_bound(A, verbose: bool = False, solver: str = 'auto',
 # =============================================================================
 
 def compute_lp_bound(n: int, s: int, q: int = 2, verbose: bool = False,
-                      solver: str = 'auto', threads: int = 0) -> Dict:
+                      solver: str = 'auto', threads: int = 0,
+                      cache_dir: Optional[str] = None) -> Dict:
     """
     Compute the exact LP upper bound for deletion correcting codes.
     """
@@ -511,13 +518,33 @@ def compute_lp_bound(n: int, s: int, q: int = 2, verbose: bool = False,
     num_vertices = q ** (n - s)
     num_hyperedges = q ** n
 
-    if verbose:
-        print(f"Building deletion hypergraph: n={n}, s={s}, q={q}")
-        print(f"  Vertices: {num_vertices}, Hyperedges: {num_hyperedges}")
+    # Try loading cached hypergraph
+    cache_path = None
+    if cache_dir:
+        cache_path = Path(cache_dir) / f"hypergraph_deletion_n{n}_s{s}_q{q}.npz"
 
-    start = time.time()
-    A, vertices, hyperedges = build_hypergraph(n, s, q)
-    build_time = time.time() - start
+    if cache_path and cache_path.exists():
+        if verbose:
+            print(f"Loading cached hypergraph from {cache_path}")
+        start = time.time()
+        A = load_npz(cache_path)
+        build_time = time.time() - start
+        if verbose:
+            print(f"  Loaded in {build_time:.2f}s (shape: {A.shape}, nnz: {A.nnz})")
+    else:
+        if verbose:
+            print(f"Building deletion hypergraph: n={n}, s={s}, q={q}")
+            print(f"  Vertices: {num_vertices}, Hyperedges: {num_hyperedges}")
+
+        start = time.time()
+        A, vertices, hyperedges = build_hypergraph(n, s, q)
+        build_time = time.time() - start
+
+        if cache_path:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            save_npz(cache_path, A)
+            if verbose:
+                print(f"  Saved hypergraph to {cache_path}")
 
     if verbose:
         print(f"  Build time: {build_time:.2f}s")
@@ -541,7 +568,8 @@ def compute_lp_bound(n: int, s: int, q: int = 2, verbose: bool = False,
 
 
 def compute_edit_lp_bound(n: int, q: int = 2, verbose: bool = False,
-                           solver: str = 'auto', threads: int = 0) -> Dict:
+                           solver: str = 'auto', threads: int = 0,
+                           cache_dir: Optional[str] = None) -> Dict:
     """
     Compute the exact LP upper bound for 1-edit error correcting codes.
 
@@ -550,6 +578,7 @@ def compute_edit_lp_bound(n: int, q: int = 2, verbose: bool = False,
         q: Alphabet size
         verbose: Print progress
         solver: LP solver to use ('auto', 'ortools', 'scipy')
+        cache_dir: Directory to cache/load hypergraph matrices
 
     Returns:
         Dictionary with lp_bound, weights, timing info
@@ -557,12 +586,32 @@ def compute_edit_lp_bound(n: int, q: int = 2, verbose: bool = False,
     if n < 1:
         return {'lp_bound': 1.0, 'weights': None}
 
-    if verbose:
-        print(f"Building edit hypergraph: n={n}, q={q}")
+    # Try loading cached hypergraph
+    cache_path = None
+    if cache_dir:
+        cache_path = Path(cache_dir) / f"hypergraph_edit_n{n}_q{q}.npz"
 
-    start = time.time()
-    A, vertices, hyperedges = build_edit_hypergraph(n, q, verbose)
-    build_time = time.time() - start
+    if cache_path and cache_path.exists():
+        if verbose:
+            print(f"Loading cached hypergraph from {cache_path}")
+        start = time.time()
+        A = load_npz(cache_path)
+        build_time = time.time() - start
+        if verbose:
+            print(f"  Loaded in {build_time:.2f}s (shape: {A.shape}, nnz: {A.nnz})")
+    else:
+        if verbose:
+            print(f"Building edit hypergraph: n={n}, q={q}")
+
+        start = time.time()
+        A, vertices, hyperedges = build_edit_hypergraph(n, q, verbose)
+        build_time = time.time() - start
+
+        if cache_path:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            save_npz(cache_path, A)
+            if verbose:
+                print(f"  Saved hypergraph to {cache_path}")
 
     if verbose:
         print(f"  Build time: {build_time:.2f}s")
@@ -590,7 +639,7 @@ def compute_edit_lp_bound(n: int, q: int = 2, verbose: bool = False,
 # =============================================================================
 
 def print_lp_table(max_n: int = 12, s: int = 1, q: int = 2, solver: str = 'auto',
-                   threads: int = 0):
+                   threads: int = 0, cache_dir: Optional[str] = None):
     """Print table of LP bounds for deletion codes."""
     print(f"\nLP Upper Bounds for s={s}-deletion codes over F_{q}")
     print("=" * 50)
@@ -603,7 +652,8 @@ def print_lp_table(max_n: int = 12, s: int = 1, q: int = 2, solver: str = 'auto'
             continue
 
         try:
-            result = compute_lp_bound(n, s, q, verbose=False, solver=solver, threads=threads)
+            result = compute_lp_bound(n, s, q, verbose=False, solver=solver,
+                                      threads=threads, cache_dir=cache_dir)
             lp_bound = result['lp_bound']
             print(f"{n:>4} | {lp_bound:>15.6f} | {int(lp_bound):>10}")
         except Exception as e:
@@ -614,7 +664,7 @@ def print_lp_table(max_n: int = 12, s: int = 1, q: int = 2, solver: str = 'auto'
 
 
 def print_edit_lp_table(max_n: int = 8, q: int = 2, solver: str = 'auto',
-                        threads: int = 0):
+                        threads: int = 0, cache_dir: Optional[str] = None):
     """Print table of LP bounds for 1-edit error correcting codes."""
     print(f"\nLP Upper Bounds for 1-edit error codes over F_{q}")
     print("(1 edit = 1 deletion OR 1 substitution OR 1 insertion)")
@@ -630,7 +680,8 @@ def print_edit_lp_table(max_n: int = 8, q: int = 2, solver: str = 'auto',
             continue
 
         try:
-            result = compute_edit_lp_bound(n, q, verbose=False, solver=solver, threads=threads)
+            result = compute_edit_lp_bound(n, q, verbose=False, solver=solver,
+                                           threads=threads, cache_dir=cache_dir)
             lp_bound = result['lp_bound']
             print(f"{n:>4} | {lp_bound:>15.6f} | {int(lp_bound):>10}")
         except Exception as e:
@@ -660,6 +711,8 @@ def main():
                         help='LP solver: auto, gurobi, ortools, scipy (default: auto)')
     parser.add_argument('--threads', type=int, default=0,
                         help='Number of threads for Gurobi (0=auto)')
+    parser.add_argument('--cache-dir', type=str, default=None,
+                        help='Directory to cache hypergraph matrices (saves/loads .npz files)')
     parser.add_argument('--verbose', '-v', action='store_true')
     parser.add_argument('--json', action='store_true', help='Output as JSON')
 
@@ -668,10 +721,12 @@ def main():
     if args.edit:
         # Edit distance mode
         if args.table:
-            print_edit_lp_table(args.max_n, args.q, solver=args.solver, threads=args.threads)
+            print_edit_lp_table(args.max_n, args.q, solver=args.solver,
+                                threads=args.threads, cache_dir=args.cache_dir)
         elif args.n:
             result = compute_edit_lp_bound(args.n, args.q, verbose=args.verbose,
-                                           solver=args.solver, threads=args.threads)
+                                           solver=args.solver, threads=args.threads,
+                                           cache_dir=args.cache_dir)
 
             if args.json:
                 import json
@@ -694,16 +749,18 @@ def main():
             print("LP Upper Bounds for 1-Edit Error Correcting Codes")
             print("=" * 55)
             print("\nFor q=2 (binary):")
-            print_edit_lp_table(max_n=10, q=2)
+            print_edit_lp_table(max_n=10, q=2, cache_dir=args.cache_dir)
             print("\nFor q=4 (quaternary):")
-            print_edit_lp_table(max_n=6, q=4)
+            print_edit_lp_table(max_n=6, q=4, cache_dir=args.cache_dir)
     else:
         # Deletion-only mode (original behavior)
         if args.table:
-            print_lp_table(args.max_n, args.s, args.q, solver=args.solver, threads=args.threads)
+            print_lp_table(args.max_n, args.s, args.q, solver=args.solver,
+                           threads=args.threads, cache_dir=args.cache_dir)
         elif args.n:
             result = compute_lp_bound(args.n, args.s, args.q, verbose=args.verbose,
-                                      solver=args.solver, threads=args.threads)
+                                      solver=args.solver, threads=args.threads,
+                                      cache_dir=args.cache_dir)
 
             if args.json:
                 import json
@@ -727,9 +784,9 @@ def main():
             print("Exact LP Upper Bounds for Deletion Correcting Codes")
             print("=" * 55)
             print("\nFor s=1:")
-            print_lp_table(max_n=12, s=1, q=2)
+            print_lp_table(max_n=12, s=1, q=2, cache_dir=args.cache_dir)
             print("\nFor s=2:")
-            print_lp_table(max_n=10, s=2, q=2)
+            print_lp_table(max_n=10, s=2, q=2, cache_dir=args.cache_dir)
 
 
 if __name__ == "__main__":

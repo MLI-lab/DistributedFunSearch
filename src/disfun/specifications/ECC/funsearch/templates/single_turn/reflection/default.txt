@@ -9,5 +9,5 @@ Below are example priority functions:
 {fewshot_examples}
 
 Improve on these functions.
-First, compare the example functions above and explain in 1-3 sentences why the second outperforms the first, then implement a better one in Python.
+First, compare the examples above and explain in 1-3 sentences why the second is better than the first. Then use that insight to write an even better version in Python.
 The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.

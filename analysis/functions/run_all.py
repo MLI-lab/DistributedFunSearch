@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Full Analysis Pipeline
+Full analysis pipeline.
 
 This script runs the complete analysis pipeline:
 1. Extract successful functions matching target signature
 2. Deduplicate by priority hash
-3. Evaluate on extended n values (6-16)
-4. Analyze VT code overlap
-5. Group functions by overlap type
+3. Evaluate on extended n values (6 to 16)
+4. (Optional) Analyze VT code overlap, only relevant for single deletion (s=1)
 
 Usage:
-    python test/run_all.py <checkpoint_paths...> [options]
+    python functions/run_all.py <checkpoint_paths...> [options]
 
 Examples:
-    python test/run_all.py checkpoint.pkl --output ./my_analysis/
-    python test/run_all.py /exp1/checkpoints/ /exp2/checkpoints/ --output ./combined/
-    python test/run_all.py /exp1/ /exp2/ /exp3/ --latest-only
+    python functions/run_all.py checkpoint.pkl --output ./my_analysis/
+    python functions/run_all.py /exp1/checkpoints/ /exp2/checkpoints/ --output ./combined/
+    python functions/run_all.py checkpoint.pkl --skip-vt
 """
 
 import argparse
@@ -63,6 +62,8 @@ def main():
                         help='Skip extraction step (use existing functions)')
     parser.add_argument('--skip-eval', action='store_true',
                         help='Skip evaluation step (use existing codebooks)')
+    parser.add_argument('--skip-vt', action='store_true',
+                        help='Skip VT overlap analysis (use for s>1, where VT is not relevant)')
     parser.add_argument('--vt-path', default=None,
                         help='Path to VT solutions JSON')
     parser.add_argument('--vt-a', type=int, default=0,
@@ -93,7 +94,10 @@ def main():
         print("  (using latest checkpoint from each folder)")
     print(f"Output: {output_dir}")
     print(f"n range: {args.min_n} to {args.max_n}")
-    print(f"VT comparison: VT_{args.vt_a}")
+    if not args.skip_vt:
+        print(f"VT comparison: VT_{args.vt_a}")
+    else:
+        print("VT comparison: skipped")
     print()
 
     # Step 1 & 2: Extract and deduplicate
@@ -142,18 +146,25 @@ def main():
         print("Run without --skip-eval to create it")
         return 1
 
-    # Step 4 & 5: VT overlap analysis and grouping
-    cmd = [
-        sys.executable, str(script_dir / "vt_overlap.py"),
-        str(codebooks_json),
-        "--output", str(output_dir),
-        "--vt-a", str(args.vt_a),
-    ]
-    if args.vt_path:
-        cmd.extend(["--vt-path", args.vt_path])
+    # Step 4: VT overlap analysis (optional, only for s=1)
+    if not args.skip_vt:
+        cmd = [
+            sys.executable, str(script_dir / "vt_overlap.py"),
+            str(codebooks_json),
+            "--output", str(output_dir),
+            "--vt-a", str(args.vt_a),
+        ]
+        if args.vt_path:
+            cmd.extend(["--vt-path", args.vt_path])
 
-    if not run_command(cmd, f"Step 4 & 5: VT_{args.vt_a} Overlap Analysis and Grouping"):
-        return 1
+        if not run_command(cmd, f"Step 4: VT_{args.vt_a} Overlap Analysis"):
+            return 1
+    else:
+        print("\n" + "=" * 70)
+        print("  Step 4: VT Overlap Analysis - SKIPPED")
+        print("=" * 70)
+        print("  (Use --skip-vt to skip, VT analysis only relevant for s=1)")
+        print()
 
     # Final summary
     print("\n" + "=" * 70)
