@@ -220,7 +220,13 @@ def load_initial_programs(initial_functions_dir, strip_tags=False, logger=None):
 
 
 def get_gpu_count():
-    """Get total number of GPUs available via nvidia-smi."""
+    """Get number of GPUs available to this process.
+
+    Respects CUDA_VISIBLE_DEVICES if set (e.g. by SLURM).
+    """
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible:
+        return len([g for g in visible.split(",") if g.strip()])
     import subprocess
     try:
         result = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True)
@@ -236,21 +242,26 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
     tp_size = int(config.sampler.tensor_parallel_size)
 
     # Set CUDA_VISIBLE_DEVICES BEFORE importing anything that touches CUDA/PyTorch
-    if tp_size > 1:
-        # Multi-GPU tensor parallelism: sampler_id=0 with tp=2 → GPUs "0,1"
-        total_gpus = get_gpu_count()
-        base_gpu = sampler_id * tp_size
-        if base_gpu + tp_size > total_gpus:
+    if config.sampler.use_local_vllm:
+        # Pick this sampler's GPU(s) from the available pool.
+        # Read CUDA_VISIBLE_DEVICES first so we respect SLURM GPU assignments.
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if visible:
+            all_gpus = [g.strip() for g in visible.split(",") if g.strip()]
+        else:
+            all_gpus = [str(i) for i in range(get_gpu_count())]
+
+        start = sampler_id * tp_size
+        if start + tp_size > len(all_gpus):
             raise RuntimeError(
-                f"Sampler {sampler_id} needs GPUs {base_gpu}-{base_gpu + tp_size - 1}, "
-                f"but only {total_gpus} available."
+                f"Sampler {sampler_id} needs GPUs [{start}:{start + tp_size}], "
+                f"but only {len(all_gpus)} available: {all_gpus}"
             )
-        gpu_ids = ",".join(str(base_gpu + i) for i in range(tp_size))
-        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
-        print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={gpu_ids} (tp={tp_size})")
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(all_gpus[start:start + tp_size])
+        print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
         device = "cuda:0"
     elif device is not None:
-        # Single GPU mode
+        # Explicit device override (e.g. from resource manager)
         device_id = device.split(":")[-1] if isinstance(device, str) and ":" in device else str(device)
         os.environ["CUDA_VISIBLE_DEVICES"] = device_id
         print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={device_id}")
