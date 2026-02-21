@@ -41,12 +41,10 @@ class ExternalProcessSandbox:
         timeout_secs: int = 30,
         graph_dir: str = None,
         memory_limit_gb: float = 1.0,
-        debug: bool = False,
     ):
         self.timeout_secs = timeout_secs
         self.graph_dir = graph_dir
         self.memory_limit_gb = memory_limit_gb
-        self.debug = debug
 
     @staticmethod
     def compile_code(program: str):
@@ -127,13 +125,9 @@ class ExternalProcessSandbox:
             namespace = ExternalProcessSandbox.compile_code(program)
             func = namespace[function_to_run]
         except Exception as e:
-            if self.debug:
-                import traceback
-                import sys
-                sys.stderr.write(f"SANDBOX COMPILE ERROR: {type(e).__name__}: {e}\n")
-                traceback.print_exc(file=sys.stderr)
-                sys.stderr.flush()
-            return None, False, 0.0
+            import traceback
+            tb = traceback.format_exc()
+            return f"COMPILE_ERROR: {type(e).__name__}: {e}\n{tb}", False, 0.0
 
         # Create pipe for result communication
         read_fd, write_fd = os.pipe()
@@ -161,8 +155,7 @@ class ExternalProcessSandbox:
             # to prevent unbounded growth of SBATCH .out/.err files.
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, 1)  # stdout
-            if not self.debug:
-                os.dup2(devnull, 2)  # stderr (keep if debug mode)
+            os.dup2(devnull, 2)  # stderr
             os.close(devnull)
 
             try:
@@ -190,12 +183,17 @@ class ExternalProcessSandbox:
                 os._exit(0)
 
             except Exception as e:
-                if self.debug:
-                    import traceback
-                    import sys
-                    sys.stderr.write(f"SANDBOX ERROR: {type(e).__name__}: {e}\n")
-                    traceback.print_exc(file=sys.stderr)
-                    sys.stderr.flush()
+                # Write error + traceback to pipe so parent can capture it
+                import traceback
+                error_msg = f"RUNTIME_ERROR: {type(e).__name__}: {e}\n{''.join(traceback.format_tb(e.__traceback__))}"
+                try:
+                    os.write(write_fd, error_msg.encode('utf-8', errors='replace'))
+                except Exception:
+                    pass
+                try:
+                    os.close(write_fd)
+                except Exception:
+                    pass
                 os._exit(1)
 
         else:
@@ -222,12 +220,31 @@ class ExternalProcessSandbox:
                     except (ProcessLookupError, ChildProcessError):
                         pass
                     os.close(read_fd)
-                    return None, False, 0.0
+                    return f"TIMEOUT: exceeded {self.timeout_secs}s", False, 0.0
 
                 # Check exit status
                 if not (os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0):
+                    # Read error details written by child to pipe
+                    error_detail = ""
+                    try:
+                        chunks = []
+                        while True:
+                            chunk = os.read(read_fd, 65536)
+                            if not chunk:
+                                break
+                            chunks.append(chunk)
+                        if chunks:
+                            error_detail = b''.join(chunks).decode('utf-8', errors='replace')
+                    except Exception:
+                        pass
                     os.close(read_fd)
-                    return None, False, 0.0
+                    if error_detail:
+                        return error_detail, False, 0.0
+                    if os.WIFSIGNALED(status):
+                        sig = os.WTERMSIG(status)
+                        return f"RUNTIME_ERROR: killed by signal {sig} (OOM or crash)", False, 0.0
+                    exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
+                    return f"RUNTIME_ERROR: child exited with code {exit_code}", False, 0.0
 
                 # Read result from pipe
                 result_chunks = []
@@ -245,7 +262,7 @@ class ExternalProcessSandbox:
                 result_data = cloudpickle.loads(result_bytes)
                 return result_data["result"], True, result_data["cpu_time"]
 
-            except Exception:
+            except Exception as e:
                 # Clean up child if still running
                 try:
                     os.kill(pid, signal.SIGKILL)
@@ -256,7 +273,7 @@ class ExternalProcessSandbox:
                     os.close(read_fd)
                 except OSError:
                     pass
-                return None, False, 0.0
+                return f"PARENT_ERROR: {type(e).__name__}: {e}", False, 0.0
 
     def cleanup_all(self):
         """No-op. Fork-based sandbox doesn't create files."""

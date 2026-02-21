@@ -440,6 +440,9 @@ class ProgramsDatabase:
 
                 island_id = data.get("island_id")
                 parent_ids = data.get("parent_ids", [])  # Extract parent IDs for lineage tracking
+                thinking_trace = data.get("thinking_trace")
+                if thinking_trace:
+                    program.thinking_trace = thinking_trace
 
                 if island_id is None:
                     # Register the program to all islands

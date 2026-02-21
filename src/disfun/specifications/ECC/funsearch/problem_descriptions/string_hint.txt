@@ -1,1 +1,1 @@
-Consider properties of the {string_type} string `node`, such as specific patterns and the distribution of characters.
+Consider properties of the {string_type} string `node`, such as specific patterns and the number of ones and zeros.

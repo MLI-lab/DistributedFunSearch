@@ -31,10 +31,12 @@ def print_test(name: str, raw_input: str):
     for i, line in enumerate(raw_input.split('\n'), 1):
         print(f"{i:3}: {line}")
 
-    body, description = parse_llm_output(raw_input)
+    body, description, thinking_trace = parse_llm_output(raw_input)
 
     print(f"\nPARSED OUTPUT:")
     print(f"description: {description}")
+    if thinking_trace:
+        print(f"thinking_trace: {thinking_trace[:200]}{'...' if len(thinking_trace) > 200 else ''}")
     print(f"\nbody ({len(body)} chars):")
     if body:
         for i, line in enumerate(body.rstrip('\n').split('\n'), 1):
@@ -292,7 +294,7 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     return -degree + len(node)
 </code>"""
 
-    evolved_function, program_str, description = _sample_to_program(
+    evolved_function, program_str, description, thinking_trace = _sample_to_program(
         llm_output, None, template, 'priority'
     )
 
@@ -308,6 +310,172 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     print(f"\nINTEGRATED PROGRAM (after integration):")
     for i, line in enumerate(program_str.split('\n'), 1):
         print(f"{i:3}: {line}")
+
+
+# ============================================================
+# GROUP 5: Real-world LLM failure patterns
+# (derived from debug_samples/eval_1268124)
+# ============================================================
+
+def assert_body_compiles(body, test_name):
+    """Verify that parsed body can be placed inside a function and compiled."""
+    if not body:
+        print(f"  FAIL: empty body")
+        return False
+    wrapped = f"def priority(node, G, n, s):\n{body}"
+    try:
+        compile(wrapped, '<test>', 'exec')
+        print(f"  PASS: body compiles OK")
+        return True
+    except SyntaxError as e:
+        print(f"  FAIL: {e}")
+        return False
+
+
+def test_multiline_def_signature():
+    """Multi-line def with continuation args (from sample 000001_island8).
+    Bug: parser included continuation lines in body, causing IndentationError."""
+    raw = """<code>
+```python
+def priority(node : str,
+             G    : object,
+             n    : int,
+             s    : int) -> float:
+    v = sum(1 for c in node if c == '1')
+    degree = len(list(G.neighbors(node)))
+    if degree == 0:
+        return float('inf')
+    return v / (degree + 1)
+```
+</code>"""
+    print_test("Multi-line def signature", raw)
+    body, _, _ = parse_llm_output(raw)
+    ok = assert_body_compiles(body, "multiline_def")
+    # Body must NOT contain continuation lines from the def signature
+    assert 'G    : object' not in body, "FAIL: def continuation leaked into body"
+    print(f"  CHECK: no def continuation in body: {'PASS' if 'G    : object' not in body else 'FAIL'}")
+
+
+def test_mixed_indentation_3space():
+    """LLM uses 3-space indent (from sample 000151_island2).
+    Bug: 3-space body mixed with 4-space injected imports -> IndentationError."""
+    raw = """<code>
+```python
+def priority_new(node, G, n, s):
+   v = sum(1 for c in node if c == '1')
+   degree = len(list(G.neighbors(node)))
+   if degree == 0:
+      return float('inf')
+   return v / (degree + 1)
+```
+</code>"""
+    print_test("Mixed indentation (3-space)", raw)
+    body, _, _ = parse_llm_output(raw)
+    ok = assert_body_compiles(body, "3space_indent")
+    # Verify body was normalized to 4-space
+    first_line = next((l for l in body.splitlines() if l.strip()), '')
+    indent = len(first_line) - len(first_line.lstrip())
+    print(f"  CHECK: normalized to 4-space indent: {'PASS' if indent == 4 else f'FAIL (got {indent})'}")
+
+
+def test_helper_before_priority_different_indent():
+    """Helper function + priority with non-standard indent.
+    Verifies helper is captured and indentation is consistent."""
+    raw = """<code>
+```python
+def hamming_weight(s):
+   return sum(1 for c in s if c == '1')
+
+def priority_new(node, G, n, s):
+   hw = hamming_weight(node)
+   degree = len(list(G.neighbors(node)))
+   return hw - degree
+```
+</code>"""
+    print_test("Helper before priority (3-space indent)", raw)
+    body, _, _ = parse_llm_output(raw)
+    ok = assert_body_compiles(body, "helper_different_indent")
+    assert 'hamming_weight' in body, "FAIL: helper function missing from body"
+    print(f"  CHECK: helper included: {'PASS' if 'hamming_weight' in body else 'FAIL'}")
+
+
+def test_code_tags_with_double_fence():
+    """<code> wrapping ```python blocks (most common pattern: 60% of samples).
+    Verifies nested fence stripping works correctly."""
+    raw = """<code>
+```python
+def priority(node, G, n, s):
+    degree = len(list(G.neighbors(node)))
+    ones = sum(1 for c in node if c == '1')
+    return -degree + ones * 0.5
+```
+</code>"""
+    print_test("Code tags with double fence", raw)
+    body, _, _ = parse_llm_output(raw)
+    ok = assert_body_compiles(body, "double_fence")
+    assert '```' not in body, "FAIL: fence markers leaked into body"
+    print(f"  CHECK: no fence markers in body: {'PASS' if '```' not in body else 'FAIL'}")
+
+
+def test_except_pass_swallows_none_return():
+    """Function with try/except: pass (from sample 000006).
+    Parser handles this correctly already — documents the behavior."""
+    raw = """<code>
+```python
+def priority(node, G, n, s):
+    try:
+        degree = len(list(G.neighbors(node)))
+        ones = sum(1 for c in node if c == '1')
+        return -degree + ones
+    except:
+        pass
+```
+</code>"""
+    print_test("Try/except pass (returns None)", raw)
+    body, _, _ = parse_llm_output(raw)
+    ok = assert_body_compiles(body, "except_pass")
+
+
+def test_priority_new_renamed():
+    """LLM names function priority_new (63% of samples).
+    Verify recursive calls are renamed to 'priority'."""
+    raw = """<code>
+```python
+def priority_new(node, G, n, s):
+    degree = len(list(G.neighbors(node)))
+    if degree == 0:
+        return priority_new(node, G, n, s - 1) if s > 0 else 0
+    return -degree
+```
+</code>"""
+    print_test("Priority_new renamed to priority", raw)
+    body, _, _ = parse_llm_output(raw)
+    ok = assert_body_compiles(body, "priority_new_rename")
+    assert 'priority_new' not in body, "FAIL: priority_new not renamed"
+    assert 'priority(' in body, "FAIL: recursive call not renamed to priority"
+    print(f"  CHECK: renamed to priority: {'PASS' if 'priority_new' not in body and 'priority(' in body else 'FAIL'}")
+
+
+def test_combinations_import_inside_body():
+    """LLM does 'from itertools import combinations' inside function body.
+    Verifies that inline import is preserved in output."""
+    raw = """<code>
+```python
+def priority_new(node, G, n, s):
+    from itertools import combinations
+    neighbors = list(G.neighbors(node))
+    triangle_count = 0
+    for u, v in combinations(neighbors, 2):
+        if G.has_edge(u, v):
+            triangle_count += 1
+    return -len(neighbors) + triangle_count * 0.1
+```
+</code>"""
+    print_test("Combinations import inside body", raw)
+    body, _, _ = parse_llm_output(raw)
+    ok = assert_body_compiles(body, "combinations_import")
+    assert 'combinations' in body, "FAIL: combinations reference missing from body"
+    print(f"  CHECK: combinations in body: {'PASS' if 'combinations' in body else 'FAIL'}")
 
 
 def main():
@@ -343,8 +511,18 @@ def main():
     print_section("GROUP 4: Template Integration")
     test_template_integration()
 
+    # Group 5: Real-world LLM failure patterns
+    print_section("GROUP 5: Real-world LLM Failure Patterns")
+    test_multiline_def_signature()
+    test_mixed_indentation_3space()
+    test_helper_before_priority_different_indent()
+    test_code_tags_with_double_fence()
+    test_except_pass_swallows_none_return()
+    test_priority_new_renamed()
+    test_combinations_import_inside_body()
+
     print(f"\n{'='*60}")
-    print("Completed 18 tests")
+    print("Completed 25 tests")
     print(f"{'='*60}\n")
 
 

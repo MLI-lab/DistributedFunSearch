@@ -118,10 +118,15 @@ def extract_evaluation_result(test_output, problem_instance):
 
 
 def _find_function_lines(tree: ast.Module, function_name: str) -> tuple[int, int]:
-  """Find start and end line numbers of a function in the AST."""
+  """Find body start and end line of a function in the AST.
+
+  Returns (body_start, end_line) where body_start is suitable as a 0-based
+  slice index that skips the entire def signature (handles multi-line defs).
+  """
   for node in ast.walk(tree):
     if isinstance(node, ast.FunctionDef) and node.name == function_name:
-      return node.lineno, node.end_lineno
+      body_start = node.body[0].lineno - 1  # skip entire def signature
+      return body_start, node.end_lineno
   raise ValueError(f"Function '{function_name}' not found in AST")
 
 
@@ -157,11 +162,36 @@ def _parse_code(code: str, max_deletions: int = 20) -> tuple[ast.Module | None, 
   return tree, code
 
 
-def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
+def _normalize_indent(lines, target=4):
+  """Normalize indentation of body lines to target spaces.
+
+  Detects actual indent from first non-empty line and scales proportionally.
+  Fixes LLM output that uses 2/3/5/6-space indent mixing with 4-space helpers.
+  """
+  first = next((l for l in lines if l.strip()), '')
+  if not first:
+    return lines
+  actual = len(first) - len(first.lstrip())
+  if actual == target or actual == 0:
+    return lines
+  result = []
+  for line in lines:
+    if not line.strip():
+      result.append(line)
+    else:
+      stripped = line.lstrip()
+      current = len(line) - len(stripped)
+      new_indent = round(current * target / actual)
+      result.append(' ' * new_indent + stripped)
+  return result
+
+
+def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
   """
   Parse raw LLM output and extract a valid Python function body.
 
   Pipeline:
+  0. Extract <think> reasoning traces (Qwen3 thinking mode)
   1. Extract and strip <description> tags
   2. Extract code: <code> tags > last markdown fence > raw text
   3. Strip any nested markdown fences
@@ -169,23 +199,23 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
   5. Parse with AST (delete invalid lines until it compiles)
 
   Returns:
-      (function_body, description)
+      (function_body, description, thinking_trace)
   """
   if not raw_output:
-    return '', None
+    return '', None, None
 
-  # ============================================================
-  # STEP 1: Extract description and clean input
-  # ============================================================
+  # Extract thinking trace from Qwen3 <think> blocks
+  think_match = re.search(r'<think>(.*?)</think>', raw_output, re.DOTALL)
+  thinking_trace = think_match.group(1).strip() if think_match else None
+
+  # Extract description and clean input
   description_match = re.search(r'<description>(.*?)</description>', raw_output, re.DOTALL)
   description = description_match.group(1).strip() if description_match else None
 
   # Remove description tags from text we'll search
   text = re.sub(r'<description>.*?</description>\s*', '', raw_output, flags=re.DOTALL)
 
-  # ============================================================
-  # STEP 2: Extract code (3-tier priority)
-  # ============================================================
+  # Extract code (3 tier priority)
 
   # Tier 1: <code> tags (highest priority)
   # Try closed tags first, then unclosed (truncated output)
@@ -219,25 +249,31 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
   # (strip() would break indented body code by removing indent from first line only)
   code = code.lstrip('\n').rstrip()
   if not code:
-    return '', description
+    return '', description, thinking_trace
 
-  # ============================================================
-  # STEP 3: Determine if this is body-only or full function
-  # ============================================================
+  # Determine if this is body only or full function
 
-  # Look for def priority(...) anywhere
-  priority_match = re.search(r'^\s*def\s+(priority(?:_v\d+)?)\s*\(', code, re.MULTILINE)
+  # 3 tier function detection:
+  # Tier 1: Any function starting with "priority" (e.g. priority_improved, priority_v2_degree_based)
+  priority_match = re.search(r'^\s*def\s+(priority\w*)\s*\(', code, re.MULTILINE)
+
+  # Tier 2/3: No priority-prefixed function — find all defs, filter skip names
+  if not priority_match:
+    skip_names = {'main', 'evaluate', 'test', 'unused', 'helper', '__init__'}
+    all_funcs = list(re.finditer(r'^\s*def\s+(\w+)\s*\(', code, re.MULTILINE))
+    candidates = [m for m in all_funcs if m.group(1) not in skip_names]
+    if len(candidates) >= 1:
+      priority_match = candidates[0]
+      logger.info(f"No priority-prefixed function, using '{candidates[0].group(1)}' as priority function")
 
   if priority_match:
-    # ---------------------------------------------------------
-    # CASE A: Full function output, extract priority body
-    # ---------------------------------------------------------
+    # Full function output, extract priority body
     function_name = priority_match.group(1)
     logger.debug(f"Found {function_name} definition, extracting body")
 
     tree, parsed_code = _parse_code(code)
     if tree is None:
-      return '', description
+      return '', description, thinking_trace
 
     parsed_lines = parsed_code.splitlines()
 
@@ -265,9 +301,17 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
         helper_lines.append('')  # blank line after helper
         logger.debug(f"Including helper function '{node.name}' as nested function")
 
-    # Extract priority body lines (everything after the def line)
-    start_line, end_line = _find_function_lines(tree, function_name)
+    # Extract priority body lines (skips entire def signature, including multi-line)
+    try:
+      start_line, end_line = _find_function_lines(tree, function_name)
+    except ValueError:
+      # Function was found by regex but removed by _parse_code line deletions
+      logger.warning(f"Function '{function_name}' found by regex but lost during AST repair")
+      return '', description, thinking_trace
     body_lines = parsed_lines[start_line:end_line]
+
+    # Normalize indentation to 4 spaces (LLMs sometimes use 2/3/5/6-space indent)
+    body_lines = _normalize_indent(body_lines)
 
     # Prepend imports and helpers inside function body
     prefix_lines = []
@@ -282,10 +326,13 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
 
     body = '\n'.join(body_lines) + '\n\n'
 
+    # Rename any non-standard function name to 'priority' so the template works
+    if function_name != 'priority':
+      body = code_manipulation.rename_function_calls(body, function_name, 'priority')
+      logger.info(f"Renamed recursive calls '{function_name}' -> 'priority' in body")
+
   else:
-    # ---------------------------------------------------------
-    # CASE B: Completion output, entire code is the body
-    # ---------------------------------------------------------
+    # Completion output, entire code is the body
     logger.debug("No priority function found, treating as body code")
 
     code_lines = code.splitlines()
@@ -351,11 +398,14 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
     wrapped = 'def _fake_():\n' + body_code
     tree, parsed_code = _parse_code(wrapped)
     if tree is None:
-      return '', description
+      return '', description, thinking_trace
 
     # Extract validated body
     _, end_line = _find_function_lines(tree, '_fake_')
     body_lines = parsed_code.splitlines()[1:end_line]
+
+    # Normalize indentation to 4 spaces
+    body_lines = _normalize_indent(body_lines)
 
     # Prepend imports and helpers to body
     prefix_lines = import_lines + helper_lines
@@ -364,8 +414,8 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None]:
 
     body = '\n'.join(body_lines) + '\n\n'
 
-  logger.debug(f"Parsed LLM output: {len(body)} chars, description={'yes' if description else 'no'}")
-  return body, description
+  logger.debug(f"Parsed LLM output: {len(body)} chars, description={'yes' if description else 'no'}, thinking={'yes' if thinking_trace else 'no'}")
+  return body, description, thinking_trace
 
 
 def _sample_to_program(
@@ -374,14 +424,14 @@ def _sample_to_program(
     template: code_manipulation.Program,
     # function_to_evolve is set to priority
     function_to_evolve: str,
-) -> tuple[code_manipulation.Function, str, str | None]:
+) -> tuple[code_manipulation.Function, str, str | None, str | None]:
   """Integrates a generated code as string into a larger program template.
 
   Returns:
-      tuple: (evolved_function, program_str (Complete runnable script as string), description)
+      tuple: (evolved_function, program_str, description, thinking_trace)
   """
   # Parse LLM output: extract from XML tags, strip markdown, validate with AST
-  body, description = parse_llm_output(generated_code)
+  body, description, thinking_trace = parse_llm_output(generated_code)
   if version_generated is not None:
 
     body = code_manipulation.rename_function_calls(
@@ -393,7 +443,8 @@ def _sample_to_program(
 
   evolved_function.body = body
   evolved_function.description = description
-  return evolved_function, str(program), description
+  evolved_function.thinking_trace = thinking_trace
+  return evolved_function, str(program), description, thinking_trace
 
 
 def run_evaluation(sandbox, program, function_to_run, input):
@@ -421,6 +472,7 @@ class Evaluator:
         target_signatures=None,
         function_to_evolve='priority',
         function_to_run='evaluate',
+        log_dir=None,
     ):
         self.template = template
         self.inputs = inputs
@@ -434,13 +486,22 @@ class Evaluator:
         self.graph_dir = evaluator_config.graph_dir
         self.graph_type = getattr(evaluator_config, 'graph_type', 'deletion')
 
+        # Debug sample folders (per-evaluator to avoid interleaving across processes)
+        self.debug_samples = getattr(evaluator_config, 'debug_samples', False)
+        self._sample_counter = 0
+        if self.debug_samples and log_dir:
+            self.debug_dir = os.path.join(log_dir, "debug_samples", f"eval_{local_id}")
+            os.makedirs(self.debug_dir, exist_ok=True)
+            logger.info(f"Evaluator {local_id}: Debug samples enabled, writing to {self.debug_dir}")
+        else:
+            self.debug_dir = None
+
         # Sandbox and thread pool for parallel evaluation.
         # Graphs are cached here. Forked children inherit via copy-on-write.
         self.sandbox = sandbox.ExternalProcessSandbox(
             timeout_secs=evaluator_config.timeout,
             graph_dir=evaluator_config.graph_dir,
             memory_limit_gb=evaluator_config.sandbox_memory_limit_gb,
-            debug=getattr(evaluator_config, 'sandbox_debug', False),
         )
         self.executor = ThreadPoolExecutor(max_workers=evaluator_config.max_workers)
         self.cumulative_cpu_time = 0.0
@@ -471,6 +532,15 @@ class Evaluator:
         if G is not None:
             return (n, s, q, G)
         return input_tuple
+
+    def _write_debug_results(self, debug_folder, debug_lines):
+        """Write eval results to debug folder if debug_samples is enabled."""
+        if debug_folder and debug_lines:
+            try:
+                with open(os.path.join(debug_folder, "3_eval_results.txt"), "w") as f:
+                    f.write("\n".join(debug_lines) + "\n")
+            except Exception:
+                pass
 
     async def consume_and_process(self):
         """Main consume loop with automatic connection recovery.
@@ -540,19 +610,44 @@ class Evaluator:
             reflection_output = data.get("reflection_output")  # ReEvo reflection
 
             # Parse LLM output and integrate into evaluation template
-            new_function, program, description = _sample_to_program(
+            new_function, program, description, thinking_trace = _sample_to_program(
                 data["sample"], data.get("version_generated"), self.template, self.function_to_evolve
             )
+
+            # Debug sample folder setup
+            self._sample_counter += 1
+            debug_folder = None
+            if self.debug_dir:
+                island_id = data.get('island_id', 'x')
+                debug_folder = os.path.join(self.debug_dir, f"{self._sample_counter:06d}_island{island_id}")
+                try:
+                    os.makedirs(debug_folder, exist_ok=True)
+                    with open(os.path.join(debug_folder, "1_raw_llm_output.txt"), "w") as f:
+                        f.write(data.get("sample", ""))
+                    if thinking_trace:
+                        with open(os.path.join(debug_folder, "1b_thinking_trace.txt"), "w") as f:
+                            f.write(thinking_trace)
+                    with open(os.path.join(debug_folder, "2_parsed_body.py"), "w") as f:
+                        f.write(new_function.body if new_function.body else "PARSE_FAILED")
+                except Exception as e:
+                    logger.warning(f"Evaluator: debug_samples write error: {e}")
+                    debug_folder = None
 
             # Helper to build result tuple
             def make_result(func, scores, found_optimal=False):
                 return (func, data['island_id'], scores, data['expected_version'],
                         self.cumulative_cpu_time, gpu_time, input_tokens, output_tokens,
-                        found_optimal, parent_ids, description, reflection_output)
+                        found_optimal, parent_ids, description, reflection_output, thinking_trace)
 
             # Early exit if parsing failed
             if not new_function.body:
                 logger.warning(f"Evaluator: Parsing failed, empty body. Island {data['island_id']}")
+                if debug_folder:
+                    try:
+                        with open(os.path.join(debug_folder, "3_eval_results.txt"), "w") as f:
+                            f.write("PARSE_FAILED - never reached evaluation\n")
+                    except Exception:
+                        pass
                 await self.publish_to_database(make_result("return", {}), None)
                 return
 
@@ -569,6 +664,7 @@ class Evaluator:
             # Collect results from completed futures
             scores_per_test = {}
             hash_value = None
+            debug_lines = []
 
             for future in as_completed(tasks):
                 input = tasks[future]
@@ -582,12 +678,21 @@ class Evaluator:
                         if extracted_hash is not None:
                             hash_value = extracted_hash
                         logger.info(f"Evaluator: input {input} score={score_value}")
+                        debug_lines.append(f"{score_key}: score={score_value}")
                     else:
                         logger.warning(f"Evaluator: input {input} failed")
+                        if isinstance(test_output, str):
+                            reason = test_output
+                        elif test_output is None:
+                            reason = "sandbox returned None"
+                        else:
+                            reason = f"test_output={test_output}"
+                        debug_lines.append(f"{input}: FAILED — {reason}")
                         break
 
                 except (concurrent.futures.TimeoutError, concurrent.futures.CancelledError, Exception) as e:
                     logger.warning(f"Evaluator: input {input} error: {type(e).__name__}")
+                    debug_lines.append(f"{input}: ERROR {type(e).__name__}: {e}")
                     break
 
             else:
@@ -597,6 +702,7 @@ class Evaluator:
                         scores_per_test.get(dim, 0) >= self.target_signatures.get(dim, float("inf"))
                         for dim in self.target_signatures
                     )
+                    self._write_debug_results(debug_folder, debug_lines)
                     await self.publish_to_database(make_result(new_function, scores_per_test, found_optimal), hash_value)
                     self.cumulative_cpu_time = 0.0
                     return
@@ -604,6 +710,7 @@ class Evaluator:
             # Failure path: cancel pending tasks and publish return to database
             for f in tasks:
                 f.cancel()
+            self._write_debug_results(debug_folder, debug_lines)
             await self.publish_to_database(make_result("return", {}), None)
             self.cumulative_cpu_time = 0.0
 
@@ -613,7 +720,7 @@ class Evaluator:
 
     async def publish_to_database(self, result, hash_value):
         try:
-            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids, description, reflection_output = result
+            function, island_id, scores_per_test, expected_version, cpu_time, gpu_time, input_tokens, output_tokens, found_optimal_solution, parent_ids, description, reflection_output, thinking_trace = result
 
             serialized_result = {
                 "new_function": function.serialize() if hasattr(function, 'serialize') else str(function),
@@ -629,6 +736,7 @@ class Evaluator:
                 "parent_ids": parent_ids,
                 "description": description,
                 "reflection_output": reflection_output,
+                "thinking_trace": thinking_trace,
             }
 
             await self._conn.channel.default_exchange.publish(

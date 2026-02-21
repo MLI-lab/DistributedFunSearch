@@ -199,8 +199,7 @@ def solve_mis_gurobi(
     model.Params.Threads = threads
     model.Params.MIPGap = mip_gap
     model.Params.Method = 1  # dual simplex (avoids OOM from barrier factorization)
-    model.Params.Presolve = 1  # conservative presolve (avoid aggressive passes)
-    model.Params.PresolveTime = 3600  # cap presolve at 1 hour
+    model.Params.Presolve = 0  # skip presolve (too slow on billion-edge graphs, MIS constraints too uniform to benefit)
 
     # Binary variable for each node: 1 if in independent set
     x = model.addVars(num_nodes, vtype=GRB.BINARY, name="x")

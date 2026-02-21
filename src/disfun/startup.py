@@ -432,6 +432,7 @@ def evaluator_process_entry(config_path, template, inputs, target_signatures, lo
                 evaluator_config=config.evaluator,
                 connection_manager=connection_manager,
                 target_signatures=target_signatures,
+                log_dir=log_dir,
             )
 
             state.task = asyncio.create_task(state.instance.consume_and_process())

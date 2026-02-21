@@ -49,6 +49,8 @@ class Function:
     timestamp: float | None = None  # When this program was created
     # Algorithm description
     description: str | None = None  # One-sentence algorithm description
+    # Reasoning trace from thinking models (e.g. Qwen3), not serialized into checkpoints
+    thinking_trace: str | None = None
 
 
     def __str__(self) -> str:

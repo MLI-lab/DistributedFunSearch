@@ -1,8 +1,5 @@
 """Evaluation script using precomputed graphs (works for any ECC problem type).
 
-PROBLEM TYPE: Generic - works with both Deletions and IDS
-The edge condition is baked into the precomputed graph files.
-
 Graph is pre-loaded by evaluator and passed via params. Uses FastGraph with
 NetworkX-compatible API: G.neighbors(node), G.degree(node), G.nodes
 """
@@ -11,6 +8,7 @@ import hashlib
 import math
 from math import *  # Make log, exp, sqrt, etc. available directly for LLM code
 import itertools
+from itertools import combinations, product, permutations
 from collections import Counter
 import numpy as np
 import networkx as nx
@@ -102,6 +100,134 @@ def _clustering_wrapper(G, nodes=None, weight=None):
             return local_clustering(nodes)
     return _nx_clustering(G, nodes, weight)
 nx.clustering = _clustering_wrapper
+nx.algorithms.cluster.clustering = _clustering_wrapper  # LLMs sometimes use fully-qualified path
+
+# nx.all_neighbors - trivial for undirected graph
+_nx_all_neighbors = nx.all_neighbors
+def _all_neighbors_wrapper(G, node):
+    if _is_fastgraph(G):
+        return iter(G.neighbors(node))
+    return _nx_all_neighbors(G, node)
+nx.all_neighbors = _all_neighbors_wrapper
+
+# nx.non_neighbors
+_nx_non_neighbors = nx.non_neighbors
+def _non_neighbors_wrapper(G, node):
+    if _is_fastgraph(G):
+        nbrs = set(G.neighbors(node))
+        nbrs.add(node)
+        return (n for n in G.nodes if n not in nbrs)
+    return _nx_non_neighbors(G, node)
+nx.non_neighbors = _non_neighbors_wrapper
+
+# nx.common_neighbors
+_nx_common_neighbors = nx.common_neighbors
+def _common_neighbors_wrapper(G, u, v):
+    if _is_fastgraph(G):
+        u_nbrs = set(G.neighbors(u))
+        v_nbrs = set(G.neighbors(v))
+        return iter(u_nbrs & v_nbrs)
+    return _nx_common_neighbors(G, u, v)
+nx.common_neighbors = _common_neighbors_wrapper
+
+# nx.degree_centrality - simple: deg / (n-1)
+_nx_degree_centrality = nx.degree_centrality
+def _degree_centrality_wrapper(G):
+    if _is_fastgraph(G):
+        n = G.number_of_nodes()
+        if n <= 1:
+            return {node: 0.0 for node in G.nodes}
+        return {node: G.degree(node) / (n - 1) for node in G.nodes}
+    return _nx_degree_centrality(G)
+nx.degree_centrality = _degree_centrality_wrapper
+nx.algorithms.centrality.degree_centrality = _degree_centrality_wrapper  # LLMs sometimes use fully-qualified path
+
+# nx.density
+_nx_density = nx.density
+def _density_wrapper(G):
+    if _is_fastgraph(G):
+        n = G.number_of_nodes()
+        if n <= 1:
+            return 0.0
+        return 2.0 * G.number_of_edges() / (n * (n - 1))
+    return _nx_density(G)
+nx.density = _density_wrapper
+
+# Expensive centrality measures — build a real nx.Graph on demand, cache it
+def _to_nx_graph(G):
+    """Convert FastGraph to a real nx.Graph for algorithms that need it."""
+    nxG = nx.Graph()
+    nxG.add_nodes_from(G.nodes)
+    nxG.add_edges_from(G.edges)
+    return nxG
+
+_nx_closeness_centrality = nx.closeness_centrality
+def _closeness_centrality_wrapper(G, u=None, distance=None, wf_improved=True):
+    if _is_fastgraph(G):
+        return _nx_closeness_centrality(_to_nx_graph(G), u, distance, wf_improved)
+    return _nx_closeness_centrality(G, u, distance, wf_improved)
+nx.closeness_centrality = _closeness_centrality_wrapper
+nx.algorithms.closeness_centrality = _closeness_centrality_wrapper  # LLMs sometimes use fully-qualified path
+
+_nx_betweenness_centrality = nx.betweenness_centrality
+def _betweenness_centrality_wrapper(G, k=None, normalized=True, weight=None, endpoints=False, seed=None):
+    if _is_fastgraph(G):
+        return _nx_betweenness_centrality(_to_nx_graph(G), k, normalized, weight, endpoints, seed)
+    return _nx_betweenness_centrality(G, k, normalized, weight, endpoints, seed)
+nx.betweenness_centrality = _betweenness_centrality_wrapper
+
+_nx_eigenvector_centrality = nx.eigenvector_centrality
+def _eigenvector_centrality_wrapper(G, max_iter=100, tol=1e-06, nstart=None, weight=None):
+    if _is_fastgraph(G):
+        return _nx_eigenvector_centrality(_to_nx_graph(G), max_iter, tol, nstart, weight)
+    return _nx_eigenvector_centrality(G, max_iter, tol, nstart, weight)
+nx.eigenvector_centrality = _eigenvector_centrality_wrapper
+
+_nx_eigenvector_centrality_numpy = getattr(nx, 'eigenvector_centrality_numpy', None)
+if _nx_eigenvector_centrality_numpy:
+    def _eigenvector_centrality_numpy_wrapper(G, weight=None, max_iter=50, tol=0):
+        if _is_fastgraph(G):
+            return _nx_eigenvector_centrality_numpy(_to_nx_graph(G), weight, max_iter, tol)
+        return _nx_eigenvector_centrality_numpy(G, weight, max_iter, tol)
+    nx.eigenvector_centrality_numpy = _eigenvector_centrality_numpy_wrapper
+
+_nx_pagerank = nx.pagerank
+def _pagerank_wrapper(G, alpha=0.85, personalization=None, max_iter=100, tol=1e-06, nstart=None, weight='weight', dangling=None):
+    if _is_fastgraph(G):
+        return _nx_pagerank(_to_nx_graph(G), alpha, personalization, max_iter, tol, nstart, weight, dangling)
+    return _nx_pagerank(G, alpha, personalization, max_iter, tol, nstart, weight, dangling)
+nx.pagerank = _pagerank_wrapper
+
+# nx.shortest_path_length — used occasionally
+_nx_shortest_path_length = nx.shortest_path_length
+def _shortest_path_length_wrapper(G, source=None, target=None, weight=None, method='dijkstra'):
+    if _is_fastgraph(G):
+        return _nx_shortest_path_length(_to_nx_graph(G), source, target, weight, method)
+    return _nx_shortest_path_length(G, source, target, weight, method)
+nx.shortest_path_length = _shortest_path_length_wrapper
+
+_nx_shortest_path = nx.shortest_path
+def _shortest_path_wrapper(G, source=None, target=None, weight=None, method='dijkstra'):
+    if _is_fastgraph(G):
+        return _nx_shortest_path(_to_nx_graph(G), source, target, weight, method)
+    return _nx_shortest_path(G, source, target, weight, method)
+nx.shortest_path = _shortest_path_wrapper
+
+# nx.connected_components
+_nx_connected_components = nx.connected_components
+def _connected_components_wrapper(G):
+    if _is_fastgraph(G):
+        return _nx_connected_components(_to_nx_graph(G))
+    return _nx_connected_components(G)
+nx.connected_components = _connected_components_wrapper
+
+# nx.average_shortest_path_length
+_nx_average_shortest_path_length = nx.average_shortest_path_length
+def _average_shortest_path_length_wrapper(G, weight=None, method=None):
+    if _is_fastgraph(G):
+        return _nx_average_shortest_path_length(_to_nx_graph(G), weight, method)
+    return _nx_average_shortest_path_length(G, weight, method)
+nx.average_shortest_path_length = _average_shortest_path_length_wrapper
 
 
 def hash_priority_mapping(priorities, nodes):
