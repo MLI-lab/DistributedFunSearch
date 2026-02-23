@@ -486,11 +486,12 @@ class Evaluator:
         self.graph_dir = evaluator_config.graph_dir
         self.graph_type = getattr(evaluator_config, 'graph_type', 'deletion')
 
-        # Debug sample folders (per-evaluator to avoid interleaving across processes)
+        # Debug sample folders (category-first layout: debug_samples/{category}/eval{PID}_{counter}_island{id}/)
         self.debug_samples = getattr(evaluator_config, 'debug_samples', False)
         self._sample_counter = 0
         if self.debug_samples and log_dir:
-            self.debug_dir = os.path.join(log_dir, "debug_samples", f"eval_{local_id}")
+            self.debug_dir = os.path.join(log_dir, "debug_samples")
+            self._eval_prefix = f"eval{local_id}"
             os.makedirs(self.debug_dir, exist_ok=True)
             logger.info(f"Evaluator {local_id}: Debug samples enabled, writing to {self.debug_dir}")
         else:
@@ -533,14 +534,32 @@ class Evaluator:
             return (n, s, q, G)
         return input_tuple
 
-    def _write_debug_results(self, debug_folder, debug_lines):
-        """Write eval results to debug folder if debug_samples is enabled."""
-        if debug_folder and debug_lines:
-            try:
-                with open(os.path.join(debug_folder, "3_eval_results.txt"), "w") as f:
+    def _write_debug_sample(self, category, debug_data, debug_lines):
+        """Write all debug files into a category subfolder (success/eval_failure/parse_failure)."""
+        if not self.debug_dir:
+            return
+        island_id = debug_data.get("island_id", "x")
+        name = f"{self._eval_prefix}_{self._sample_counter:06d}_island{island_id}"
+        folder = os.path.join(self.debug_dir, category, name)
+        try:
+            os.makedirs(folder, exist_ok=True)
+            prompt = debug_data.get("prompt", "")
+            if prompt:
+                with open(os.path.join(folder, "0_prompt.txt"), "w") as f:
+                    f.write(prompt)
+            with open(os.path.join(folder, "1_raw_llm_output.txt"), "w") as f:
+                f.write(debug_data.get("raw_output", ""))
+            thinking_trace = debug_data.get("thinking_trace")
+            if thinking_trace:
+                with open(os.path.join(folder, "1b_thinking_trace.txt"), "w") as f:
+                    f.write(thinking_trace)
+            with open(os.path.join(folder, "2_parsed_body.py"), "w") as f:
+                f.write(debug_data.get("parsed_body", "PARSE_FAILED"))
+            if debug_lines:
+                with open(os.path.join(folder, "3_eval_results.txt"), "w") as f:
                     f.write("\n".join(debug_lines) + "\n")
-            except Exception:
-                pass
+        except Exception as e:
+            logger.warning(f"Evaluator: debug_samples write error: {e}")
 
     async def consume_and_process(self):
         """Main consume loop with automatic connection recovery.
@@ -614,24 +633,15 @@ class Evaluator:
                 data["sample"], data.get("version_generated"), self.template, self.function_to_evolve
             )
 
-            # Debug sample folder setup
+            # Debug sample data (deferred write until outcome is known)
             self._sample_counter += 1
-            debug_folder = None
-            if self.debug_dir:
-                island_id = data.get('island_id', 'x')
-                debug_folder = os.path.join(self.debug_dir, f"{self._sample_counter:06d}_island{island_id}")
-                try:
-                    os.makedirs(debug_folder, exist_ok=True)
-                    with open(os.path.join(debug_folder, "1_raw_llm_output.txt"), "w") as f:
-                        f.write(data.get("sample", ""))
-                    if thinking_trace:
-                        with open(os.path.join(debug_folder, "1b_thinking_trace.txt"), "w") as f:
-                            f.write(thinking_trace)
-                    with open(os.path.join(debug_folder, "2_parsed_body.py"), "w") as f:
-                        f.write(new_function.body if new_function.body else "PARSE_FAILED")
-                except Exception as e:
-                    logger.warning(f"Evaluator: debug_samples write error: {e}")
-                    debug_folder = None
+            debug_data = {
+                "prompt": data.get("prompt", ""),
+                "raw_output": data.get("sample", ""),
+                "thinking_trace": thinking_trace,
+                "parsed_body": new_function.body if new_function.body else "PARSE_FAILED",
+                "island_id": data.get("island_id", "x"),
+            }
 
             # Helper to build result tuple
             def make_result(func, scores, found_optimal=False):
@@ -642,12 +652,7 @@ class Evaluator:
             # Early exit if parsing failed
             if not new_function.body:
                 logger.warning(f"Evaluator: Parsing failed, empty body. Island {data['island_id']}")
-                if debug_folder:
-                    try:
-                        with open(os.path.join(debug_folder, "3_eval_results.txt"), "w") as f:
-                            f.write("PARSE_FAILED - never reached evaluation\n")
-                    except Exception:
-                        pass
+                self._write_debug_sample("parse_failure", debug_data, ["PARSE_FAILED - never reached evaluation"])
                 await self.publish_to_database(make_result("return", {}), None)
                 return
 
@@ -702,7 +707,7 @@ class Evaluator:
                         scores_per_test.get(dim, 0) >= self.target_signatures.get(dim, float("inf"))
                         for dim in self.target_signatures
                     )
-                    self._write_debug_results(debug_folder, debug_lines)
+                    self._write_debug_sample("success", debug_data, debug_lines)
                     await self.publish_to_database(make_result(new_function, scores_per_test, found_optimal), hash_value)
                     self.cumulative_cpu_time = 0.0
                     return
@@ -710,7 +715,7 @@ class Evaluator:
             # Failure path: cancel pending tasks and publish return to database
             for f in tasks:
                 f.cancel()
-            self._write_debug_results(debug_folder, debug_lines)
+            self._write_debug_sample("eval_failure", debug_data, debug_lines)
             await self.publish_to_database(make_result("return", {}), None)
             self.cumulative_cpu_time = 0.0
 

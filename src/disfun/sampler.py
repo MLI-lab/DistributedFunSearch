@@ -609,10 +609,11 @@ class LLM_model:
 class Sampler:
     """Samples program continuations and sends them for evaluation."""
 
-    def __init__(self, config, rabbitmq_config, device=None, log_dir=None, random_seed=None, sampler_id=0):
+    def __init__(self, config, rabbitmq_config, device=None, log_dir=None, random_seed=None, sampler_id=0, debug_samples=False):
         self._config = config
         self.device = device
         self.sampler_id = sampler_id
+        self.debug_samples = debug_samples
 
         from disfun.utils import rabbitmq
         self._conn = rabbitmq.ConnectionManager(
@@ -867,6 +868,8 @@ class Sampler:
                     # Include reflection output for ReEvo (only on first sample to avoid duplicates)
                     "reflection_output": reflection_outputs[prompt_idx] if sample_idx == 0 else None,
                 }
+                if self.debug_samples:
+                    message_data["prompt"] = generation_prompts[prompt_idx]
                 messages_to_publish.append(aio_pika.Message(body=json.dumps(message_data).encode()))
 
         # Batch publish all messages concurrently
