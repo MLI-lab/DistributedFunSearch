@@ -1,7 +1,7 @@
 """Evaluation script using precomputed graphs with native NetworkX.
 
-Converts FastGraph to a real nx.Graph so all nx functions work natively
-without wrappers. Slower than graph_fastgraph.py but fully compatible.
+Same as graph_fastgraph.py but receives a real nx.Graph instead of FastGraph.
+All nx functions work natively without wrappers.
 """
 
 import hashlib
@@ -19,18 +19,6 @@ mean = np.mean
 inf = float('inf')
 
 
-def _to_nx_graph(G):
-    """Convert a FastGraph to a real nx.Graph."""
-    nxG = nx.Graph()
-    nxG.add_nodes_from(G.nodes)
-    nxG.add_edges_from(G.edges)
-    return nxG
-
-
-def _is_fastgraph(G):
-    return hasattr(G, '_cpp_graph') or hasattr(G, '_degrees')
-
-
 def hash_priority_mapping(priorities, nodes):
     """Generate a hash based on the mapping of nodes to their priority scores."""
     mapping_str = ','.join(f'{node}:{priorities[node]}' for node in sorted(nodes))
@@ -39,8 +27,6 @@ def hash_priority_mapping(priorities, nodes):
 
 def evaluate(params, graph_dir):
     n, s, q, G = params
-    if _is_fastgraph(G):
-        G = _to_nx_graph(G)
     independent_set, hash_value = solve(n, s, q, G)
     return (len(independent_set), hash_value)
 

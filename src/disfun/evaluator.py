@@ -47,7 +47,7 @@ import gc
 import psutil
 import re
 
-from disfun.utils.fast_graph import load_graph_from_lmdb
+from disfun.utils.fast_graph import load_graph_from_lmdb, load_nx_graph_from_lmdb
 
 
 logger = logging.getLogger('main_logger')
@@ -67,17 +67,18 @@ def _build_graph_path(graph_dir, graph_type, s, n, q):
     return os.path.join(graph_dir, subdir, alphabet, f"s{s}", f"{prefix}_s{s}_n{n}_q{q}.lmdb")
 
 
-def get_cached_graph(n, s, q, graph_dir, graph_type="deletion"):
+def get_cached_graph(n, s, q, graph_dir, graph_type="deletion", use_nx=False):
     """Get graph from cache or load and cache it.
 
     Thread-safe. Forked children inherit the cached graphs.
     Path structure: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb
     Returns None if graph_dir is not configured (no-graph mode).
+    If use_nx is True, loads into a real nx.Graph instead of FastGraph.
     """
     if not graph_dir:
         return None
 
-    key = (n, s, q)
+    key = (n, s, q, use_nx)
 
     with _graph_cache_lock:
         if key in _graph_cache:
@@ -88,12 +89,13 @@ def get_cached_graph(n, s, q, graph_dir, graph_type="deletion"):
         logger.warning(f"Graph not found: {graph_path}")
         return None
 
-    logger.info(f"Loading graph n={n}, s={s}, q={q} from {graph_path}")
-    G = load_graph_from_lmdb(graph_path)
+    loader = load_nx_graph_from_lmdb if use_nx else load_graph_from_lmdb
+    logger.info(f"Loading graph n={n}, s={s}, q={q} from {graph_path} ({'nx.Graph' if use_nx else 'FastGraph'})")
+    G = loader(graph_path)
 
     with _graph_cache_lock:
         _graph_cache[key] = G
-        logger.info(f"Cached graph n={n}, s={s}, q={q}, nodes={G.number_of_nodes()}, edges={G.number_of_edges()}")
+        logger.info(f"Cached graph n={n}, s={s}, q={q}, nodes={len(G)}")
 
     return G
 
@@ -131,7 +133,11 @@ def _find_function_lines(tree: ast.Module, function_name: str) -> tuple[int, int
 
 
 def _parse_code(code: str, max_deletions: int = 20) -> tuple[ast.Module | None, str]:
-  """Parse Python code, deleting invalid lines from the end until it compiles.
+  """Parse Python code, truncating from the first syntax error onward until it compiles.
+
+  This helps when LLMs append trailing junk (bad comments, extra braces, markdown
+  artifacts). Mid-function errors will lose the return statement, but that's caught
+  later during evaluation.
 
   Returns:
       (parsed_tree, remaining_code) where parsed_tree is None if parsing failed.
@@ -485,6 +491,7 @@ class Evaluator:
         self._conn = connection_manager
         self.graph_dir = evaluator_config.graph_dir
         self.graph_type = getattr(evaluator_config, 'graph_type', 'deletion')
+        self.use_nx = evaluator_config.evaluation_script_path.endswith('graph_nx.py')
 
         # Debug sample folders (category-first layout: debug_samples/{category}/eval{PID}_{counter}_island{id}/)
         self.debug_samples = getattr(evaluator_config, 'debug_samples', False)
@@ -519,7 +526,7 @@ class Evaluator:
         unique_inputs = {(inp[0], inp[1], inp[2]) for inp in self.inputs if len(inp) >= 3}
         logger.info(f"Evaluator {self.local_id}: Pre-loading {len(unique_inputs)} graphs...")
         for n, s, q in sorted(unique_inputs):
-            get_cached_graph(n, s, q, self.graph_dir, self.graph_type)
+            get_cached_graph(n, s, q, self.graph_dir, self.graph_type, self.use_nx)
         logger.info(f"Evaluator {self.local_id}: Pre-load complete.")
 
     def _get_input_with_graph(self, input_tuple):
@@ -529,7 +536,7 @@ class Evaluator:
         Forked children inherit the cached graph via copy-on-write.
         """
         n, s, q = input_tuple[:3]
-        G = get_cached_graph(n, s, q, self.graph_dir, self.graph_type)
+        G = get_cached_graph(n, s, q, self.graph_dir, self.graph_type, self.use_nx)
         if G is not None:
             return (n, s, q, G)
         return input_tuple

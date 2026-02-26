@@ -14,6 +14,29 @@ LLM-generated priority functions work unchanged:
 """
 
 
+import numpy as np
+
+
+def _resolve_node(key, nodes_tuple, node_set):
+    """Resolve a node key that might be a string identifier or integer index.
+
+    LLM-generated code often confuses:
+    - Integer positional indices (for i in range(len(G)): G.neighbors(i))
+    - String node identifiers (G.neighbors("0110"))
+
+    Strategy:
+    - If key is already in node_set, return as-is (fast path)
+    - If key is an int and not in node_set, treat as positional index
+    - If key is a string of digits and not in node_set, try int conversion as index
+    """
+    if key in node_set:
+        return key
+    if isinstance(key, (int, np.integer)):
+        if 0 <= key < len(nodes_tuple):
+            return nodes_tuple[key]
+    raise KeyError(key)
+
+
 class NodeView:
     """NetworkX-compatible node view supporting both G.nodes and G.nodes()."""
 
@@ -38,6 +61,11 @@ class NodeView:
         return node in self._nodes
 
     def __getitem__(self, idx):
+        # Support NetworkX-style G.nodes[node] -> attribute dict
+        if isinstance(idx, str):
+            if idx in self._nodes:
+                return {}
+            raise KeyError(idx)
         return self._nodes[idx]
 
     def keys(self):
@@ -105,7 +133,9 @@ class DegreeView:
         self._graph = graph
 
     def __call__(self, node=None, weight=None):
-        """G.degree(node) -> int, G.degree() -> dict. Weight param ignored (unweighted graph)."""
+        """G.degree(node) -> int, G.degree() -> iterator of (node, deg) pairs. Weight param ignored."""
+        if node is None:
+            return self  # Iterable of (node, degree) pairs, same as nx.Graph.degree()
         return self._graph._degree_lookup(node)
 
     def __getitem__(self, node):
@@ -176,6 +206,9 @@ class AdjacencyView:
             return self[node]
         return default
 
+    def __contains__(self, node):
+        return node in self._graph
+
 
 class SubGraphView:
     """Read-only subgraph view for NetworkX compatibility.
@@ -211,10 +244,8 @@ class SubGraphView:
         """Returns DegreeView for subgraph."""
         return DegreeView(self)
 
-    def _degree_lookup(self, node=None):
+    def _degree_lookup(self, node):
         """Internal method for DegreeView."""
-        if node is None:
-            return {n: len(self.neighbors(n)) for n in self._nodes_tuple}
         return len(self.neighbors(node))
 
     def number_of_nodes(self):
@@ -329,11 +360,12 @@ if USING_CPP:
     class FastGraphCpp:
         """Wrapper around C++ FastGraph with NetworkX-compatible G.degree[node] support."""
 
-        __slots__ = ('_cpp_graph', '_degree_view', '_adj_view', '_node_view', '_edges_view', '_nodes_tuple')
+        __slots__ = ('_cpp_graph', '_degree_view', '_adj_view', '_node_view', '_edges_view', '_nodes_tuple', '_node_set')
 
         def __init__(self, cpp_graph):
             self._cpp_graph = cpp_graph
             self._nodes_tuple = cpp_graph.nodes  # Cache for internal use
+            self._node_set = frozenset(self._nodes_tuple)
             self._degree_view = DegreeView(self)
             self._adj_view = AdjacencyView(self)
             self._node_view = NodeView(self._nodes_tuple)
@@ -349,17 +381,21 @@ if USING_CPP:
             """Deprecated alias for nodes (NetworkX compatibility)."""
             return {n: {} for n in self._nodes_tuple}
 
+        def _resolve(self, node):
+            """Resolve node key (handles int-index vs string-identifier confusion)."""
+            return _resolve_node(node, self._nodes_tuple, self._node_set)
+
         def neighbors(self, node):
-            return self._cpp_graph.neighbors(node)
+            return self._cpp_graph.neighbors(self._resolve(node))
 
         @property
         def degree(self):
             """Returns DegreeView supporting both G.degree(node) and G.degree[node]."""
             return self._degree_view
 
-        def _degree_lookup(self, node=None):
+        def _degree_lookup(self, node):
             """Internal method for DegreeView."""
-            return self._cpp_graph.degree(node)
+            return self._cpp_graph.degree(self._resolve(node))
 
         def number_of_nodes(self):
             return self._cpp_graph.number_of_nodes()
@@ -368,11 +404,18 @@ if USING_CPP:
             return self._cpp_graph.number_of_edges()
 
         def has_node(self, node):
-            return self._cpp_graph.has_node(node)
+            try:
+                self._resolve(node)
+                return True
+            except KeyError:
+                return False
 
         def has_edge(self, u, v, key=None):
             """Check if edge exists (NetworkX compatibility). Key param ignored (not a multigraph)."""
-            return v in self._cpp_graph.neighbors(u)
+            try:
+                return self._resolve(v) in self._cpp_graph.neighbors(self._resolve(u))
+            except KeyError:
+                return False
 
         def order(self):
             """Number of nodes (NetworkX alias)."""
@@ -396,7 +439,11 @@ if USING_CPP:
                 yield node, {nb: {} for nb in self._cpp_graph.neighbors(node)}
 
         def __contains__(self, node):
-            return node in self._cpp_graph
+            try:
+                self._resolve(node)
+                return True
+            except KeyError:
+                return False
 
         def __len__(self):
             return len(self._cpp_graph)
@@ -406,7 +453,7 @@ if USING_CPP:
 
         def __getitem__(self, node):
             """G[node] -> dict of neighbors (NetworkX compatibility)."""
-            return {nb: {} for nb in self._cpp_graph.neighbors(node)}
+            return {nb: {} for nb in self._cpp_graph.neighbors(self._resolve(node))}
 
         @property
         def adj(self):
@@ -428,9 +475,11 @@ if USING_CPP:
 
         def get(self, node, default=None):
             """G.get(node) -> neighbors dict or default (NetworkX compatibility)."""
-            if node in self._cpp_graph:
-                return {nb: {} for nb in self._cpp_graph.neighbors(node)}
-            return default
+            try:
+                resolved = self._resolve(node)
+                return {nb: {} for nb in self._cpp_graph.neighbors(resolved)}
+            except KeyError:
+                return default
 
         def subgraph(self, nodes):
             """G.subgraph(nodes) -> SubGraphView (NetworkX compatibility).
@@ -507,11 +556,11 @@ if USING_CPP:
 
         def successors(self, node):
             """G.successors(node) -> neighbors (same as neighbors for undirected)."""
-            return self._cpp_graph.neighbors(node)
+            return self._cpp_graph.neighbors(self._resolve(node))
 
         def predecessors(self, node):
             """G.predecessors(node) -> neighbors (same as neighbors for undirected)."""
-            return self._cpp_graph.neighbors(node)
+            return self._cpp_graph.neighbors(self._resolve(node))
 
     def load_graph_from_lmdb(graph_path: str) -> FastGraphCpp:
         """Load graph from LMDB and wrap with NetworkX-compatible API."""
@@ -554,19 +603,21 @@ else:
             """Deprecated alias for nodes (NetworkX compatibility)."""
             return {n: {} for n in self._nodes_tuple}
 
+        def _resolve(self, node):
+            """Resolve node key (handles int-index vs string-identifier confusion)."""
+            return _resolve_node(node, self._nodes_tuple, self._node_set)
+
         def neighbors(self, node) -> tuple:
-            return self._neighbors[node]
+            return self._neighbors[self._resolve(node)]
 
         @property
         def degree(self):
             """Returns DegreeView supporting both G.degree(node) and G.degree[node]."""
             return self._degree_view
 
-        def _degree_lookup(self, node=None):
+        def _degree_lookup(self, node):
             """Internal method for DegreeView."""
-            if node is None:
-                return self._degrees
-            return self._degrees[node]
+            return self._degrees[self._resolve(node)]
 
         def number_of_nodes(self) -> int:
             return len(self._nodes_tuple)
@@ -575,11 +626,18 @@ else:
             return self._num_edges
 
         def has_node(self, node) -> bool:
-            return node in self._node_set
+            try:
+                self._resolve(node)
+                return True
+            except KeyError:
+                return False
 
         def has_edge(self, u, v, key=None) -> bool:
             """Check if edge exists (NetworkX compatibility). Key param ignored (not a multigraph)."""
-            return v in self._neighbors.get(u, ())
+            try:
+                return self._resolve(v) in self._neighbors.get(self._resolve(u), ())
+            except KeyError:
+                return False
 
         def order(self) -> int:
             """Number of nodes (NetworkX alias)."""
@@ -603,7 +661,11 @@ else:
                 yield node, {nb: {} for nb in self._neighbors[node]}
 
         def __contains__(self, node) -> bool:
-            return node in self._node_set
+            try:
+                self._resolve(node)
+                return True
+            except KeyError:
+                return False
 
         def __len__(self) -> int:
             return len(self._nodes_tuple)
@@ -613,7 +675,7 @@ else:
 
         def __getitem__(self, node):
             """G[node] -> dict of neighbors (NetworkX compatibility)."""
-            return {nb: {} for nb in self._neighbors[node]}
+            return {nb: {} for nb in self._neighbors[self._resolve(node)]}
 
         @property
         def adj(self):
@@ -648,9 +710,11 @@ else:
 
         def get(self, node, default=None):
             """G.get(node) -> neighbors dict or default (NetworkX compatibility)."""
-            if node in self._node_set:
-                return {nb: {} for nb in self._neighbors[node]}
-            return default
+            try:
+                resolved = self._resolve(node)
+                return {nb: {} for nb in self._neighbors[resolved]}
+            except KeyError:
+                return default
 
         def subgraph(self, nodes):
             """G.subgraph(nodes) -> SubGraphView (NetworkX compatibility).
@@ -727,11 +791,11 @@ else:
 
         def successors(self, node):
             """G.successors(node) -> neighbors (same as neighbors for undirected)."""
-            return self._neighbors[node]
+            return self._neighbors[self._resolve(node)]
 
         def predecessors(self, node):
             """G.predecessors(node) -> neighbors (same as neighbors for undirected)."""
-            return self._neighbors[node]
+            return self._neighbors[self._resolve(node)]
 
 
     def load_graph_from_lmdb(graph_path: str) -> FastGraphCpp:
@@ -755,6 +819,25 @@ else:
         env.close()
 
         return FastGraphCpp(nodes, edges)
+
+
+def load_nx_graph_from_lmdb(graph_path: str):
+    """Load graph from LMDB directly into an nx.Graph."""
+    import lmdb
+    import ujson
+    import networkx as nx
+
+    G = nx.Graph()
+    env = lmdb.open(graph_path, readonly=True, lock=False, readahead=True, max_readers=126)
+    with env.begin(buffers=True) as txn:
+        for key, value in txn.cursor():
+            node = bytes(key).decode()
+            G.add_node(node)
+            for neighbor in ujson.loads(bytes(value).decode()):
+                if node < neighbor:
+                    G.add_edge(node, neighbor)
+    env.close()
+    return G
 
 
 # Alias for backwards compatibility

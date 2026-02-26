@@ -35,7 +35,8 @@ DESC_COLS = ["description_present", "description_length", "description_score",
              "description_matches_code", "overambitious"]
 RETURN_COLS = ["has_return_raw", "has_return_parsed", "return_subcategory",
                "raw_token_count", "parsed_empty_line_pct",
-               "wasted_empty_tokens", "wasted_empty_pct", "observed_error_type"]
+               "wasted_empty_tokens", "wasted_empty_pct", "observed_error_type",
+               "error_message"]
 CSV_FIELDS = (["sample_id", "category", "detail"]
               + THINKING_COLS + DESC_COLS + RETURN_COLS)
 
@@ -68,7 +69,7 @@ def _load_tokenizer(model_name):
         return None
     try:
         from transformers import AutoTokenizer
-        return AutoTokenizer.from_pretrained(model_name)
+        return AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     except Exception:
         return None
 
@@ -130,12 +131,32 @@ def _extract_error_type(eval_text):
     return "unknown"
 
 
+def _extract_error_message(eval_text):
+    """Extract the error type and message, e.g. 'KeyError: 'weight''.
+
+    Looks for the RUNTIME_ERROR line first, falls back to searching for
+    any ExceptionType: message pattern.
+    """
+    if not eval_text:
+        return "unknown"
+    if "timeout" in eval_text.lower():
+        return "timeout"
+    m = re.search(r'RUNTIME_ERROR: (.+)', eval_text)
+    if m:
+        msg = m.group(1).strip()
+        return msg
+    m = re.search(r'COMPILE_ERROR: (.+)', eval_text)
+    if m:
+        return m.group(1).strip()[:120]
+    return "unknown"
+
+
 def analyze_return_statement(sample_dir, max_tokens, tokenizer):
     """Check whether the generated function has a return statement.
 
     Classifies into subcategories:
       has_return:             parsed body has return, not a return issue.
-      syntax_error_in_return: raw output has return but parser dropped it.
+      return_lost_to_syntax_error: raw output has return but parser dropped it.
       no_return_max_tokens:   hit max_tokens before generating a return.
       no_return_short:        below max_tokens, gave up early.
     """
@@ -152,7 +173,7 @@ def analyze_return_statement(sample_dir, max_tokens, tokenizer):
     if has_ret_parsed:
         subcat = "has_return"
     elif has_ret_raw:
-        subcat = "syntax_error_in_return"
+        subcat = "return_lost_to_syntax_error"
     else:
         hit_max = token_count >= max_tokens
         if hit_max:
@@ -169,6 +190,7 @@ def analyze_return_statement(sample_dir, max_tokens, tokenizer):
         "wasted_empty_tokens": wasted_tokens,
         "wasted_empty_pct": wasted_pct,
         "observed_error_type": _extract_error_type(eval_text),
+        "error_message": _extract_error_message(eval_text),
     }
 
 
@@ -277,33 +299,14 @@ def print_summary(rows):
                   f"median={statistics.median(vals):.0f}, "
                   f"min={min(vals)}, max={max(vals)}")
 
-    # non timeout categories, show top details
-    for cat, count in cats.most_common():
-        if cat == "timeout":
-            continue
-        cat_rows = [r for r in rows if r["category"] == cat]
-        print(f"\n{cat} ({count} samples):")
-        for detail, cnt in Counter(r["detail"] for r in cat_rows).most_common(5):
-            print(f"    {detail}  ({cnt} samples)")
+    # group by exact error message across all runtime errors
+    runtime_rows = [r for r in rows if r["category"] != "timeout"]
+    if runtime_rows:
+        msgs = Counter(r.get("error_message", "unknown") for r in runtime_rows)
+        print(f"\nerror message breakdown ({len(runtime_rows)} runtime errors):")
+        for msg, cnt in msgs.most_common():
+            print(f"  {cnt:>4} ({_pct(cnt, len(runtime_rows)):>5.1f}%)  {msg}")
 
-    # same breakdown but filtered to samples that have a return statement,
-    # so we see the "pure" error distribution without the missing return noise
-    has_return = [r for r in rows if r.get("has_return_parsed")]
-    if has_return and len(has_return) < total:
-        n_hr = len(has_return)
-        print(f"\n--- excluding samples with missing return ({n_hr} of {total}) ---\n")
-        cats_hr = Counter(r["category"] for r in has_return)
-        print("category breakdown (has return only):")
-        for cat, count in cats_hr.most_common():
-            print(f"  {cat}: {count:>4} ({_pct(count, n_hr):>5.1f}%)")
-
-        for cat, count in cats_hr.most_common():
-            if cat == "timeout":
-                continue
-            cat_rows = [r for r in has_return if r["category"] == cat]
-            print(f"\n{cat} ({count} samples):")
-            for detail, cnt in Counter(r["detail"] for r in cat_rows).most_common(5):
-                print(f"    {detail}  ({cnt} samples)")
 
 
 def _pct(n, total):
@@ -343,7 +346,7 @@ def print_return_analysis(rows):
     # subcategory breakdown
     subcats = Counter(r.get("return_subcategory", "unknown") for r in no_return)
     subcat_labels = [
-        ("syntax_error_in_return", "raw has return, parser dropped it"),
+        ("return_lost_to_syntax_error", "raw has return, lost to AST truncation (syntax error before it)"),
         ("no_return_max_tokens",   "hit max_tokens before generating return"),
         ("no_return_short",        "below max_tokens, gave up early"),
     ]
@@ -358,16 +361,15 @@ def print_return_analysis(rows):
     # when priority() returns None the evaluator always produces:
     #   TypeError: bad operand type for unary -: 'NoneType'
     none_err = "bad operand type for unary -: 'NoneType'"
-    is_none = [r for r in no_return if none_err in r.get("detail", "")]
-    is_other = [r for r in no_return if none_err not in r.get("detail", "")]
+    is_none = [r for r in no_return if none_err in r.get("error_message", "")]
+    is_other = [r for r in no_return if none_err not in r.get("error_message", "")]
 
     print(f"\n  observed error vs missing return:")
     print(f"    None was the direct cause:        {len(is_none):>4} ({_pct(len(is_none), n_miss):.1f}%)")
+    none_max = sum(1 for r in is_none if r.get("return_subcategory") == "no_return_max_tokens")
+    none_short = len(is_none) - none_max
+    print(f"      hit max_tokens: {none_max}, below max_tokens: {none_short}")
     print(f"    other error fired first:          {len(is_other):>4} ({_pct(len(is_other), n_miss):.1f}%)")
-    if is_other:
-        etypes = Counter(r.get("observed_error_type", "unknown") for r in is_other)
-        for etype, cnt in etypes.most_common():
-            print(f"      {etype}: {cnt}")
 
     # token counts
     tcounts = [r["raw_token_count"] for r in no_return
