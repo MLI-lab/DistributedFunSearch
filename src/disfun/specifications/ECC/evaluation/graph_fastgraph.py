@@ -1,7 +1,8 @@
-"""Evaluation script using precomputed graphs (works for any ECC problem type).
+"""Evaluation script using precomputed graphs with FastGraph backend.
 
-Graph is pre-loaded by evaluator and passed via params. Uses FastGraph with
-NetworkX-compatible API: G.neighbors(node), G.degree(node), G.nodes
+Uses FastGraph (C++ backed) for fast graph operations. Monkey-patches common
+nx.* functions to work with FastGraph. For full nx compatibility at the cost
+of speed, use graph_nx.py instead.
 """
 
 import hashlib

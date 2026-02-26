@@ -265,7 +265,7 @@ def load_specification(
     funsearch_evaluation_script: str | None = None,
     fewshot_num_examples: int = 2,
     fewshot_include_description: bool = True,
-    initial_functions_dir: str = "initial_functions/graph_networkx",
+    initial_functions_dir: str = "initial_functions/graph",
     # EoH options
     eoh_styles_dir: str = "eoh/styles",
     eoh_problem_desc: str = "eoh/problem_descriptions/baseline.txt",

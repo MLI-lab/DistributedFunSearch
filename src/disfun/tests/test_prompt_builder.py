@@ -89,7 +89,7 @@ def load_spec(strategy: PromptStrategy, variant: str = "deletions", **kwargs) ->
         "spec_dir": str(get_spec_dir()),
         "variant": variant,
         "imports_file": "imports/networkx.txt",
-        "initial_functions_dir": "initial_functions/graph_networkx",
+        "initial_functions_dir": "initial_functions/graph",
         "fewshot_num_examples": 2,
         "fewshot_include_description": True,
         "funsearch_template": "funsearch/templates/completion.txt",
