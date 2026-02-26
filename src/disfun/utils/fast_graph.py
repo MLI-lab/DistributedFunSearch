@@ -98,8 +98,35 @@ class EdgesView:
         self._cached_edges = cached_edges  # For pure Python version
 
     def __call__(self, nbunch=None, data=False, default=None):
-        """G.edges() -> iterator of edges (NetworkX compatibility)."""
-        return iter(self)
+        """G.edges() / G.edges(data=True) / G.edges(node).
+
+        Matches nx: returns self for no args, filtered list for nbunch,
+        3-tuples (u, v, {}) when data=True.
+        """
+        if data:
+            return [(u, v, {}) for u, v in self._iter_edges(nbunch)]
+        if nbunch is not None:
+            return list(self._iter_edges(nbunch))
+        return self
+
+    def _iter_edges(self, nbunch=None):
+        """Iterate edges, optionally filtered to nbunch."""
+        if nbunch is None:
+            yield from self
+        elif isinstance(nbunch, str) or nbunch in self._graph:
+            # Single node
+            for nb in self._graph.neighbors(nbunch):
+                yield (nbunch, nb)
+        else:
+            # Iterable of nodes
+            seen = set()
+            for node in nbunch:
+                if node in self._graph:
+                    for nb in self._graph.neighbors(node):
+                        edge = (node, nb) if node < nb else (nb, node)
+                        if edge not in seen:
+                            seen.add(edge)
+                            yield edge
 
     def __iter__(self):
         if self._cached_edges is not None:
@@ -298,7 +325,7 @@ class SubGraphView:
         """Iterate over nodes in subgraph."""
         if nbunch is None:
             return iter(self._nodes_tuple)
-        if nbunch in self._nodes_set:
+        if isinstance(nbunch, str) and nbunch in self._nodes_set:
             return iter([nbunch])
         return (n for n in nbunch if n in self._nodes_set)
 
@@ -497,7 +524,7 @@ if USING_CPP:
             """
             if nbunch is None:
                 return iter(self._nodes_tuple)
-            if nbunch in self:
+            if isinstance(nbunch, str) and nbunch in self:
                 return iter([nbunch])
             return (n for n in nbunch if n in self)
 
@@ -732,7 +759,7 @@ else:
             """
             if nbunch is None:
                 return iter(self._nodes_tuple)
-            if nbunch in self:
+            if isinstance(nbunch, str) and nbunch in self:
                 return iter([nbunch])
             return (n for n in nbunch if n in self)
 

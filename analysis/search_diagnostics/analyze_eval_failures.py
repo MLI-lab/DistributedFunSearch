@@ -302,10 +302,17 @@ def print_summary(rows):
     # group by exact error message across all runtime errors
     runtime_rows = [r for r in rows if r["category"] != "timeout"]
     if runtime_rows:
-        msgs = Counter(r.get("error_message", "unknown") for r in runtime_rows)
+        # collect sample ids per error message
+        msg_samples = {}
+        for r in runtime_rows:
+            msg = r.get("error_message", "unknown")
+            msg_samples.setdefault(msg, []).append(r.get("sample_id", "?"))
         print(f"\nerror message breakdown ({len(runtime_rows)} runtime errors):")
-        for msg, cnt in msgs.most_common():
+        for msg, ids in sorted(msg_samples.items(), key=lambda x: -len(x[1])):
+            cnt = len(ids)
+            examples = ", ".join(ids[:3])
             print(f"  {cnt:>4} ({_pct(cnt, len(runtime_rows)):>5.1f}%)  {msg}")
+            print(f"         e.g. {examples}")
 
 
 
@@ -323,76 +330,38 @@ def _print_stats(label, values):
 
 
 def print_return_analysis(rows):
-    """Print return statement analysis summary.
-
-    Checks whether the generated function body contains a return statement,
-    independent of what runtime error actually fired. This catches functions
-    that crash with e.g. NameError before the missing return would surface.
-    """
+    """Print NoneType / missing return analysis."""
     total = len(rows)
     if total == 0:
         return
 
-    no_return = [r for r in rows if not r.get("has_return_parsed")]
-    print(f"\nreturn statement analysis:")
-    if not no_return:
-        print(f"  all {total} samples have a return statement in parsed body")
+    # All samples where priority() returned None at runtime
+    none_err = "bad operand type for unary -: 'NoneType'"
+    all_none = [r for r in rows if none_err in r.get("error_message", "")]
+    if not all_none:
         return
 
-    n_miss = len(no_return)
-    print(f"  total eval failures: {total}")
-    print(f"  missing return in parsed body: {n_miss:>4} ({_pct(n_miss, total):.1f}%)")
+    subcats = Counter(r.get("return_subcategory", "unknown") for r in all_none)
+    no_ret = sum(1 for r in all_none if not r.get("has_return_parsed"))
+    has_ret = len(all_none) - no_ret
 
-    # subcategory breakdown
-    subcats = Counter(r.get("return_subcategory", "unknown") for r in no_return)
-    subcat_labels = [
-        ("return_lost_to_syntax_error", "raw has return, lost to AST truncation (syntax error before it)"),
-        ("no_return_max_tokens",   "hit max_tokens before generating return"),
-        ("no_return_short",        "below max_tokens, gave up early"),
-    ]
-    print(f"\n  breakdown of {n_miss} missing return samples:")
-    for subcat, label in subcat_labels:
-        count = subcats.get(subcat, 0)
-        print(f"    {subcat}: {count:>4} "
-              f"({_pct(count, n_miss):>5.1f}% of missing, "
-              f"{_pct(count, total):>5.1f}% of all)  .. {label}")
-
-    # which error actually fired at runtime.
-    # when priority() returns None the evaluator always produces:
-    #   TypeError: bad operand type for unary -: 'NoneType'
-    none_err = "bad operand type for unary -: 'NoneType'"
-    is_none = [r for r in no_return if none_err in r.get("error_message", "")]
-    is_other = [r for r in no_return if none_err not in r.get("error_message", "")]
-
-    print(f"\n  observed error vs missing return:")
-    print(f"    None was the direct cause:        {len(is_none):>4} ({_pct(len(is_none), n_miss):.1f}%)")
-    none_max = sum(1 for r in is_none if r.get("return_subcategory") == "no_return_max_tokens")
-    none_short = len(is_none) - none_max
-    print(f"      hit max_tokens: {none_max}, below max_tokens: {none_short}")
-    print(f"    other error fired first:          {len(is_other):>4} ({_pct(len(is_other), n_miss):.1f}%)")
-
-    # token counts
-    tcounts = [r["raw_token_count"] for r in no_return
-               if isinstance(r.get("raw_token_count"), (int, float))]
-    _print_stats(f"token counts for missing return samples ({len(tcounts)})", tcounts)
-
-    # wasted empty line tokens for samples that hit max_tokens
-    max_tok = [r for r in no_return
-               if r.get("return_subcategory") == "no_return_max_tokens"]
-    if max_tok:
-        wasted = [r["wasted_empty_tokens"] for r in max_tok
-                  if isinstance(r.get("wasted_empty_tokens"), (int, float))]
-        wasted_pcts = [r["wasted_empty_pct"] for r in max_tok
-                       if isinstance(r.get("wasted_empty_pct"), (int, float))]
-        if wasted:
-            _print_stats(f"wasted tokens on empty lines, max_tokens samples ({len(wasted)})", wasted)
-        if wasted_pcts:
-            _print_stats(f"wasted % on empty lines, max_tokens samples ({len(wasted_pcts)})", wasted_pcts)
-            for lo in range(0, 60, 5):
-                hi = lo + 5
-                n = sum(1 for p in wasted_pcts if lo <= p < hi)
-                if n:
-                    print(f"    {lo:>2}..{hi:>3}%: {n:>3} ({_pct(n, len(wasted_pcts)):>5.1f}%)")
+    print(f"\nNoneType analysis ({len(all_none)} samples returned None, {_pct(len(all_none), total):.1f}% of all):")
+    print(f"  has return but outputs None:    {has_ret:>4} ({_pct(has_ret, len(all_none)):.1f}%)")
+    print(f"  no return statement:            {no_ret:>4} ({_pct(no_ret, len(all_none)):.1f}%)", end="")
+    if no_ret:
+        parts = []
+        lost = subcats.get("return_lost_to_syntax_error", 0)
+        max_tok = subcats.get("no_return_max_tokens", 0)
+        short = subcats.get("no_return_short", 0)
+        if lost:
+            parts.append(f"{lost} lost to AST truncation")
+        if max_tok:
+            parts.append(f"{max_tok} hit max_tokens")
+        if short:
+            parts.append(f"{short} gave up early")
+        if parts:
+            print(f"  ({', '.join(parts)})", end="")
+    print()
 
 
 def consolidate_rows(rows, model):
