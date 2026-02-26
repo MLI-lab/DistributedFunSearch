@@ -192,7 +192,7 @@ def _normalize_indent(lines, target=4):
   return result
 
 
-def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
+def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None, str | None]:
   """
   Parse raw LLM output and extract a valid Python function body.
 
@@ -205,10 +205,11 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
   5. Parse with AST (delete invalid lines until it compiles)
 
   Returns:
-      (function_body, description, thinking_trace)
+      (function_body, description, thinking_trace, failure_reason)
+      failure_reason is None on success, or a string describing why parsing failed.
   """
   if not raw_output:
-    return '', None, None
+    return '', None, None, 'LLM returned empty output'
 
   # Extract thinking trace from Qwen3 <think> blocks
   think_match = re.search(r'<think>(.*?)</think>', raw_output, re.DOTALL)
@@ -255,7 +256,7 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
   # (strip() would break indented body code by removing indent from first line only)
   code = code.lstrip('\n').rstrip()
   if not code:
-    return '', description, thinking_trace
+    return '', description, thinking_trace, 'LLM returned no code (only markdown/description tags)'
 
   # Determine if this is body only or full function
 
@@ -264,13 +265,20 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
   priority_match = re.search(r'^\s*def\s+(priority\w*)\s*\(', code, re.MULTILINE)
 
   # Tier 2/3: No priority-prefixed function — find all defs, filter skip names
+  # But only when code starts at column 0 (full function output).
+  # If first non-empty line is indented, this is completion-mode output and
+  # any def appearing later is a helper or trailing junk, not the priority function.
   if not priority_match:
-    skip_names = {'main', 'evaluate', 'test', 'unused', 'helper', '__init__'}
-    all_funcs = list(re.finditer(r'^\s*def\s+(\w+)\s*\(', code, re.MULTILINE))
-    candidates = [m for m in all_funcs if m.group(1) not in skip_names]
-    if len(candidates) >= 1:
-      priority_match = candidates[0]
-      logger.info(f"No priority-prefixed function, using '{candidates[0].group(1)}' as priority function")
+    first_non_empty = next((l for l in code.splitlines() if l.strip()), '')
+    is_completion = first_non_empty and first_non_empty[0].isspace()
+
+    if not is_completion:
+      skip_names = {'main', 'evaluate', 'test', 'unused', 'helper', '__init__'}
+      all_funcs = list(re.finditer(r'^\s*def\s+(\w+)\s*\(', code, re.MULTILINE))
+      candidates = [m for m in all_funcs if m.group(1) not in skip_names]
+      if len(candidates) >= 1:
+        priority_match = candidates[0]
+        logger.info(f"No priority-prefixed function, using '{candidates[0].group(1)}' as priority function")
 
   if priority_match:
     # Full function output, extract priority body
@@ -279,7 +287,7 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
 
     tree, parsed_code = _parse_code(code)
     if tree is None:
-      return '', description, thinking_trace
+      return '', description, thinking_trace, 'code too broken to compile (still has syntax errors after truncating 20+ lines)'
 
     parsed_lines = parsed_code.splitlines()
 
@@ -313,7 +321,7 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
     except ValueError:
       # Function was found by regex but removed by _parse_code line deletions
       logger.warning(f"Function '{function_name}' found by regex but lost during AST repair")
-      return '', description, thinking_trace
+      return '', description, thinking_trace, f"AST repair truncated '{function_name}' to no body (whole body had syntax errors)"
     body_lines = parsed_lines[start_line:end_line]
 
     # Normalize indentation to 4 spaces (LLMs sometimes use 2/3/5/6-space indent)
@@ -404,7 +412,7 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
     wrapped = 'def _fake_():\n' + body_code
     tree, parsed_code = _parse_code(wrapped)
     if tree is None:
-      return '', description, thinking_trace
+      return '', description, thinking_trace, 'code too broken to compile (still has syntax errors after truncating 20+ lines)'
 
     # Extract validated body
     _, end_line = _find_function_lines(tree, '_fake_')
@@ -421,7 +429,7 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None]:
     body = '\n'.join(body_lines) + '\n\n'
 
   logger.debug(f"Parsed LLM output: {len(body)} chars, description={'yes' if description else 'no'}, thinking={'yes' if thinking_trace else 'no'}")
-  return body, description, thinking_trace
+  return body, description, thinking_trace, None
 
 
 def _sample_to_program(
@@ -430,14 +438,14 @@ def _sample_to_program(
     template: code_manipulation.Program,
     # function_to_evolve is set to priority
     function_to_evolve: str,
-) -> tuple[code_manipulation.Function, str, str | None, str | None]:
+) -> tuple[code_manipulation.Function, str, str | None, str | None, str | None]:
   """Integrates a generated code as string into a larger program template.
 
   Returns:
-      tuple: (evolved_function, program_str, description, thinking_trace)
+      tuple: (evolved_function, program_str, description, thinking_trace, failure_reason)
   """
   # Parse LLM output: extract from XML tags, strip markdown, validate with AST
-  body, description, thinking_trace = parse_llm_output(generated_code)
+  body, description, thinking_trace, failure_reason = parse_llm_output(generated_code)
   if version_generated is not None:
 
     body = code_manipulation.rename_function_calls(
@@ -450,7 +458,7 @@ def _sample_to_program(
   evolved_function.body = body
   evolved_function.description = description
   evolved_function.thinking_trace = thinking_trace
-  return evolved_function, str(program), description, thinking_trace
+  return evolved_function, str(program), description, thinking_trace, failure_reason
 
 
 def run_evaluation(sandbox, program, function_to_run, input):
@@ -636,7 +644,7 @@ class Evaluator:
             reflection_output = data.get("reflection_output")  # ReEvo reflection
 
             # Parse LLM output and integrate into evaluation template
-            new_function, program, description, thinking_trace = _sample_to_program(
+            new_function, program, description, thinking_trace, failure_reason = _sample_to_program(
                 data["sample"], data.get("version_generated"), self.template, self.function_to_evolve
             )
 
@@ -646,7 +654,7 @@ class Evaluator:
                 "prompt": data.get("prompt", ""),
                 "raw_output": data.get("sample", ""),
                 "thinking_trace": thinking_trace,
-                "parsed_body": new_function.body if new_function.body else "PARSE_FAILED",
+                "parsed_body": new_function.body if new_function.body else f"PARSE_FAILED: {failure_reason or 'unknown'}",
                 "island_id": data.get("island_id", "x"),
             }
 
@@ -658,8 +666,8 @@ class Evaluator:
 
             # Early exit if parsing failed
             if not new_function.body:
-                logger.warning(f"Evaluator: Parsing failed, empty body. Island {data['island_id']}")
-                self._write_debug_sample("parse_failure", debug_data, ["PARSE_FAILED - never reached evaluation"])
+                logger.warning(f"Evaluator: Parsing failed ({failure_reason}), empty body. Island {data['island_id']}")
+                self._write_debug_sample("parse_failure", debug_data, [f"PARSE_FAILED ({failure_reason or 'unknown'}) - never reached evaluation"])
                 await self.publish_to_database(make_result("return", {}), None)
                 return
 

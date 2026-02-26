@@ -31,10 +31,12 @@ def print_test(name: str, raw_input: str):
     for i, line in enumerate(raw_input.split('\n'), 1):
         print(f"{i:3}: {line}")
 
-    body, description, thinking_trace = parse_llm_output(raw_input)
+    body, description, thinking_trace, failure_reason = parse_llm_output(raw_input)
 
     print(f"\nPARSED OUTPUT:")
     print(f"description: {description}")
+    if failure_reason:
+        print(f"failure_reason: {failure_reason}")
     if thinking_trace:
         print(f"thinking_trace: {thinking_trace[:200]}{'...' if len(thinking_trace) > 200 else ''}")
     print(f"\nbody ({len(body)} chars):")
@@ -294,7 +296,7 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     return -degree + len(node)
 </code>"""
 
-    evolved_function, program_str, description, thinking_trace = _sample_to_program(
+    evolved_function, program_str, description, thinking_trace, failure_reason = _sample_to_program(
         llm_output, None, template, 'priority'
     )
 
@@ -349,7 +351,7 @@ def priority(node : str,
 ```
 </code>"""
     print_test("Multi-line def signature", raw)
-    body, _, _ = parse_llm_output(raw)
+    body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "multiline_def")
     # Body must NOT contain continuation lines from the def signature
     assert 'G    : object' not in body, "FAIL: def continuation leaked into body"
@@ -370,7 +372,7 @@ def priority_new(node, G, n, s):
 ```
 </code>"""
     print_test("Mixed indentation (3-space)", raw)
-    body, _, _ = parse_llm_output(raw)
+    body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "3space_indent")
     # Verify body was normalized to 4-space
     first_line = next((l for l in body.splitlines() if l.strip()), '')
@@ -393,7 +395,7 @@ def priority_new(node, G, n, s):
 ```
 </code>"""
     print_test("Helper before priority (3-space indent)", raw)
-    body, _, _ = parse_llm_output(raw)
+    body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "helper_different_indent")
     assert 'hamming_weight' in body, "FAIL: helper function missing from body"
     print(f"  CHECK: helper included: {'PASS' if 'hamming_weight' in body else 'FAIL'}")
@@ -411,7 +413,7 @@ def priority(node, G, n, s):
 ```
 </code>"""
     print_test("Code tags with double fence", raw)
-    body, _, _ = parse_llm_output(raw)
+    body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "double_fence")
     assert '```' not in body, "FAIL: fence markers leaked into body"
     print(f"  CHECK: no fence markers in body: {'PASS' if '```' not in body else 'FAIL'}")
@@ -432,7 +434,7 @@ def priority(node, G, n, s):
 ```
 </code>"""
     print_test("Try/except pass (returns None)", raw)
-    body, _, _ = parse_llm_output(raw)
+    body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "except_pass")
 
 
@@ -449,7 +451,7 @@ def priority_new(node, G, n, s):
 ```
 </code>"""
     print_test("Priority_new renamed to priority", raw)
-    body, _, _ = parse_llm_output(raw)
+    body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "priority_new_rename")
     assert 'priority_new' not in body, "FAIL: priority_new not renamed"
     assert 'priority(' in body, "FAIL: recursive call not renamed to priority"
@@ -472,7 +474,7 @@ def priority_new(node, G, n, s):
 ```
 </code>"""
     print_test("Combinations import inside body", raw)
-    body, _, _ = parse_llm_output(raw)
+    body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "combinations_import")
     assert 'combinations' in body, "FAIL: combinations reference missing from body"
     print(f"  CHECK: combinations in body: {'PASS' if 'combinations' in body else 'FAIL'}")
