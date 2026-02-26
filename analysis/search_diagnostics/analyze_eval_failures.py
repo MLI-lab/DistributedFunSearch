@@ -2,13 +2,18 @@
 """Analyze eval failure debug samples, classify errors and compute statistics.
 
 Usage:
-    python analyze_eval_failures.py /path/to/debug_samples/
-    python analyze_eval_failures.py /path/to/debug_samples/ --skip-llm
-    python analyze_eval_failures.py --csv /path/to/eval_failures.csv /path/to/debug_samples/
+    python analyze_eval_failures.py <debug_samples_dir> [options]
 
-Uses gpt-5 by default for classification (--model to override).
-Uses bigcode/starcoder2-15b tokenizer by default for token counting (--tokenizer to override).
-Uses 246 max tokens by default for return analysis (--max-tokens to override).
+Options:
+    --model NAME      LLM model for error classification (default: gpt-5)
+    --skip-llm        Skip all LLM calls, use heuristics only
+    --csv PATH        Reanalyze an existing CSV instead of running on samples
+    --consolidate     Reread existing CSV and deduplicate descriptions via LLM (requires --csv)
+    --tokenizer NAME  HuggingFace tokenizer for token counting (default: bigcode/starcoder2-15b)
+    --max-tokens N    Max new tokens the sampler model was configured with,
+                      used to distinguish "hit token limit" vs "stopped early" (default: 246)
+    -o, --output PATH Output CSV path (default: <debug_samples>/eval_failures.csv)
+    -v, --verbose     Print classification details for each sample
 """
 
 import os
@@ -21,7 +26,7 @@ from shared import (
     read_file, list_samples, common_args, write_csv, read_csv,
     add_thinking_analysis, add_description_analysis,
     print_thinking_summary, print_description_summary, llm_call,
-    tee_to_file,
+    tee_to_file, load_tokenizer, count_tokens,
 )
 
 # path to the evaluation script (included in llm prompt for context)
@@ -36,7 +41,7 @@ DESC_COLS = ["description_present", "description_length", "description_score",
 RETURN_COLS = ["has_return_raw", "has_return_parsed", "return_subcategory",
                "raw_token_count", "parsed_empty_line_pct",
                "wasted_empty_tokens", "wasted_empty_pct", "observed_error_type",
-               "error_message"]
+               "error_message", "parsed_body_hash"]
 CSV_FIELDS = (["sample_id", "category", "detail"]
               + THINKING_COLS + DESC_COLS + RETURN_COLS)
 
@@ -63,23 +68,6 @@ def parse_eval_results(text):
     }
 
 
-def _load_tokenizer(model_name):
-    """Try to load a huggingface tokenizer for accurate token counting."""
-    if not model_name:
-        return None
-    try:
-        from transformers import AutoTokenizer
-        return AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    except Exception:
-        return None
-
-
-def _count_tokens(text, tokenizer):
-    """Count tokens. Uses real tokenizer if available, otherwise chars/3.5."""
-    if tokenizer is not None:
-        return len(tokenizer.encode(text))
-    return int(len(text) / 3.5)
-
 
 def _has_return(text):
     """Check if text contains a return statement outside of comments."""
@@ -90,6 +78,13 @@ def _has_return(text):
         if not stripped.startswith("#") and re.search(r'\breturn\b', stripped):
             return True
     return False
+
+
+def _normalize_code(text):
+    """Normalize code for deduplication: strip comments, collapse whitespace."""
+    text = re.sub(r"#.*", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 def _empty_line_pct(text):
@@ -108,10 +103,10 @@ def _wasted_empty_line_tokens(text, tokenizer):
     token counts. Returns (wasted_tokens, wasted_pct) where pct is
     relative to original token count.
     """
-    original_tokens = _count_tokens(text, tokenizer)
+    original_tokens = count_tokens(text, tokenizer)
     lines = text.splitlines() if text else []
     stripped = "\n".join(l for l in lines if l.strip())
-    stripped_tokens = _count_tokens(stripped, tokenizer)
+    stripped_tokens = count_tokens(stripped, tokenizer)
     wasted = original_tokens - stripped_tokens
     wasted_pct = 100.0 * wasted / original_tokens if original_tokens > 0 else 0.0
     return wasted, round(wasted_pct, 1)
@@ -166,7 +161,7 @@ def analyze_return_statement(sample_dir, max_tokens, tokenizer):
 
     has_ret_raw = _has_return(raw)
     has_ret_parsed = _has_return(parsed)
-    token_count = _count_tokens(raw, tokenizer)
+    token_count = count_tokens(raw, tokenizer)
     empty_pct = _empty_line_pct(raw)
     wasted_tokens, wasted_pct = _wasted_empty_line_tokens(raw, tokenizer)
 
@@ -191,6 +186,7 @@ def analyze_return_statement(sample_dir, max_tokens, tokenizer):
         "wasted_empty_pct": wasted_pct,
         "observed_error_type": _extract_error_type(eval_text),
         "error_message": _extract_error_message(eval_text),
+        "parsed_body_hash": hash(_normalize_code(parsed)),
     }
 
 
@@ -346,7 +342,20 @@ def print_return_analysis(rows):
     has_ret = len(all_none) - no_ret
 
     print(f"\nNoneType analysis ({len(all_none)} samples returned None, {_pct(len(all_none), total):.1f}% of all):")
+    has_ret_rows = [r for r in all_none if r.get("has_return_parsed")]
     print(f"  has return but outputs None:    {has_ret:>4} ({_pct(has_ret, len(all_none)):.1f}%)")
+    if has_ret_rows:
+        seen = set()
+        examples = []
+        for r in has_ret_rows:
+            h = r.get("parsed_body_hash", r.get("sample_id"))
+            if h in seen:
+                continue
+            seen.add(h)
+            examples.append(r.get("sample_id", "?"))
+            if len(examples) >= 5:
+                break
+        print(f"         e.g. {', '.join(examples)}")
     print(f"  no return statement:            {no_ret:>4} ({_pct(no_ret, len(all_none)):.1f}%)", end="")
     if no_ret:
         parts = []
@@ -471,7 +480,7 @@ def main():
     print(f"analyzing {len(samples)} eval failure samples...")
 
     print(f"tokenizer: {args.tokenizer}, max_tokens: {args.max_tokens}")
-    tokenizer = _load_tokenizer(args.tokenizer)
+    tokenizer = load_tokenizer(args.tokenizer)
     if not tokenizer:
         print(f"  warning: could not load tokenizer, using chars/3.5 heuristic")
 

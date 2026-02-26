@@ -132,12 +132,14 @@ def _find_function_lines(tree: ast.Module, function_name: str) -> tuple[int, int
   raise ValueError(f"Function '{function_name}' not found in AST")
 
 
-def _parse_code(code: str, max_deletions: int = 20) -> tuple[ast.Module | None, str]:
+def _parse_code(code: str) -> tuple[ast.Module | None, str]:
   """Parse Python code, truncating from the first syntax error onward until it compiles.
 
   This helps when LLMs append trailing junk (bad comments, extra braces, markdown
-  artifacts). Mid-function errors will lose the return statement, but that's caught
-  later during evaluation.
+  artifacts). Keeps truncating until the code compiles or is empty, so a good
+  priority function body followed by arbitrarily long rambling will still be
+  recovered. Mid function errors will lose the return statement, but that is
+  caught later during evaluation.
 
   Returns:
       (parsed_tree, remaining_code) where parsed_tree is None if parsing failed.
@@ -154,8 +156,8 @@ def _parse_code(code: str, max_deletions: int = 20) -> tuple[ast.Module | None, 
       deleted_line = lines[e.lineno - 1] if e.lineno <= len(lines) else "(unknown)"
       logger.warning(f"AST SyntaxError at line {e.lineno}: {e.msg}. Deleting: {deleted_line[:100]}")
       code = '\n'.join(lines[:e.lineno - 1])
-      if deletion_count > max_deletions:
-        logger.error(f"Too many AST deletions (>{max_deletions}), code likely invalid.")
+      if not code.strip():
+        logger.error("AST parsing consumed all lines, code is entirely invalid.")
         return None, ''
 
   if not code:
@@ -219,22 +221,23 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None, str 
   description_match = re.search(r'<description>(.*?)</description>', raw_output, re.DOTALL)
   description = description_match.group(1).strip() if description_match else None
 
-  # Remove description tags from text we'll search
-  text = re.sub(r'<description>.*?</description>\s*', '', raw_output, flags=re.DOTALL)
+  # Remove thinking and description tags from text we'll search for code
+  text = re.sub(r'<think>.*?</think>\s*', '', raw_output, flags=re.DOTALL)
+  text = re.sub(r'<description>.*?</description>\s*', '', text, flags=re.DOTALL)
 
   # Extract code (3 tier priority)
 
-  # Tier 1: <code> tags (highest priority)
-  # Try closed tags first, then unclosed (truncated output)
-  code_match = re.search(r'<code>(.*?)</code>', text, re.DOTALL)
-  if not code_match:
+  # Tier 1: <code> tags (highest priority, take LAST match like markdown fences)
+  code_matches = list(re.finditer(r'<code>(.*?)</code>', text, re.DOTALL))
+  if not code_matches:
     # Fallback: unclosed <code> tag (output truncated before </code>)
-    code_match = re.search(r'<code>(.*)', text, re.DOTALL)
-    if code_match:
+    unclosed = re.search(r'<code>(.*)', text, re.DOTALL)
+    if unclosed:
+      code_matches = [unclosed]
       logger.debug(f"Extracted code from unclosed <code> tag (truncated output)")
-  if code_match:
-    code = code_match.group(1)
-    logger.debug(f"Extracted code from <code> tags ({len(code)} chars)")
+  if code_matches:
+    code = code_matches[-1].group(1)  # Take LAST match
+    logger.debug(f"Extracted code from <code> tags ({len(code)} chars, match {len(code_matches)} of {len(code_matches)})")
   else:
     # Tier 2: Last markdown fence (most likely final answer)
     # Handles: ```python, ```py, ```Python, ```python3, or plain ```
@@ -287,7 +290,7 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None, str 
 
     tree, parsed_code = _parse_code(code)
     if tree is None:
-      return '', description, thinking_trace, 'code too broken to compile (still has syntax errors after truncating 20+ lines)'
+      return '', description, thinking_trace, 'code too broken to compile (no valid lines survived AST truncation)'
 
     parsed_lines = parsed_code.splitlines()
 
@@ -412,7 +415,7 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None, str 
     wrapped = 'def _fake_():\n' + body_code
     tree, parsed_code = _parse_code(wrapped)
     if tree is None:
-      return '', description, thinking_trace, 'code too broken to compile (still has syntax errors after truncating 20+ lines)'
+      return '', description, thinking_trace, 'code too broken to compile (no valid lines survived AST truncation)'
 
     # Extract validated body
     _, end_line = _find_function_lines(tree, '_fake_')
