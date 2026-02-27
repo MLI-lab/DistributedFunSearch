@@ -804,7 +804,8 @@ class TaskManager:
                     proc.start()
                     self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid} on GPUs {base_gpu}-{base_gpu + tp_size - 1}")
                     self.sampler_processes.append(proc)
-                    self.process_to_device_map[proc.pid] = base_gpu  # Track base GPU for resource manager
+                    gpu_ids = ",".join(str(base_gpu + g) for g in range(tp_size))
+                    self.process_to_device_map[proc.pid] = gpu_ids  # Track GPU(s) for respawn
 
                     if i < self.config.num_samplers - 1:
                         time.sleep(90)

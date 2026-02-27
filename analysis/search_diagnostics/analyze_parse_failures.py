@@ -73,6 +73,20 @@ NO_CODE_REASONS = {
     "LLM returned no code (only markdown/description tags)",
 }
 
+# Patterns that indicate actual Python code (not just prose)
+_CODE_PATTERN = re.compile(
+    r'\b(def |return |import |from \w+ import |class )\b|[a-zA-Z_]\w*\s*=',
+    re.MULTILINE,
+)
+
+
+def _has_code(raw_text):
+    """Check if raw LLM output contains any Python code indicators."""
+    # Strip description/thinking tags first (same as evaluator does)
+    text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
+    text = re.sub(r'<description>.*?</description>', '', text, flags=re.DOTALL)
+    return bool(_CODE_PATTERN.search(text))
+
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze parse failure debug samples")
@@ -118,6 +132,14 @@ def main():
             examples = ", ".join(e[0] for e in entries[:3])
             print(f"  {count:>4} ({pct:>5.1f}%)  {reason}")
             print(f"         e.g. {examples}")
+
+        # Code vs prose breakdown: how many had actual code in raw output?
+        all_entries = [e for entries in by_reason.values() for e in entries]
+        with_code = sum(1 for _, _, _, raw in all_entries if _has_code(raw))
+        no_code = total - with_code
+        print(f"\ncode vs prose (heuristic on raw LLM output):")
+        print(f"  {with_code:>4} ({100*with_code/total:>5.1f}%)  had code (but too broken to parse)")
+        print(f"  {no_code:>4} ({100*no_code/total:>5.1f}%)  no code at all (only prose/description)")
 
         # For "no code" reasons: token stats to distinguish truncation vs stopped
         for reason in NO_CODE_REASONS:

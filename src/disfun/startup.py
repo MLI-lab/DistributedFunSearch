@@ -243,22 +243,28 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
 
     # Set CUDA_VISIBLE_DEVICES BEFORE importing anything that touches CUDA/PyTorch
     if config.sampler.use_local_vllm:
-        # Pick this sampler's GPU(s) from the available pool.
-        # Read CUDA_VISIBLE_DEVICES first so we respect SLURM GPU assignments.
-        visible = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if visible:
-            all_gpus = [g.strip() for g in visible.split(",") if g.strip()]
+        if device is not None:
+            # Respawn path: reuse the GPU(s) from the dead sampler
+            device_str = str(device)
+            # device can be "0" (single GPU) or "0,1" (tensor parallel)
+            os.environ["CUDA_VISIBLE_DEVICES"] = device_str
+            print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={device_str} (respawn)")
         else:
-            all_gpus = [str(i) for i in range(get_gpu_count())]
+            # Initial startup: pick GPUs based on sampler_id
+            visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+            if visible:
+                all_gpus = [g.strip() for g in visible.split(",") if g.strip()]
+            else:
+                all_gpus = [str(i) for i in range(get_gpu_count())]
 
-        start = sampler_id * tp_size
-        if start + tp_size > len(all_gpus):
-            raise RuntimeError(
-                f"Sampler {sampler_id} needs GPUs [{start}:{start + tp_size}], "
-                f"but only {len(all_gpus)} available: {all_gpus}"
-            )
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(all_gpus[start:start + tp_size])
-        print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
+            start = sampler_id * tp_size
+            if start + tp_size > len(all_gpus):
+                raise RuntimeError(
+                    f"Sampler {sampler_id} needs GPUs [{start}:{start + tp_size}], "
+                    f"but only {len(all_gpus)} available: {all_gpus}"
+                )
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(all_gpus[start:start + tp_size])
+            print(f"Sampler {sampler_id}: CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
         device = "cuda:0"
     elif device is not None:
         # Explicit device override (e.g. from resource manager)
