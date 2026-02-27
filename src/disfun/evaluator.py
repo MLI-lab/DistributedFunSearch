@@ -246,7 +246,9 @@ def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None, str 
       code = fence_matches[-1].group(1)  # Take LAST match
       logger.debug(f"Extracted code from markdown fence {len(fence_matches)} of {len(fence_matches)} ({len(code)} chars)")
     else:
-      # Tier 3: Use cleaned text directly
+      # Tier 3: No code tags or fences found — check if text has any code
+      if not re.search(r'\b(def |return |import |from \w+ import )\b', text):
+        return '', description, thinking_trace, 'LLM returned no code (no code tags and no code found in output)'
       code = text
       logger.debug(f"Using raw text as code ({len(code)} chars)")
 

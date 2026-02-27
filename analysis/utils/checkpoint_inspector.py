@@ -11,18 +11,37 @@ Analyze a single checkpoint file in detail:
 Usage:
     python checkpoint_inspector.py <checkpoint_path> [options]
 
+Arguments:
+    checkpoint              Path to checkpoint .pkl file or directory (auto-picks latest)
+
+Options:
+    --summary-only, -S      Only show summary stats, skip islands/clusters/programs
+    --island, -i ID         Show details for a specific island
+    --export, -e FILE       Export best programs to a file
+    --list-signatures, -l   List all unique signatures in checkpoint
+    --search-signature, -s  Search for a specific signature, e.g. "{(7,2,2): 4, (8,2,2): 5}"
+    --keys                  Show all top-level keys in the checkpoint
+    --no-programs           Skip showing best programs
+
 Examples:
-    python checkpoint_inspector.py Checkpoints/checkpoint_2025-01-15_10-30-00.pkl
+    python checkpoint_inspector.py Checkpoints/
+    python checkpoint_inspector.py checkpoint.pkl -S
     python checkpoint_inspector.py checkpoint.pkl --island 0
     python checkpoint_inspector.py checkpoint.pkl --export best_programs.txt
     python checkpoint_inspector.py checkpoint.pkl --search-signature '((7,2,2), 4), ((8,2,2), 5)'
+    python checkpoint_inspector.py checkpoint.pkl --list-signatures
+    python checkpoint_inspector.py checkpoint.pkl --keys
 """
 
 import argparse
-import pickle
 from pathlib import Path
 from typing import Dict, Any, Optional
 import numpy as np
+
+try:
+    from .checkpoint import load_checkpoint, find_latest_checkpoint
+except ImportError:
+    from checkpoint import load_checkpoint, find_latest_checkpoint
 
 try:
     from tabulate import tabulate
@@ -33,11 +52,6 @@ except ImportError:
     print("Install with: pip install tabulate")
 
 
-def load_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
-    """Load checkpoint from pickle file."""
-    with open(checkpoint_path, 'rb') as f:
-        checkpoint = pickle.load(f)
-    return checkpoint
 
 
 def format_table(data, headers, tablefmt='grid'):
@@ -62,12 +76,21 @@ def print_checkpoint_summary(checkpoint: Dict[str, Any]):
     print("=" * 80)
     print()
 
+    # Iteration count
+    iterations = checkpoint.get('iterations', checkpoint.get('total_prompts', 0))
+    print("Progress:")
+    print(f"  Iterations:                    {iterations:,}")
+    print()
+
     # Resource usage
     print("Resource Usage:")
     print(f"  Cumulative Evaluator CPU Time: {checkpoint.get('cumulative_evaluator_cpu_time', 0):.2f} seconds")
     print(f"  Cumulative Sampler GPU Time:   {checkpoint.get('cumulative_sampler_gpu_time', 0):.2f} seconds")
     print(f"  Cumulative Input Tokens:       {checkpoint.get('cumulative_input_tokens', 0):,}")
     print(f"  Cumulative Output Tokens:      {checkpoint.get('cumulative_output_tokens', 0):,}")
+    cumulative_cost = checkpoint.get('cumulative_cost', 0.0)
+    if cumulative_cost:
+        print(f"  Cumulative Cost:               ${cumulative_cost:.2f}")
     print()
 
     # Program statistics
@@ -76,12 +99,22 @@ def print_checkpoint_summary(checkpoint: Dict[str, Any]):
     print(f"  Execution Failed:              {checkpoint.get('execution_failed', 0):,}")
     print(f"  Version Mismatch Discarded:    {checkpoint.get('version_mismatch_discarded', 0):,}")
     print(f"  Duplicates Discarded:          {checkpoint.get('duplicates_discarded', 0):,}")
+    total_resets = checkpoint.get('total_resets', 0)
+    if total_resets:
+        print(f"  Total Island Resets:           {total_resets:,}")
     print()
 
     # Prompt statistics
+    duplicate_prompts = checkpoint.get('duplicate_prompts', checkpoint.get('dublicate_prompts', 0))
+    parallel_prompts = checkpoint.get('parallel_prompts', 0)
+    sequential_prompts = checkpoint.get('sequential_prompts', 0)
     print("Prompt Statistics:")
-    print(f"  Total Prompts:                 {checkpoint.get('total_prompts', 0):,}")
-    print(f"  Duplicate Prompts:             {checkpoint.get('dublicate_prompts', 0):,}")
+    print(f"  Duplicate Prompts:             {duplicate_prompts:,}")
+    if iterations:
+        print(f"  Duplicate Prompt Rate:         {duplicate_prompts / iterations * 100:.1f}%")
+    if parallel_prompts or sequential_prompts:
+        print(f"  Parallel Prompts:              {parallel_prompts:,}")
+        print(f"  Sequential Prompts:            {sequential_prompts:,}")
     print()
 
     # Solution tracking
@@ -539,17 +572,25 @@ Examples:
                         help='List all unique signatures in checkpoint')
     parser.add_argument('--search-signature', '-s',
                         help='Search for a specific signature (e.g., "{(7,2,2): 4, (8,2,2): 5}")')
-    parser.add_argument('--summary-only', action='store_true',
-                        help='Only show summary, skip detailed analysis')
+    parser.add_argument('--keys', action='store_true',
+                        help='Show all top-level keys in the checkpoint')
+    parser.add_argument('--summary-only', '-S', action='store_true',
+                        help='Only show summary stats, skip islands/clusters/programs')
     parser.add_argument('--no-programs', action='store_true',
                         help='Skip showing best programs')
 
     args = parser.parse_args()
 
-    # Check checkpoint exists
+    # Resolve checkpoint path (supports directories → finds latest)
     checkpoint_path = Path(args.checkpoint)
     if not checkpoint_path.exists():
-        print(f"Error: Checkpoint file not found: {checkpoint_path}")
+        print(f"Error: Checkpoint path not found: {checkpoint_path}")
+        return 1
+
+    try:
+        checkpoint_path = find_latest_checkpoint(checkpoint_path)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
         return 1
 
     print()
@@ -561,6 +602,21 @@ Examples:
     print()
 
     checkpoint = load_checkpoint(str(checkpoint_path))
+
+    # Show raw keys if requested
+    if args.keys:
+        print("Top-level checkpoint keys:")
+        for key in sorted(checkpoint.keys()):
+            val = checkpoint[key]
+            if isinstance(val, (int, float, str, bool, type(None))):
+                print(f"  {key}: {val}")
+            elif isinstance(val, list):
+                print(f"  {key}: list[{len(val)}]")
+            elif isinstance(val, dict):
+                print(f"  {key}: dict[{len(val)}]")
+            else:
+                print(f"  {key}: {type(val).__name__}")
+        print()
 
     # Always show summary
     print_checkpoint_summary(checkpoint)

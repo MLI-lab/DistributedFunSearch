@@ -56,32 +56,32 @@ class SamplerConfig:
     samples_per_prompt_mutation: int = 5  # Override for ReEvo mutation phase
     temperature_period = None  # Programs until LLM temperature decays (exploration to exploitation), None for fixed
     temperature: float = 0.9444444
-    max_new_tokens: int = 16000 #246 for starcoder2-15b, 1024 for qwen3-8b
+    max_new_tokens: int = 2048 #246 for starcoder2-15b, 1024 for qwen3-8b
     top_p: float = 0.7777777777777778
     repetition_penalty: float = 1.222222
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "Qwen/Qwen3-8B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
-    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-8b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+    model: str = "Qwen/Qwen3-32B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
+    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-32b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
     use_chat_api: bool = True  # True to use vLLM chat() instead of generate(), use when providing system/user messages
-    enable_thinking: bool = True  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
+    enable_thinking: bool = False  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
     model_params_billions: float = None # For FLOP estimation, None to disable
     api_base: str = None
     api_key: str = None  # None loads from .env
     cache_dir: str = "/mnt/models"
     gpu_memory_utilization: float = 0.85
     prefetch_multiplier: int = 2
-    tensor_parallel_size: int = 1  # GPUs per sampler (1, 2, 4, 8). Ensure num_samplers × tensor_parallel_size ≤ total GPUs
+    tensor_parallel_size: int = 2  # GPUs per sampler (1, 2, 4, 8). Ensure num_samplers × tensor_parallel_size ≤ total GPUs
     enforce_eager: bool = False  # True to skip CUDA graph compilation (faster startup, required for multi-GPU)
-    assistant_prefix: str | None = None #"<code>"  # Prefix forcing: e.g. "<code>" forces model to start output with <code> (None=disabled)
+    assistant_prefix: str | None = "<description>" #"<code>"  # Prefix forcing: e.g. "<code>" forces model to start output with <code> (None=disabled)
 
 
 @dataclasses.dataclass(frozen=True)
 class EvaluatorConfig:
     """Evaluator settings."""
-    evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/evaluation/graph_fastgraph.py"
+    evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/evaluation/graph_nx.py"
     initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/initial_functions/graph"
     s_values: List[int] = dataclasses.field(default_factory=lambda: [2])  # Deletions to correct 
     start_n: List[int] = dataclasses.field(default_factory=lambda: [7])  # Shortest code length to evaluate
@@ -107,14 +107,14 @@ class PromptConfig:
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/templates/single_turn/thought.txt"
+    funsearch_template: str = "funsearch/templates/single_turn/reflection"
     funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
     funsearch_string_hint: str | None = None #"funsearch/problem_descriptions/string_hint.txt"  # e.g., "funsearch/problem_descriptions/string_hint.txt"
-    funsearch_system_message: str | None = "funsearch/system_messages/single_turn/thought.txt" #"funsearch/system_messages/single_turn/basic.txt" #"funsearch/system_messages/single_turn/basic.txt" #
+    funsearch_system_message: str | None = "funsearch/system_messages/single_turn/reflection.txt" #"funsearch/system_messages/single_turn/basic.txt" #"funsearch/system_messages/single_turn/basic.txt" #
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
-    fewshot_include_description: bool = True  # Include <description> tags in few-shot examples (if template requests description output)
+    fewshot_include_description: bool = False  # Include <description> tags in few-shot examples (if template requests description output)
 
     # EoH
     eoh_styles_dir: str = "eoh/styles"
@@ -152,11 +152,11 @@ class PromptConfig:
 @dataclasses.dataclass(frozen=True)
 class WandbConfig:
     """Weights & Biases settings."""
-    enabled: bool = True
+    enabled: bool = False
     project: str = "disfun_s2"
     entity: str = "franziweindel-technical-university-of-munich"
     run_name: str = None  # None for auto-generated
-    run_name_tag: str = "r_desc+code_8B"
+    run_name_tag: str = "test_code_32B"
     log_interval: int = 300  # Seconds
     tags: List[str] = dataclasses.field(default_factory=list)
     checkpoints_base_path: str = "/mnt/disfun/checkpoints/s1/final"
@@ -205,8 +205,8 @@ class ScalingConfig:
 @dataclasses.dataclass(frozen=True)
 class TerminationConfig:
     """Experiment termination conditions."""
-    termination_mode: str = "cost"  # "iterations" or "cost"
-    iteration_limit: int = 330319 #400_000  # Used when termination_mode="iterations"
+    termination_mode: str = "iterations"  # "iterations" or "cost"
+    iteration_limit: int = 1000 #400_000  # Used when termination_mode="iterations"
     cost_limit: float = 120  # Max cost in USD, used when termination_mode="cost"
     stop_on_optimal: bool = False  # If True, stop early after finding optimal solution
     optimal_solution_programs: int = 20_000  # Extra iterations after optimal found (only if stop_on_optimal=True)
@@ -257,7 +257,7 @@ class Config:
     termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
     sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
-    num_samplers: int = 3  # With 4 GPUs and tensor_parallel_size=2: sampler 0 → GPUs 0,1; sampler 1 → GPUs 2,3
+    num_samplers: int = 2  # With 4 GPUs and tensor_parallel_size=2: sampler 0 → GPUs 0,1; sampler 1 → GPUs 2,3
     num_evaluators: int = 40
     num_pdb: int = 1
     random_seed: int = 1  # None for non-deterministic

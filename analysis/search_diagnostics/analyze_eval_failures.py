@@ -9,7 +9,7 @@ Options:
     --skip-llm        Skip all LLM calls, use heuristics only
     --csv PATH        Reanalyze an existing CSV instead of running on samples
     --consolidate     Reread existing CSV and deduplicate descriptions via LLM (requires --csv)
-    --tokenizer NAME  HuggingFace tokenizer for token counting (default: bigcode/starcoder2-15b)
+    --tokenizer NAME  HuggingFace tokenizer e.g. Qwen/Qwen3-8B for token counting (default: bigcode/starcoder2-15b)
     --max-tokens N    Max new tokens the sampler model was configured with,
                       used to distinguish "hit token limit" vs "stopped early" (default: 246)
     -o, --output PATH Output CSV path (default: <debug_samples>/eval_failures.csv)

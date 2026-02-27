@@ -1,9 +1,9 @@
 """
 DistributedFunSearch Analysis Package
 
-Utilities for analyzing checkpoint files and visualizing evolution progress.
+Utilities for analyzing checkpoints, evaluating functions, and computing baselines.
 """
 
-from .checkpoint_analyzer import load_checkpoint
+from .utils.checkpoint import load_checkpoint
 
 __all__ = ['load_checkpoint']

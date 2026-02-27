@@ -11,7 +11,6 @@ Usage:
     python analyze_parse_failures.py <debug_samples_dir> [options]
 
 Options:
-    --examples N      Number of unique examples per failure reason (default: 3)
     --tokenizer NAME  HuggingFace tokenizer for token counting (default: bigcode/starcoder2-15b)
     --max-tokens N    Max new tokens the sampler model was configured with,
                       used to distinguish "hit token limit" vs "stopped early" (default: 246)
@@ -27,14 +26,35 @@ from collections import defaultdict
 from shared import read_file, list_samples, tee_to_file, load_tokenizer, count_tokens
 
 
+def _normalize_reason(reason):
+    """Normalize failure reasons to group variants together.
+
+    E.g. all "AST repair truncated '<name>' to no body" become one bucket
+    regardless of the function name.
+    """
+    m = re.match(r"AST repair truncated '.*?' to no body", reason)
+    if m:
+        return "AST repair truncated target function to no body (whole body had syntax errors)"
+    return reason
+
+
 def extract_failure_reason(sample_dir):
-    """Extract failure reason from 2_parsed_body.py."""
+    """Extract failure reason from 2_parsed_body.py.
+
+    The file may contain multiple PARSE_FAILED lines (one per test input).
+    We take the first one since they share the same root cause (same code).
+    """
     body = read_file(os.path.join(sample_dir, "2_parsed_body.py"))
     if not body:
         return "unknown (no 2_parsed_body.py)"
     body = body.strip()
+    # Take first PARSE_FAILED reason (file may have multiple concatenated)
     if body.startswith("PARSE_FAILED:"):
-        return body[len("PARSE_FAILED:"):].strip()
+        first_line = body.split("PARSE_FAILED:")[1].strip()
+        # Trim at next PARSE_FAILED if concatenated
+        if "PARSE_FAILED:" in first_line:
+            first_line = first_line[:first_line.index("PARSE_FAILED:")].strip()
+        return _normalize_reason(first_line)
     if body == "PARSE_FAILED":
         return "unknown (no reason recorded)"
     # File has actual code, not a parse failure
@@ -62,8 +82,6 @@ def main():
                              "(default: bigcode/starcoder2-15b)")
     parser.add_argument("--max-tokens", type=int, default=246,
                         help="Max new tokens for the sampler model (default: 246)")
-    parser.add_argument("--examples", type=int, default=3,
-                        help="Number of unique examples per failure reason (default: 3)")
     args = parser.parse_args()
 
     samples = list_samples(args.path, "parse_failure")
@@ -92,12 +110,14 @@ def main():
     with tee_to_file(log_path):
         print(f"\nparse failure analysis: {total} samples\n")
 
-        # Distribution table
+        # Distribution table with example sample IDs
         print("failure reason distribution:")
         for reason, entries in sorted(by_reason.items(), key=lambda x: -len(x[1])):
             count = len(entries)
             pct = 100 * count / total
+            examples = ", ".join(e[0] for e in entries[:3])
             print(f"  {count:>4} ({pct:>5.1f}%)  {reason}")
+            print(f"         e.g. {examples}")
 
         # For "no code" reasons: token stats to distinguish truncation vs stopped
         for reason in NO_CODE_REASONS:
@@ -111,33 +131,6 @@ def main():
             print(f"    tokens: min={min(tokens)}, median={statistics.median(tokens):.0f}, max={max(tokens)}")
             print(f"    {hit_max}/{len(tokens)} hit max_tokens ({args.max_tokens}), "
                   f"{short}/{len(tokens)} stopped early")
-
-        # Examples per reason (deduplicated by normalized code)
-        for reason, entries in sorted(by_reason.items(), key=lambda x: -len(x[1])):
-            print(f"\n{'='*70}")
-            print(f"reason: {reason} ({len(entries)} samples)")
-            print(f"{'='*70}")
-            seen = set()
-            shown = 0
-            for sample_id, sample_dir, tok, raw in entries:
-                norm = _normalize_code(raw)
-                if norm in seen:
-                    continue
-                seen.add(norm)
-                print(f"\n--- {sample_id} ({tok} tokens) ---")
-                print(raw if raw else "(empty)")
-                shown += 1
-                if shown >= args.examples:
-                    break
-            dupes = len(entries) - len(seen)
-            remaining_unique = len(seen) - shown
-            if dupes > 0 or remaining_unique > 0:
-                parts = []
-                if dupes > 0:
-                    parts.append(f"{dupes} duplicates")
-                if remaining_unique > 0:
-                    parts.append(f"{remaining_unique} more unique")
-                print(f"\n  [{', '.join(parts)} not shown]")
 
 
 if __name__ == "__main__":
