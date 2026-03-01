@@ -482,6 +482,12 @@ if USING_CPP:
             """G[node] -> dict of neighbors (NetworkX compatibility)."""
             return {nb: {} for nb in self._cpp_graph.neighbors(self._resolve(node))}
 
+        def __setitem__(self, key, value):
+            raise TypeError("Graph is read-only and cannot be modified")
+
+        def __delitem__(self, key):
+            raise TypeError("Graph is read-only and cannot be modified")
+
         @property
         def adj(self):
             """G.adj[node] -> neighbors (NetworkX compatibility)."""
@@ -703,6 +709,12 @@ else:
         def __getitem__(self, node):
             """G[node] -> dict of neighbors (NetworkX compatibility)."""
             return {nb: {} for nb in self._neighbors[self._resolve(node)]}
+
+        def __setitem__(self, key, value):
+            raise TypeError("Graph is read-only and cannot be modified")
+
+        def __delitem__(self, key):
+            raise TypeError("Graph is read-only and cannot be modified")
 
         @property
         def adj(self):

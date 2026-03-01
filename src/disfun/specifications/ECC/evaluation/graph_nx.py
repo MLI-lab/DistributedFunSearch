@@ -33,6 +33,9 @@ def evaluate(params, graph_dir):
 
 def solve(n, s, q, G):
     """Find a large independent set."""
+    # Freeze graph so LLM-generated priority() cannot mutate it
+    nx.freeze(G)
+
     # Seed random for deterministic evaluation
     random.seed(1)
     np.random.seed(1)
