@@ -49,7 +49,7 @@ class Function:
     timestamp: float | None = None  # When this program was created
     # Algorithm description
     description: str | None = None  # One-sentence algorithm description
-    # Reasoning trace from thinking models (e.g. Qwen3), not serialized into checkpoints
+    # Reasoning trace from thinking models (e.g. Qwen3)
     thinking_trace: str | None = None
 
 
@@ -70,7 +70,7 @@ class Function:
 
     def serialize(self) -> dict:
         """Returns a dictionary representing the serializable parts of the function."""
-        return {
+        d = {
             "name": self.name,
             "args": self.args,
             "body": self.body,
@@ -79,6 +79,9 @@ class Function:
             "hash_value": self.hash_value,
             "description": self.description
         }
+        if self.thinking_trace:
+            d["thinking_trace"] = self.thinking_trace
+        return d
 
     @staticmethod
     def deserialize(serialized_str: str):
@@ -87,7 +90,7 @@ class Function:
         return Function(**data)
 
     def to_dict(self):
-        return {
+        d = {
             "name": self.name,
             "args": self.args,
             "body": self.body,
@@ -96,6 +99,9 @@ class Function:
             "hash_value": self.hash_value,
             "description": self.description
         }
+        if self.thinking_trace:
+            d["thinking_trace"] = self.thinking_trace
+        return d
 
     @staticmethod
     def from_dict(data: dict):
@@ -106,7 +112,8 @@ class Function:
             return_type=data.get("return_type", None),
             docstring=data.get("docstring", None),
             hash_value=data.get("hash_value", None),
-            description=data.get("description", None)
+            description=data.get("description", None),
+            thinking_trace=data.get("thinking_trace", None)
         )
 
     @staticmethod
