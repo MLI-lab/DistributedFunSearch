@@ -97,7 +97,8 @@ def _reduce_score(
     """Reduce per-test scores into a single aggregate score.
 
     Groups by (s, q, ...), reduces each group by mode, averages across groups.
-    Modes: "last" (largest n), "average", "weighted" (by n), "relative_difference" (vs baseline).
+    Modes: "last" (largest n), "average", "weighted" (by n), "relative_difference" (vs baseline),
+    "last_relative" (like "last" but normalized vs baseline).
     """
     groups = _group_scores_by_params(scores_per_test)
     if not groups:
@@ -105,7 +106,7 @@ def _reduce_score(
 
     baseline_groups = _group_scores_by_params(baseline_scores) if baseline_scores else {}
 
-    if mode == "relative_difference" and not baseline_groups:
+    if mode in ("relative_difference", "last_relative") and not baseline_groups:
         raise ValueError("baseline_scores required for 'relative_difference' mode")
 
     # Reduce each parameter group to a single score
@@ -135,8 +136,19 @@ def _reduce_score(
                     relative.append((actual - base) / base)
             group_scores.append(sum(relative) / len(relative) if relative else 0)
 
+        elif mode == "last_relative":
+            # Like "last" but normalized: (achieved - best) / best at largest n
+            max_n = max(n_scores.keys())
+            actual = n_scores[max_n]
+            baseline_n = baseline_groups.get(group_key, {})
+            base = baseline_n.get(max_n)
+            if base is not None and base != 0:
+                group_scores.append((actual - base) / base)
+            else:
+                group_scores.append(0)
+
         else:
-            raise ValueError(f"Invalid mode: {mode}. Use 'last', 'average', 'weighted', or 'relative_difference'.")
+            raise ValueError(f"Invalid mode: {mode}. Use 'last', 'average', 'weighted', 'relative_difference', or 'last_relative'.")
 
     # Average across all parameter groups
     return sum(group_scores) / len(group_scores) if group_scores else 0.0
