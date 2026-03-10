@@ -632,13 +632,28 @@ class ProgramsDatabase:
         except Exception as e:
             logger.error(f"Could not purge queues: {e}")
         try:
-            indices_sorted_by_score = np.argsort(self._best_score_per_island)
+            # Sort islands by full signature (n12, n11, n10, ...) to break ties on largest n
+            island_signatures = []
+            for i in range(len(self._islands)):
+                scores = self._best_scores_per_test_per_island[i]
+                if scores is not None:
+                    sig = self._get_signature(scores)
+                else:
+                    sig = ()
+                island_signatures.append((sig, i))
+            island_signatures.sort()  # Ascending by full signature
+            indices_sorted_by_score = [i for _, i in island_signatures]
+
             num_islands_to_reset = self._config.num_islands // 2
-            reset_islands_ids = indices_sorted_by_score[:num_islands_to_reset]
-            keep_islands_ids = indices_sorted_by_score[num_islands_to_reset:]
+
+            # Only reset islands strictly worse than the best in the keep group.
+            # Islands tied with the keep group are spared.
+            weakest_keep_sig = island_signatures[num_islands_to_reset][0]
+            reset_islands_ids = [i for sig, i in island_signatures[:num_islands_to_reset] if sig < weakest_keep_sig]
+            keep_islands_ids = [i for sig, i in island_signatures if i not in set(reset_islands_ids)]
 
             if len(reset_islands_ids) == 0:
-                logger.warning("No islands to reset. Skipping reset.")
+                logger.info("Skipping island reset: no islands strictly worse than the keep group.")
                 return
 
             for island_id in reset_islands_ids:
