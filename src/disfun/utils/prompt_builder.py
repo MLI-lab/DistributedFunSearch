@@ -367,12 +367,6 @@ def load_specification(
         if funsearch_evaluation_script:
             evaluation_script = _load_file(base / funsearch_evaluation_script)
 
-        # Extract function signature from initial function
-        initial_func_dir = base / initial_functions_dir
-        if initial_func_dir.exists():
-            initial_func_path = next(initial_func_dir.glob("*.txt"), None)
-            if initial_func_path:
-                function_args, return_type = _extract_function_signature(initial_func_path)
 
     elif strategy == PromptStrategy.EOH:
         # Load all style templates
@@ -403,6 +397,14 @@ def load_specification(
             # Remove user_generator from templates (it's a component, not a prompt template)
             del templates["user_generator"]
 
+    # Extract function signature from initial function (used by all strategies)
+    initial_func_dir = base / initial_functions_dir
+    if initial_func_dir.exists():
+        initial_func_path = next(initial_func_dir.glob("*.txt"), None)
+        if initial_func_path:
+            function_args, return_type = _extract_function_signature(initial_func_path)
+    function_signature = f"priority({function_args}) -> {return_type}"
+
     # Infer requirements for each template
     template_requirements = {
         name: _infer_requirements(content)
@@ -418,6 +420,7 @@ def load_specification(
         templates[name] = templates[name].replace("{problem_description}", problem_description)
         templates[name] = templates[name].replace("{problem_desc}", problem_desc)
         templates[name] = templates[name].replace("{func_desc}", func_desc)
+        templates[name] = templates[name].replace("{function_signature}", function_signature)
         templates[name] = templates[name].replace("{user_generator}", user_generator)
 
     # Load docstring templates
@@ -879,11 +882,15 @@ def _fill_program_placeholders(
         f'    """{header_docstring}"""'
     )
 
+    # Build {function_signature} from extracted initial function signature
+    function_signature = f"{spec.function_to_evolve}({spec.function_args}) -> {spec.return_type}"
+
     # Fill all placeholders
     prompt = prompt.replace("{fewshot_examples}", fewshot_examples)
     prompt = prompt.replace("{worse_code}", worse_code)
     prompt = prompt.replace("{better_code}", better_code)
     prompt = prompt.replace("{function_header}", function_header)
+    prompt = prompt.replace("{function_signature}", function_signature)
     prompt = prompt.replace("{version}", str(next_version))
     prompt = prompt.replace("{evaluation_script}", spec.evaluation_script)
     prompt = prompt.replace("{version}", str(next_version))  # Also replace {version} in evaluation_script

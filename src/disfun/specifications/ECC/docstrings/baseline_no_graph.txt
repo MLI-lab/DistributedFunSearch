@@ -1,0 +1,2 @@
+Returns the priority with which we want to add `codeword` to the code. Higher priority codewords are added first.
+{score}

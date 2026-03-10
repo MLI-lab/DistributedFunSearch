@@ -2,7 +2,7 @@ Your analysis:
 {reflection}
 
 Now implement an improved priority function that builds on this insight.
-The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
+The function signature is fixed: {function_signature}. Do not change the inputs or return type.
 
 Available imports:
 

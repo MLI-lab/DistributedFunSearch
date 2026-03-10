@@ -62,7 +62,7 @@ def solve(n, s, q, graph_dir):
     np.random.seed(1)
 
     # Calculate priorities based only on node string properties (no graph passed)
-    priorities = {node: priority(node, n, s, q) for node in nodes}
+    priorities = {node: priority(codeword=node, n=n, s=s) for node in nodes}
 
     # Sort nodes by priority (descending), lexicographic tie breaking
     nodes_sorted = sorted(nodes, key=lambda x: (-priorities[x], x))
@@ -89,5 +89,5 @@ def solve(n, s, q, graph_dir):
     return independent_set, hash_value
 
 
-def priority(node, n, s, q) -> float:
+def priority(codeword, n, s) -> float:
     pass

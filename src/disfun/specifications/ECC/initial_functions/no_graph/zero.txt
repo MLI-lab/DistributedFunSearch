@@ -1,8 +1,8 @@
 <description>
-Baseline implementation that assigns equal priority to all nodes.
+Baseline implementation that assigns equal priority to all codewords.
 </description>
 
 <code>
-def priority(node, n, s, q) -> float:
+def priority(codeword, n, s) -> float:
     return 0.0
 </code>

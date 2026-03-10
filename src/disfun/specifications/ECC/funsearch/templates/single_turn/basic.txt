@@ -9,4 +9,4 @@ Below are example priority functions:
 {fewshot_examples}
 
 Improve on these functions.
-The function signature is fixed: priority(node, G, n, s) -> float. Do not change the inputs or return type.
+The function signature is fixed: {function_signature}. Do not change the inputs or return type.
