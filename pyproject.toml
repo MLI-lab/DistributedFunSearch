@@ -47,19 +47,3 @@ where = ["src"]
 
 [project.scripts]
 disfun = "disfun.__main__:main"
-
-[tool.ruff]
-line-length = 150
-target-version = "py311"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "B", "UP"]
-ignore = [
-    "E501",  # line too long (handled by formatter with some flexibility)
-    "E741",  # ambiguous variable name (we use n, s, G intentionally)
-    "F821",  # undefined name - priority/start_n are injected at runtime in spec files
-    "B006",  # mutable default argument - we use these intentionally, not causing bugs
-]
-
-[tool.ruff.format]
-quote-style = "double"
