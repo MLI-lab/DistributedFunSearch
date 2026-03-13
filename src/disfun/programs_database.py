@@ -247,11 +247,8 @@ class ProgramsDatabase:
         self.cumulative_cost = 0.0
         self.cost_model = sampler_config.cost_model if sampler_config and hasattr(sampler_config, 'cost_model') else None
 
-        # Model parameters for FLOP estimation (2N FLOPs per token where N = params)
-        self.model_params_billions = sampler_config.model_params_billions if sampler_config and hasattr(sampler_config, 'model_params_billions') else None
-
         self.duplicate_prompts = 0
-        self.iterations = 0             # Number of evolutionary cycles completed (prompt, sample, evaluate, store)
+        self.iterations = 0             # Number of evolutionary iterations completed (prompt, sample, evaluate, store)
         self.total_stored_programs = 0
         self.version_mismatch_discarded = 0
         self.duplicates_discarded = 0
@@ -647,7 +644,7 @@ class ProgramsDatabase:
             num_islands_to_reset = self._config.num_islands // 2
 
             # Only reset islands strictly worse than the best in the keep group.
-            # Islands tied with the keep group are spared.
+            # Islands tied with the keep group are not reset.
             weakest_keep_sig = island_signatures[num_islands_to_reset][0]
             reset_islands_ids = [i for sig, i in island_signatures[:num_islands_to_reset] if sig < weakest_keep_sig]
             keep_islands_ids = [i for sig, i in island_signatures if i not in set(reset_islands_ids)]
@@ -668,7 +665,7 @@ class ProgramsDatabase:
                     founder_island_id = np.random.choice(keep_islands_ids)
                     founder = self._best_program_per_island[founder_island_id]
                     founder_scores = self._best_scores_per_test_per_island[founder_island_id]
-                    # Deep-copy founder so the surviving island's program is not mutated
+                    # Deep copy founder so the surviving island's program is not mutated
                     founder_copy = copy.deepcopy(founder)
                     founder_copy.is_migration = True
                     founder_copy.migrated_from_island = founder_island_id
@@ -799,8 +796,9 @@ class ProgramsDatabase:
         # Compute temperature once for all sampling iterations
         temperature = self._compute_temperature(island)
 
-        # Iteratively sample clusters: pick one, remove it, recompute softmax on the rest.
-        # This prevents the top cluster from starving all others during low-temperature phases.
+        # Sample clusters without replacement: pick one, remove it, recompute softmax on the rest.
+        # Without this, low temperature would concentrate all probability on the top cluster,
+        # causing it to be picked every time instead of sampling from diverse clusters.
         remaining_sigs = list(signatures)
         selected_sigs = []
 

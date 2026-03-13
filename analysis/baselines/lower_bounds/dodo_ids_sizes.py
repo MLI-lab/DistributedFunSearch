@@ -40,7 +40,7 @@ def dodo_rate(n: int) -> float:
 
     r(n) = 1 - [log2(n) + log2(log2(n)) + log2(3)] / (2n)
 
-    The redundancy is in bits, divided by 2 to convert to base-4 symbols.
+    The redundancy is in bits, divided by 2 to convert to base 4 symbols.
 
     Args:
         n: Code length

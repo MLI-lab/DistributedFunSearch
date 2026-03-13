@@ -317,7 +317,7 @@ def build_wandb_init_config(
             "repetition_penalty": sampler_config.repetition_penalty,
             "model": sampler_config.model,
             "prompts_per_batch_sampler": sampler_config.prompts_per_batch,
-            "model_params_billions": getattr(sampler_config, 'model_params_billions', None),
+
         })
 
     return wandb_config
@@ -442,15 +442,6 @@ def compute_wandb_metrics(database) -> dict:
     metrics["tokens/cumulative_output"] = database.cumulative_output_tokens
     metrics["tokens/cumulative_total"] = database.cumulative_input_tokens + database.cumulative_output_tokens
     metrics["cost/cumulative_usd"] = database.cumulative_cost
-
-    # 4b. FLOP estimation (2N FLOPs per token, where N = model parameters)
-    # This approximation comes from the forward pass requiring ~2N multiply-adds per token
-    if database.model_params_billions is not None:
-        total_tokens = database.cumulative_input_tokens + database.cumulative_output_tokens
-        model_params = database.model_params_billions * 1e9  # Convert to actual parameter count
-        cumulative_flops = 2 * model_params * total_tokens
-        metrics["compute/cumulative_flops"] = cumulative_flops
-        metrics["compute/cumulative_pflops"] = cumulative_flops / 1e15  # PetaFLOPs for readability
 
     # 5. Number of clusters per island and cluster sizes
     cluster_sizes_all = []

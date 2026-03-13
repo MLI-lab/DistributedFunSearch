@@ -57,7 +57,7 @@ class ResourceManager:
         Args:
             log_dir: Directory for log files
             resource_logger: Pre-configured logger instance
-            cpu_only: Whether to run in CPU-only mode
+            cpu_only: Whether to run in CPU only mode
             scaling_config: ScalingConfig instance with scaling thresholds
         """
         self.hostname = socket.gethostname()
@@ -67,7 +67,7 @@ class ResourceManager:
         self.scaling_config = scaling_config
         self.next_sampler_id = 0  # Monotonically increasing counter for unique sampler IDs (never reused)
         self.database = None  # Reference to ProgramsDatabase for syncing next_sampler_id to checkpoint
-        # Scale-down idle tracking
+        # Scale down idle tracking
         self._evaluator_idle_checks = 0
         self._sampler_idle_checks = 0
         if resource_logger is None:
@@ -82,7 +82,7 @@ class ResourceManager:
             except Exception as e:
                 self.resource_logger.warning(f"Failed to initialize NVML: {e}")
                 self.cpu_only = True
-                self.resource_logger.info("Switching to CPU-only mode.")
+                self.resource_logger.info("Switching to CPU only mode.")
 
 
     def _initialize_nvml(self):
@@ -103,7 +103,7 @@ class ResourceManager:
         return free_gib >= self.scaling_config.min_system_memory_gib
 
     def _initialize_resource_logger(self, log_dir):
-        """Sets up a file-based logger using centralized create_logger."""
+        """Sets up a file based logger using centralized create_logger."""
         pid = os.getpid()
         log_file_name = f"resources_{self.hostname}_pid{pid}.log"
         logger = create_logger(f'resource_logger_{pid}', log_dir, log_file_name)
@@ -250,7 +250,7 @@ class ResourceManager:
             self.resource_logger.info(f"Scaling up sampler (queue depth: {message_count})")
             started = self._start_sampler(ctx, assignment)
             if not started:
-                self.resource_logger.info("No available GPU found. Skipping sampler scale-up.")
+                self.resource_logger.info("No available GPU found. Skipping sampler scale up.")
             return True
         return False
 
@@ -357,7 +357,7 @@ class ResourceManager:
             self.database.next_sampler_id = self.next_sampler_id
 
         # Determine device based on assignment
-        if assignment is True:  # CPU-only mode
+        if assignment is True:  # CPU only mode
             device = None
         elif assignment is not None:
             _, device = assignment  # (host_gpu, container_device)
@@ -377,7 +377,7 @@ class ResourceManager:
         if device:
             self.resource_logger.info(f"Started Sampler (PID: {proc.pid}, ID: {sampler_id}) on {device}")
         else:
-            self.resource_logger.info(f"Started Sampler (PID: {proc.pid}, ID: {sampler_id}) in CPU-only mode")
+            self.resource_logger.info(f"Started Sampler (PID: {proc.pid}, ID: {sampler_id}) in CPU only mode")
         return True
 
     async def get_smoothed_cpu_usage(self):
@@ -447,7 +447,7 @@ class ResourceManager:
         if assigned_gpus is None:
             assigned_gpus = set(self.process_to_device_map.values())
 
-        # Check for MIG devices FIRST (before cpu_only check)
+        # Check for MIG devices first (before cpu_only check)
         # MIG devices don't need NVML so they work even if NVML init failed
         visible_str = os.environ.get("CUDA_VISIBLE_DEVICES", "")
         self.resource_logger.info(f"CUDA_VISIBLE_DEVICES = '{visible_str}'")
@@ -458,7 +458,7 @@ class ResourceManager:
 
         self.resource_logger.info(f"Not MIG path. cpu_only={self.cpu_only}")
 
-        # For non-MIG GPUs, we need NVML
+        # For non MIG GPUs, we need NVML
         if self.cpu_only:
             return None
 
@@ -473,7 +473,7 @@ class ResourceManager:
             else:
                 visible_devices = list(range(pynvml.nvmlDeviceGetCount()))
 
-            # Map host GPU index to container-visible index
+            # Map host GPU index to container visible index
             id_to_container_index = {visible_devices[i]: i for i in range(len(visible_devices))}
             available_gpus = []
 
@@ -533,7 +533,7 @@ class ResourceManager:
 
         Returns:
             tuple: (index, gpu_util) where gpu_util is the utilization % of the selected
-                   sampler's GPU, or None for evaluators/CPU-only mode.
+                   sampler's GPU, or None for evaluators or CPU only mode.
         """
         min_lifetime = self.scaling_config.min_process_lifetime
         now = time.time()
@@ -549,7 +549,7 @@ class ResourceManager:
         if not eligible:
             return None, None
 
-        # For samplers with GPUs, prefer terminating the one on lowest-utilization GPU
+        # For samplers with GPUs, prefer terminating the one on lowest utilization GPU
         if process_name == "Sampler" and not self.cpu_only:
             best_idx = None
             lowest_util = float('inf')

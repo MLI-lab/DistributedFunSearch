@@ -25,7 +25,7 @@ class _NFSSafeRotatingFileHandler(RotatingFileHandler):
 
     When multiple processes share a log file on NFS, rotation by one process
     causes Errno 116 (Stale file handle) in others. The log data is still
-    written correctly — only the error traceback to stderr is problematic,
+    written correctly, only the error traceback to stderr is problematic,
     as it can produce GB-sized .err files on HPC clusters.
     """
 
@@ -321,7 +321,7 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
     async def run():
         nonlocal connection, channel
         try:
-            # Initialize model BEFORE connecting to RabbitMQ (avoids heartbeat timeouts)
+            # Initialize model before connecting to RabbitMQ (avoids heartbeat timeouts)
             logger.info(f"Sampler {local_id}: Initializing model {config.sampler.model} on device {device}...")
 
             sampler_seed = None
@@ -367,7 +367,7 @@ def sampler_process_entry(config_path, device, log_dir, log_filename, sampler_id
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # Signal handlers — track which signal killed us for exit code
+    # Signal handlers, track which signal killed us for exit code
     shutdown_task = None
     received_signal = [None]
 

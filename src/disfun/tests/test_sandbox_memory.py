@@ -1,4 +1,7 @@
-"""Test sandbox memory requirements with the actual evaluation script.
+"""Test sandbox memory limits using a simplified evaluation in a forked child.
+
+Binary searches for the minimum memory limit that allows the sandbox to
+run a small networkx evaluation without hitting RLIMIT_AS.
 
 Usage:
     cd src/experiments/experiment1
@@ -97,15 +100,16 @@ def test_with_limit(limit_gb: float) -> tuple[bool, str, float]:
 
 def main():
     print("=" * 60)
-    print("Sandbox Memory Test (using actual evaluation code)")
+    print("Sandbox Memory Limit Test")
     print("=" * 60)
 
     # Show current memory before any tests
     mem = get_memory_info()
     print(f"\nParent process memory: RSS={mem['rss_mb']:.1f}MB, VMS={mem['vms_mb']:.1f}MB")
 
-    # Test WITHOUT pre-loading numpy.random (matches real evaluator behavior)
-    print("\nNOT pre-importing numpy.random (to match real evaluator)")
+    # Note: the sandbox pre-loads numpy.random in compile_code() to avoid
+    # lazy-load mmap failures in forked children under memory limits.
+    print("\nRunning sandbox memory limit tests:")
 
     print("\n" + "-" * 60)
     print("Testing memory limits:")

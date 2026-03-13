@@ -25,10 +25,10 @@ enroot export -o /path/to/disfun_rabbitmq.sqsh disfun
 
 **Configure and submit:**
 
-Edit `src/experiments/experiment1/exp1.sh` with your SLURM settings and container path, then:
+Edit `src/experiments/experiment1/run_enroot.sh` with your SLURM settings and container path, then:
 
 ```bash
-sbatch DistributedFunSearch/src/experiments/experiment1/exp1.sh
+sbatch DistributedFunSearch/src/experiments/experiment1/run_enroot.sh
 ```
 
 ---
@@ -53,7 +53,7 @@ pip install -e /path/to/DistributedFunSearch
 # If nodes have different Python versions, build on each node separately.
 # Requires: build-essential, liblmdb-dev (apt-get install -y build-essential liblmdb-dev)
 cd /path/to/DistributedFunSearch
-./tools/build_fast_graph.sh
+./src/disfun/utils/build_fast_graph.sh
 
 wandb login
 ```
@@ -77,7 +77,7 @@ export PATH="/data/ws/your-workspace/erlang/bin:$PATH"
 **3. Submit:**
 
 ```bash
-sbatch exp1_zih.sh
+sbatch src/experiments/experiment1/run_modules.sh
 ```
 
 ---
@@ -114,10 +114,14 @@ python -c "import socket; s=socket.socket(); s.connect(('<gpu-ip>', 5672)); prin
 **If OK:** Set `host` in config to GPU node's hostname, then attach workers:
 
 ```bash
-sbatch --export=RABBITMQ_HOST=<gpu-node-hostname> attach_modules.sh
+# Attach evaluators on CPU partition
+sbatch --export=RABBITMQ_HOST=<gpu-node-hostname> src/experiments/experiment1/attach_cpus.sh
+
+# Attach samplers on GPU partition
+sbatch --export=RABBITMQ_HOST=<gpu-node-hostname> src/experiments/experiment1/attach_llms.sh
 ```
 
-See `src/experiments/experiment1/attach_modules.sh` for the full script.
+See `attach_cpus.sh` and `attach_llms.sh` for the full scripts.
 
 **If fails:** Need SSH port forwarding through login node:
 ```bash

@@ -5,21 +5,21 @@ Extract and deduplicate functions from checkpoint(s).
 Three modes:
   exact:     Functions matching an exact score signature
   threshold: Functions where score at a given n >= some value
-  top-gap:   Top-K functions by normalized gap to best known solutions
+  top gap:   Top K functions by normalized gap to best known solutions
 
 Deduplication uses the hash_value stored in each checkpoint (the semantic hash
-computed during evaluation), so no re-execution is needed.
+computed during evaluation), so no re execution is needed.
 
 Usage:
-    # Exact match (s=1, default target is VT-optimal)
+    # Exact match (s=1, default target is VT optimal)
     python functions/extract.py /path/to/checkpoint.pkl
 
     # Threshold: all functions with n=12 score >= 36
-    python functions/extract.py /mnt/disfun/checkpoints/s2/ --latest-only \
+    python functions/extract.py /path/to/checkpoints/ --latest-only \
         --mode threshold --threshold-n 12 --threshold-min 36 --s-value 2
 
-    # Top-gap: best 50 by normalized gap to optimal
-    python functions/extract.py /mnt/disfun/checkpoints/s2/ --latest-only \
+    # Top gap: best 50 by normalized gap to optimal
+    python functions/extract.py /path/to/checkpoints/ --latest-only \
         --mode top-gap --top-k 50 --s-value 2
 """
 
@@ -36,23 +36,16 @@ from collections import defaultdict
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.helpers import detect_signature
+from utils.best_known import BEST_KNOWN
 
-
-# ── Best known solutions ────────────────────────────────────────────────────
-
-BEST_KNOWN = {
-    1: {(6, 1): 10, (7, 1): 16, (8, 1): 30, (9, 1): 52, (10, 1): 94, (11, 1): 172},
-    2: {(7, 2): 5, (8, 2): 7, (9, 2): 11, (10, 2): 16, (11, 2): 24, (12, 2): 37},
-}
-
-# Default target for exact mode (VT-optimal, s=1, q=2)
+# Default target for exact mode (VT optimal, s=1, q=2)
 DEFAULT_TARGET = {
     (6, 1, 2): 10, (7, 1, 2): 16, (8, 1, 2): 30,
     (9, 1, 2): 52, (10, 1, 2): 94, (11, 1, 2): 172,
 }
 
 
-# ── Checkpoint loading ──────────────────────────────────────────────────────
+# Checkpoint loading
 
 def find_checkpoint_files(paths: List[str], latest_only: bool = False) -> List[Path]:
     """Find checkpoint .pkl files from a list of file/directory paths."""
@@ -89,7 +82,7 @@ def parse_scores(raw: Dict) -> Dict[tuple, int]:
     return out
 
 
-# ── Extraction ──────────────────────────────────────────────────────────────
+# Extraction
 
 def _record(prog: Dict, cluster: Dict, scores: Dict, island_id: int, source: str) -> Dict:
     """Build a flat function record from checkpoint data."""
@@ -142,7 +135,7 @@ def extract_threshold(checkpoint: Dict, n: int, min_score: int,
 
 
 def extract_all(checkpoint: Dict, source: str) -> List[Dict]:
-    """Extract every function (for top-gap ranking later)."""
+    """Extract every function (for top gap ranking later)."""
     results = []
     for island_id, island in enumerate(checkpoint.get('islands_state', [])):
         for _sig, cluster in island.get('clusters', {}).items():
@@ -153,15 +146,20 @@ def extract_all(checkpoint: Dict, source: str) -> List[Dict]:
     return results
 
 
-# ── Gap computation ─────────────────────────────────────────────────────────
+# Gap computation
 
 def normalized_gap(scores: Dict[tuple, int], best: Dict[tuple, int]) -> float:
-    """Average (optimal - achieved) / optimal.  0 = optimal, 1 = worst."""
-    gaps = [(best[k] - scores.get(k, 0)) / best[k] for k in best]
+    """Average (optimal - achieved) / optimal.  0 = optimal, 1 = worst.
+
+    Returns 1.0 (worst) if the function doesn't have scores for all training keys.
+    """
+    if not all(k in scores for k in best):
+        return 1.0
+    gaps = [(best[k] - scores[k]) / best[k] for k in best]
     return sum(gaps) / len(gaps) if gaps else 1.0
 
 
-# ── Deduplication ───────────────────────────────────────────────────────────
+# Deduplication
 
 def deduplicate(functions: List[Dict]) -> List[Dict]:
     """Deduplicate by stored hash_value (falls back to body text)."""
@@ -173,10 +171,10 @@ def deduplicate(functions: List[Dict]) -> List[Dict]:
     return list(seen.values())
 
 
-# ── Save ────────────────────────────────────────────────────────────────────
+# Save
 
 def save_functions(functions: List[Dict], output_dir: str, prefix: str = "successful"):
-    """Save to JSON + Python + summary files."""
+    """Save to JSON, Python, and summary files."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -223,7 +221,7 @@ def save_functions(functions: List[Dict], output_dir: str, prefix: str = "succes
     print(f"Saved summary to {summary_path}")
 
 
-# ── Main ────────────────────────────────────────────────────────────────────
+# Main
 
 def main():
     parser = argparse.ArgumentParser(
@@ -241,9 +239,16 @@ def main():
     parser.add_argument('--threshold-n', type=int, default=12, help='[threshold] n value')
     parser.add_argument('--threshold-min', type=int, default=36, help='[threshold] min score')
     parser.add_argument('--top-k', type=int, default=50, help='[top-gap] how many to keep')
-    parser.add_argument('--s-value', type=int, default=1, help='s value (1 or 2)')
+    parser.add_argument('--s-value', default='1',
+                        help='s value (1, 2, 3, or "ids" for quaternary IDS codes)')
 
     args = parser.parse_args()
+
+    # Parse s value (int or "ids")
+    try:
+        args.s_value = int(args.s_value)
+    except ValueError:
+        pass  # keep as string, e.g. "ids"
 
     # Output dir
     if not args.output:
@@ -266,7 +271,7 @@ def main():
         try:
             cp = pickle.load(open(path, 'rb'))
         except Exception as e:
-            print(f"FAILED ({e})")
+            print(f"Failed ({e})")
             continue
 
         if args.mode == 'exact':
@@ -287,11 +292,11 @@ def main():
     all_funcs = deduplicate(all_funcs)
     print(f"After dedup: {len(all_funcs)}")
 
-    # For top-gap: compute gap, sort, take top-K
+    # For top gap: compute gap, sort, take top K
     if args.mode == 'top-gap':
         best = BEST_KNOWN.get(args.s_value, {})
         if not best:
-            print(f"No best-known solutions for s={args.s_value}!")
+            print(f"No best known solutions for s={args.s_value}!")
             return 1
         for f in all_funcs:
             f['normalized_gap'] = normalized_gap(f['scores_per_test'], best)
@@ -310,7 +315,7 @@ def main():
         opt = "  ".join(f"/{best[k]:2d}" for k in ns_keys)
         print(f"\n{'#':>3} {'Gap':>6}  {hdr}  Source")
         print(f"{'':>3} {'':>6}  {opt}")
-        print("-" * 70)
+        print()
         for i, f in enumerate(all_funcs[:60], 1):
             sc = f['scores_per_test']
             vals = "  ".join(f"{sc.get(k, 0):3d}" for k in ns_keys)

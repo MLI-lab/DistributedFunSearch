@@ -15,10 +15,6 @@ import numpy as np
 import networkx as nx
 import random
 
-# Common aliases LLMs use
-mean = np.mean
-inf = float('inf')
-
 
 # Wrappers to make nx.function(G, ...) work with FastGraph
 def _is_fastgraph(G):
@@ -76,7 +72,7 @@ if _nx_adj:
         return _nx_adj(G)
     nx.adj = _adj_wrapper
 
-# nx.clustering - compute locally for FastGraph
+# nx.clustering, compute locally for FastGraph
 _nx_clustering = nx.clustering
 def _clustering_wrapper(G, nodes=None, weight=None):
     if _is_fastgraph(G):
@@ -103,7 +99,7 @@ def _clustering_wrapper(G, nodes=None, weight=None):
 nx.clustering = _clustering_wrapper
 nx.algorithms.cluster.clustering = _clustering_wrapper  # LLMs sometimes use fully-qualified path
 
-# nx.all_neighbors - trivial for undirected graph
+# nx.all_neighbors, trivial for undirected graph
 _nx_all_neighbors = nx.all_neighbors
 def _all_neighbors_wrapper(G, node):
     if _is_fastgraph(G):
@@ -131,7 +127,7 @@ def _common_neighbors_wrapper(G, u, v):
     return _nx_common_neighbors(G, u, v)
 nx.common_neighbors = _common_neighbors_wrapper
 
-# nx.degree_centrality - simple: deg / (n-1)
+# nx.degree_centrality, simple: deg / (n-1)
 _nx_degree_centrality = nx.degree_centrality
 def _degree_centrality_wrapper(G):
     if _is_fastgraph(G):
@@ -154,7 +150,7 @@ def _density_wrapper(G):
     return _nx_density(G)
 nx.density = _density_wrapper
 
-# Expensive centrality measures — build a real nx.Graph on demand, cache it
+# Expensive centrality measures, build a real nx.Graph on demand, cache it
 def _to_nx_graph(G):
     """Convert FastGraph to a real nx.Graph for algorithms that need it."""
     nxG = nx.Graph()
@@ -199,7 +195,7 @@ def _pagerank_wrapper(G, alpha=0.85, personalization=None, max_iter=100, tol=1e-
     return _nx_pagerank(G, alpha, personalization, max_iter, tol, nstart, weight, dangling)
 nx.pagerank = _pagerank_wrapper
 
-# nx.shortest_path_length — used occasionally
+# nx.shortest_path_length, used occasionally
 _nx_shortest_path_length = nx.shortest_path_length
 def _shortest_path_length_wrapper(G, source=None, target=None, weight=None, method='dijkstra'):
     if _is_fastgraph(G):

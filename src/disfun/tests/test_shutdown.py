@@ -153,25 +153,23 @@ class TestEvaluatorShutdown:
         mock_template.get_function.return_value = Mock(body="pass")
 
         with patch('disfun.evaluator.sandbox.ExternalProcessSandbox'):
-            with patch('disfun.evaluator.ProcessPoolExecutor'):
-                with patch('disfun.evaluator.Manager') as mock_manager:
-                    mock_manager.return_value.Value.return_value = Mock(value=0)
-                    mock_manager.return_value.Lock.return_value = Mock()
-
-                    evaluator = Evaluator(
-                        template=mock_template,
-                        inputs=[(7, 2, 5)],
-                        local_id=12345,
-                        evaluator_config=Mock(
-                            timeout=30,
-                            max_workers=2,
-                            prefetch_count=5,
-                            graph_dir="/tmp/graphs",
-                            sandbox_memory_limit_gb=1.0
-                        ),
-                        connection_manager=mock_conn,
-                        target_signatures=None,
-                    )
+            with patch('disfun.evaluator.ThreadPoolExecutor'):
+                evaluator = Evaluator(
+                    template=mock_template,
+                    inputs=[(7, 2, 5)],
+                    local_id=12345,
+                    evaluator_config=Mock(
+                        timeout=30,
+                        max_workers=2,
+                        prefetch_count=5,
+                        graph_dir=None,
+                        sandbox_memory_limit_gb=1.0,
+                        evaluation_script_path="graph.py",
+                        debug_samples=False,
+                    ),
+                    connection_manager=mock_conn,
+                    target_signatures=None,
+                )
 
         # Mock shutdown_subprocesses
         evaluator.shutdown_subprocesses = AsyncMock()

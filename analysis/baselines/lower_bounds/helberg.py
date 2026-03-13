@@ -1,23 +1,22 @@
 """
-Helberg-Ferreira Multiple Insertion/Deletion Correcting Codes
-=============================================================
+Helberg Ferreira Multiple Insertion/Deletion Correcting Codes
 
 Implementation based on:
 "On Multiple Insertion/Deletion Correcting Codes"
 Albertus S. J. Helberg and Hendrik C. Ferreira
 IEEE Trans. Inform. Theory, Vol. 48, No. 1, January 2002
 
-This module implements the generalized number-theoretic construction
+This module implements the generalized number theoretic construction
 for codes that can correct s random insertion and/or deletion errors.
 
-Key Concepts:
--------------
+Key concepts:
+
 1. Codeword Moment: For a binary sequence x = x_1 x_2 ... x_n,
    the moment is Σ v_i * x_i where v is the weight vector.
 
-2. Weight Vector (v): A modified Fibonacci-like sequence where
+2. Weight Vector (v): A modified Fibonacci like sequence where
    v_j = 1 + Σ_{k=1}^{s} v_{j-k}
-   
+
 3. Modulus (u): u = 1 + Σ_{j=0}^{s-1} v_{n-j}
 
 4. Code Construction: A codeword x is valid if:
@@ -28,7 +27,7 @@ For s=1, this reduces to the classic Levenshtein codes.
 For s=2, the weight vector becomes: 1, 2, 4, 7, 12, 20, 33, ...
 
 Usage:
-------
+
 Run directly for a cardinality table with n up to 20 and s in {2,3,4,5}:
 
     python helberg.py
@@ -55,7 +54,7 @@ import time
 
 class HelbergFerreiraCode:
     """
-    Implementation of Helberg-Ferreira multiple insertion/deletion correcting codes.
+    Implementation of Helberg Ferreira multiple insertion/deletion correcting codes.
     
     Attributes:
         n: Length of codewords
@@ -96,7 +95,7 @@ class HelbergFerreiraCode:
                 if j - k >= 1:
                     v[j] += v[j - k]
         
-        return v[1:]  # Return v_1 to v_n (0-indexed as list)
+        return v[1:]  # Return v_1 to v_n (zero indexed as list)
     
     def _compute_modulus(self) -> int:
         """
@@ -210,9 +209,7 @@ class HelbergFerreiraCode:
         print(f"\nCode Table for n={self.n}, s={self.s}")
         print(f"Weight vector v = {self.v}")
         print(f"Modulus u = {self.u}")
-        print("-" * 60)
         print(f"{'x':^{self.n+4}} | {'weight':^6} | {'moment':^8} | {'residue':^8}")
-        print("-" * 60)
         
         for x in range(2**self.n):
             binary = self.int_to_binary(x, self.n)
@@ -303,16 +300,12 @@ def compute_cardinality_table(max_n: int, s_values: List[int],
 
 def print_cardinality_table(results: Dict, s_values: List[int], max_n: int):
     """Print results in a formatted table."""
-    print("\n" + "=" * 80)
-    print("MAXIMUM CARDINALITIES FOR s-INSERTION/DELETION-CORRECTING CODES")
-    print("=" * 80)
+    print("\nMaximum cardinalities for s insertion/deletion correcting codes")
     
     header = f"{'n':^6}"
     for s in s_values:
         header += f" | {'s='+str(s):^12}"
     print(header)
-    print("-" * len(header))
-    
     for n in range(4, max_n + 1):
         row = f"{n:^6}"
         for s in s_values:
@@ -326,7 +319,7 @@ def print_cardinality_table(results: Dict, s_values: List[int], max_n: int):
 
 def verify_code_construction(n: int, s: int, verbose: bool = True) -> bool:
     """
-    Verify that the construction produces valid s-correcting codes
+    Verify that the construction produces valid s correcting codes
     by checking the subword condition.
     
     The condition is: for any two codewords x, y:
@@ -386,24 +379,21 @@ def verify_code_construction(n: int, s: int, verbose: bool = True) -> bool:
                     common = sw1 & sw2
                     if common:
                         if verbose:
-                            print(f"  FAIL: {format(cw1, f'0{n}b')} and {format(cw2, f'0{n}b')} "
+                            print(f"  Fail: {format(cw1, f'0{n}b')} and {format(cw2, f'0{n}b')} "
                                   f"share subword after {d1}+{d2} deletions")
                         return False
     
     if verbose:
-        print("  PASS: All codeword pairs are distinguishable")
+        print("  Pass: All codeword pairs are distinguishable")
     return True
 
 
 # Example usage and demonstration
 if __name__ == "__main__":
-    print("=" * 70)
-    print("HELBERG-FERREIRA MULTIPLE INSERTION/DELETION CORRECTING CODES")
-    print("=" * 70)
+    print("Helberg Ferreira multiple insertion/deletion correcting codes")
     
     # Example 1: Reproduce paper's example (n=4, s=2)
     print("\n[Example 1] Paper's example: n=4, s=2")
-    print("-" * 40)
     code = HelbergFerreiraCode(4, 2)
     code.print_code_table()
     
@@ -415,7 +405,6 @@ if __name__ == "__main__":
     
     # Example 2: Larger code
     print("\n[Example 2] n=10, s=2")
-    print("-" * 40)
     code = HelbergFerreiraCode(10, 2)
     analysis = code.analyze()
     print(f"Weight vector: {analysis['weight_vector']}")
@@ -428,13 +417,11 @@ if __name__ == "__main__":
     
     # Example 3: Verify small codes
     print("\n[Example 3] Verification of small codes")
-    print("-" * 40)
     for s in [2, 3]:
         for n in range(s + 2, min(s + 6, 12)):
             verify_code_construction(n, s, verbose=True)
     
     # Compute extended table
     print("\n[Example 4] Extended cardinality table (n ≤ 20)")
-    print("-" * 40)
     results = compute_cardinality_table(max_n=20, s_values=[2, 3, 4, 5], verbose=True)
     print_cardinality_table(results, [2, 3, 4, 5], 20)

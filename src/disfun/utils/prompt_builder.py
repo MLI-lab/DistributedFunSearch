@@ -20,10 +20,12 @@ Placeholders:
         {worse_code}         First program as v0 (when 2 programs provided)
         {better_code}        Last program (v0 or v1 depending on count)
         {function_header}    Next function header for code completion
+        {function_signature} Full function signature (def line with parameters)
+        {evaluation_script}  Evaluation script content (how functions are scored)
         {version}            Next version number
 
     Note: {fewshot_examples}, {worse_code}, {better_code} include <code> tags when detected
-    in template. <description> tags are included only if detected in template AND enabled via
+    in template. <description> tags are included only if detected in template and enabled via
     fewshot_include_description config option.
 
     ReEvo only (reflection state):
@@ -82,7 +84,7 @@ class PromptSpec:
     function_to_evolve: str = "priority"
     function_args: str = ""
     return_type: str = "float"
-    is_multi_turn: bool = False  # True if using two-stage prompts (stage1 + stage2)
+    is_multi_turn: bool = False  # True if using two stage prompts (stage1 + stage2)
 
     # ReEvo specific
     user_generator: str = ""  # Prebuilt from user_generator.txt
@@ -326,12 +328,12 @@ def load_specification(
     is_multi_turn = False
 
     if strategy == PromptStrategy.FUNSEARCH:
-        # Load template(s) - supports single file, single-turn folder, or multi-turn folder
+        # Load template(s). Supports single file, single turn folder, or multi turn folder
         template_path = base / funsearch_template
         if template_path.is_dir():
             # Check if this is a multi-turn template (has stage1.txt and stage2.txt)
             if (template_path / "stage1.txt").exists() and (template_path / "stage2.txt").exists():
-                # Multi-turn: load stage1 (reflection) and stage2 (generation) templates
+                # Multi turn: load stage1 (reflection) and stage2 (generation) templates
                 is_multi_turn = True
                 stage1_template = _load_file(template_path / "stage1.txt").strip()
                 stage2_template = _load_file(template_path / "stage2.txt").strip()
@@ -339,7 +341,7 @@ def load_specification(
                     "funsearch_stage1": stage1_template,
                     "funsearch": stage2_template,
                 }
-                # Load single-function variants if they exist (optional, no warning if missing)
+                # Load single function variants if they exist (optional, no warning if missing)
                 stage1_single_path = template_path / "stage1_single.txt"
                 stage2_single_path = template_path / "stage2_single.txt"
                 if stage1_single_path.exists():
@@ -347,10 +349,10 @@ def load_specification(
                 if stage2_single_path.exists():
                     templates["funsearch_single"] = stage2_single_path.read_text().strip()
             else:
-                # Single-turn folder: load default.txt and single.txt variants
+                # Single turn folder: load default.txt and single.txt variants
                 default_template = _load_file(template_path / "default.txt").strip()
                 templates = {"funsearch": default_template}
-                # Load single-function variant if it exists (optional, no warning if missing)
+                # Load single function variant if it exists (optional, no warning if missing)
                 single_path = template_path / "single.txt"
                 if single_path.exists():
                     templates["funsearch_single"] = single_path.read_text().strip()
@@ -610,7 +612,7 @@ def build_funsearch_prompts(
         generation_prompt = build_prompt(spec, template_name, programs)
         return (None, generation_prompt)
 
-    # Multi-turn: build stage1 (reflection) and stage2 (generation) prompts
+    # Multi turn: build stage1 (reflection) and stage2 (generation) prompts
     # Select appropriate templates based on available programs
     if available_programs == 1 and "funsearch_stage1_single" in spec.templates:
         stage1_template_name = "funsearch_stage1_single"

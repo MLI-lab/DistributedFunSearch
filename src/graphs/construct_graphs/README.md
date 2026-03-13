@@ -4,168 +4,87 @@ Scripts for constructing graphs used in DistributedFunSearch experiments.
 
 ---
 
-## Deletion-Correcting Code Graphs
+## Combined Script: `construct_graphs.py`
 
-**Script:** `construct_deletions_graphs.py`
+Constructs graphs for either deletion-correcting codes or IDS (Insertion/Deletion/Substitution) codes, selected via `--type`.
 
-Constructs graphs for finding codes that can correct deletions.
+### Graph Types
 
-### Graph Structure
+| Type | Edge Condition | Solution |
+|------|---------------|----------|
+| `deletion` | Two nodes connected if they share a common subsequence of length >= n-s | Independent set = valid deletion-correcting code |
+| `ids` | Two nodes connected if `edit_distance(node1, node2) < 2s + 1` | Independent set = valid code with min distance >= 2s + 1 |
 
-| Property | Description |
-|----------|-------------|
-| Nodes | q-ary strings of length n (q=2 for binary, q=4 for DNA) |
-| Edges | Two nodes connected if they share a common subsequence of length >= n-s |
-| Solution | An independent set represents a valid deletion-correcting code |
+In both cases, nodes are q-ary strings of length n (q=2 for binary, q=4 for DNA).
 
 ### Usage
 
-1. Edit the `params` list and `q` value in `__main__`:
-
-```python
-q = 4  # 2 for binary, 4 for DNA (quaternary)
-params = [
-    (6, 1),  # n=6, s=1 (single deletion correction)
-    (7, 1),
-    # ... add more as needed
-]
-```
-
-2. Run the script:
-
 ```bash
-cd src/construct_graphs
-python construct_deletions_graphs.py
+# Build deletion graphs for n=10,11,12 with s=1, binary alphabet
+python construct_graphs.py --type deletion --n 10,11,12 --s 1 --q 2
+
+# Build IDS graphs for n=8,9,10 with s=1, quaternary alphabet (DNA)
+python construct_graphs.py --type ids --n 8,9,10 --s 1 --q 4
+
+# Build graph for n=15 with s=2, 100 workers, custom output
+python construct_graphs.py --type deletion --n 15 --s 2 --workers 100 --output /mnt/Graphs
+
+# Force streaming mode for memory-limited systems
+python construct_graphs.py --type ids --n 18 --s 1 --q 4 --stream
 ```
+
+Default alphabet size: q=2 for deletion, q=4 for ids.
 
 ### Output
 
 Graphs are saved with automatic directory structure:
 
 ```
-{base_dir}/deletion/{alphabet}/s{s}/graph_d_s{s}_n{n}_q{q}.lmdb
+{base_dir}/{type}/{alphabet}/s{s}/graph_{prefix}_s{s}_n{n}_q{q}.lmdb
 ```
 
-Where `{alphabet}` is `binary` (q=2), `quaternary` (q=4), or `q{n}` for other values.
+Where `{type}` is `deletion` or `ids`, `{prefix}` is `d` or `ids`, and `{alphabet}` is `binary` (q=2), `quaternary` (q=4), or `q{q}` for other values.
 
 **Examples:**
 ```
 /mnt/Graphs/deletion/binary/s1/graph_d_s1_n7_q2.lmdb
-/mnt/Graphs/deletion/quaternary/s1/graph_d_s1_n7_q4.lmdb
-src/graphs/deletion/binary/s2/graph_d_s2_n10_q2.lmdb
+/mnt/Graphs/ids/quaternary/s1/graph_ids_s1_n8_q4.lmdb
 ```
 
-**Changing output directory:** Use `--output` to specify a different base directory:
+**Changing output directory:** Use `--output` to specify a different base directory.
 
-```python
-# Default: saves to src/graphs/
-OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
-
-# Custom: save to external storage
-OUTPUT_DIR = "/mnt/large_storage/graphs"
-```
-
-> **Note:** Construction can be slow for large n or q due to computing pairwise LCS for all q^n sequences.
+> **Note:** Construction can be slow for large n or q due to computing pairwise distances for all q^n sequences.
 
 ---
 
-## IDS (Insertion/Deletion/Substitution) Code Graphs
+## SLURM Shell Script: `construct_graph.sh`
 
-**Script:** `construct_ids_graphs.py`
-
-Constructs graphs for finding codes that can correct insertions, deletions, and substitutions.
-
-### Graph Structure
-
-| Property | Description |
-|----------|-------------|
-| Nodes | q-ary strings of length n (q=2 for binary, q=4 for DNA) |
-| Edges | Two nodes connected if `edit_distance(node1, node2) < 2s + 1` |
-| Solution | An independent set represents a valid code with min distance >= 2s + 1 |
-
-### Usage
-
-1. Edit the `params` list and `q` value in `__main__`:
-
-```python
-q = 4  # 2 for binary, 4 for DNA (quaternary)
-params = [
-    (6, 1),  # n=6, s=1 (requires min distance 3)
-    (7, 1),
-    # ... add more as needed
-]
-```
-
-2. Run the script:
+Wraps `construct_graphs.py` for SLURM job submission. Configure via environment variables:
 
 ```bash
-cd src/construct_graphs
-python construct_ids_graphs.py
+GRAPH_TYPE=deletion N_VALUES=10,11,12 S_VALUE=1 Q_VALUE=2 WORKERS=90 sbatch construct_graph.sh
 ```
-
-### Output
-
-Graphs are saved with automatic directory structure:
-
-```
-{base_dir}/ids/{alphabet}/s{s}/graph_ids_s{s}_n{n}_q{q}.lmdb
-```
-
-Where `{alphabet}` is `binary` (q=2), `quaternary` (q=4), or `q{n}` for other values.
-
-**Examples:**
-```
-/mnt/Graphs/ids/binary/s1/graph_ids_s1_n8_q2.lmdb
-/mnt/Graphs/ids/quaternary/s2/graph_ids_s2_n10_q4.lmdb
-src/graphs/ids/binary/s1/graph_ids_s1_n7_q2.lmdb
-```
-
-**Changing output directory:** For large graphs (n >= 10), you may want to save to a different location with more storage. Edit `OUTPUT_DIR` in `__main__`:
-
-```python
-# Default: saves to src/graphs/
-OUTPUT_DIR = os.path.join(SCRIPT_DIR, "../graphs")
-
-# Custom: save to external storage
-OUTPUT_DIR = "/mnt/large_storage/graphs"
-```
-
-> **Note:** Construction can be slow for large n or q due to computing pairwise edit distances for all q^n sequences.
 
 ---
 
 ## Checkpointing
 
-Both scripts support resuming from checkpoints after interruption:
+The script supports resuming from checkpoints after interruption:
 
 - Checkpoints saved after each worker completes
-- Default location: `<OUTPUT_DIR>/checkpoints/checkpoint_<type>_s{s}_n{n}_q{q}.pkl`
+- Default location: `<OUTPUT_DIR>/checkpoints/checkpoint_<prefix>_s{s}_n{n}_q{q}.pkl`
 - Auto-detected on restart: script resumes from last checkpoint
 - Delete checkpoint file to force fresh start
-
-**Changing checkpoint location:** Checkpoints are stored relative to `OUTPUT_DIR`. To use a different location, change `OUTPUT_DIR` (see above) or modify `_get_checkpoint_path()`:
-
-```python
-def _get_checkpoint_path(output_dir, n, s, q):
-    # Default: checkpoints inside output_dir
-    checkpoint_dir = os.path.join(output_dir, "checkpoints")
-
-    # Custom: use fast local SSD for checkpoints
-    # checkpoint_dir = "/tmp/graph_checkpoints"
-
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    return os.path.join(checkpoint_dir, f"checkpoint_<type>_s{s}_n{n}_q{q}.pkl")
-```
 
 ---
 
 ## Memory Tracking
 
-Both scripts include memory monitoring:
+The script includes memory monitoring:
 
 | Phase | Description |
 |-------|-------------|
-| Before | Shows estimated upper bound (Hamming ball formula) |
+| Before | Shows estimated upper bound (Hamming ball formula, IDS only) |
 | During | Samples memory every 0.5s (main process + all workers) |
 | After | Reports actual peak memory vs estimate |
 

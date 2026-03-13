@@ -1,13 +1,11 @@
-"""Fork-based sandbox for executing LLM-generated code.
+"""Sandbox for executing LLM generated code via os.fork().
 
-Uses os.fork() for process isolation. Child inherits parent's memory (copy-on-write),
-so cached graphs are available without reload. Child runs evaluation, writes result
-to pipe, exits. Parent waits with timeout.
+Child inherits parent's memory (copy on write), so cached graphs are available
+without reload. Child runs evaluation, writes result to pipe, exits. Parent
+waits with timeout.
 
-This is much faster than subprocess-based sandboxing because:
-1. Fork is ~1ms vs subprocess ~50ms
-2. Child already has graphs in memory (no LMDB reload)
-3. No pickle serialization of function or input needed
+Faster than subprocess sandboxing because child already has graphs in memory
+(no LMDB reload) and no pickle serialization of function or input needed.
 """
 
 import ast
@@ -19,22 +17,18 @@ import cloudpickle
 import threading
 
 
-def cleanup_orphaned_sandbox_processes(logger=None, max_age_seconds=300):
-    """No-op. Fork-based sandbox children are reaped by parent via waitpid."""
-    return 0
-
 
 class ExternalProcessSandbox:
     """Sandbox using fork() for fast, isolated execution.
 
-    Child process inherits parent's memory via copy-on-write, so graphs
+    Child process inherits parent's memory via copy on write, so graphs
     cached in the evaluator are available without reloading.
     """
 
     # Cache for compiled base namespace (spec without priority), per process
     _cached_namespace = None
     _cached_base_hash = None
-    _compile_lock = threading.Lock()  # Thread synchronization for cache
+    _compile_lock = threading.Lock()  # thread synchronization for cache
 
     def __init__(
         self,
@@ -52,7 +46,7 @@ class ExternalProcessSandbox:
 
         Separates the program into base (imports, helpers) and priority function.
         The base is cached and reused across evaluations.
-        Thread-safe: uses lock to prevent race conditions in cache access.
+        Thread safe, uses lock to prevent race conditions in cache access.
         """
         tree = ast.parse(program)
 
@@ -69,15 +63,15 @@ class ExternalProcessSandbox:
         base_tree = ast.Module(body=base_nodes, type_ignores=[])
         base_hash = hash(ast.dump(base_tree))
 
-        # Thread-safe cache check and update
+        # Thread safe cache check and update
         with ExternalProcessSandbox._compile_lock:
             if ExternalProcessSandbox._cached_base_hash != base_hash:
                 ExternalProcessSandbox._cached_namespace = {}
                 exec(compile(base_tree, '<ast>', 'exec'), ExternalProcessSandbox._cached_namespace)
                 ExternalProcessSandbox._cached_base_hash = base_hash
 
-                # Pre-load lazy modules so child inherits them (avoids mmap in sandbox)
-                # numpy.random is lazy-loaded and uses ~2GB VMS when mmap'd fresh
+                # Preload lazy modules so child inherits them (avoids mmap in sandbox).
+                # numpy.random is lazy loaded.
                 ns = ExternalProcessSandbox._cached_namespace
                 if 'np' in ns or 'numpy' in ns:
                     np_module = ns.get('np') or ns.get('numpy')
@@ -87,14 +81,14 @@ class ExternalProcessSandbox:
                         except Exception:
                             pass
 
-                # Pre-load scipy to avoid "failed to map segment" errors in forked children
-                # scipy's .so files need mmap which can fail under memory limits
+                # Preload scipy to avoid "failed to map segment" errors in forked children.
+                # scipy's .so files need mmap which can fail under memory limits.
                 try:
                     import scipy
                     import scipy.stats
                     import scipy.special
                     import scipy.spatial
-                    # Touch lazy-loaded submodules to force their .so files to load
+                    # Touch lazy loaded submodules to force their .so files to load.
                     _ = scipy.stats.norm.pdf(0)
                 except Exception:
                     pass
@@ -112,22 +106,22 @@ class ExternalProcessSandbox:
         function_to_run: str,
         test_input,
     ) -> tuple:
-        """Execute function in fork-based sandbox.
+        """Execute function in forked sandbox.
 
-        Child inherits parent's memory (including cached graphs) via copy-on-write.
+        Child inherits parent's memory (including cached graphs) via copy on write.
         Sets memory limits in child, runs evaluation, returns result via pipe.
 
         Returns:
             (result, success, cpu_time)
         """
         try:
-            # Compile in parent - child will inherit compiled namespace
+            # Compile in parent, child will inherit compiled namespace.
             namespace = ExternalProcessSandbox.compile_code(program)
             func = namespace[function_to_run]
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
-            return f"COMPILE_ERROR: {type(e).__name__}: {e}\n{tb}", False, 0.0
+            return f"Compile error: {type(e).__name__}: {e}\n{tb}", False, 0.0
 
         # Create pipe for result communication
         read_fd, write_fd = os.pipe()
@@ -135,13 +129,13 @@ class ExternalProcessSandbox:
         pid = os.fork()
 
         if pid == 0:
-            # === CHILD PROCESS ===
-            # Detach from parent's signal handling BEFORE anything else.
+            # Child process.
+            # Detach from parent's signal handling before anything else.
             # After fork, child inherits asyncio's signal wakeup fd (a pipe shared
             # with the parent). Any signal delivered to the child would write to this
-            # pipe, tricking the parent's event loop into thinking IT received the
-            # signal (causing spurious SIGINT shutdowns). Resetting the wakeup fd
-            # and ignoring signals prevents this.
+            # pipe, tricking the parent's event loop into thinking it received the
+            # signal (causing spurious shutdowns). Resetting the wakeup fd and
+            # ignoring signals prevents this.
             try:
                 signal.set_wakeup_fd(-1)
             except (ValueError, OSError):
@@ -151,8 +145,8 @@ class ExternalProcessSandbox:
 
             os.close(read_fd)
 
-            # Suppress stdout/stderr from LLM-generated code (e.g. print statements)
-            # to prevent unbounded growth of SBATCH .out/.err files.
+            # Suppress stdout/stderr from LLM generated code (e.g. print statements)
+            # to prevent unbounded growth of sbatch .out/.err files.
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, 1)  # stdout
             os.dup2(devnull, 2)  # stderr
@@ -160,8 +154,8 @@ class ExternalProcessSandbox:
 
             try:
                 # Set memory limit (virtual address space)
-                # Note: Use RLIMIT_AS, not RLIMIT_DATA - the latter breaks mmap
-                # for shared libraries like numpy ("failed to map segment")
+                # Note: use RLIMIT_AS, not RLIMIT_DATA. The latter breaks mmap
+                # for shared libraries like numpy ("failed to map segment").
                 mem_bytes = int(self.memory_limit_gb * 1024 * 1024 * 1024)
                 try:
                     resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
@@ -185,7 +179,7 @@ class ExternalProcessSandbox:
             except Exception as e:
                 # Write error + traceback to pipe so parent can capture it
                 import traceback
-                error_msg = f"RUNTIME_ERROR: {type(e).__name__}: {e}\n{''.join(traceback.format_tb(e.__traceback__))}"
+                error_msg = f"Runtime error: {type(e).__name__}: {e}\n{''.join(traceback.format_tb(e.__traceback__))}"
                 try:
                     os.write(write_fd, error_msg.encode('utf-8', errors='replace'))
                 except Exception:
@@ -197,7 +191,7 @@ class ExternalProcessSandbox:
                 os._exit(1)
 
         else:
-            # === PARENT PROCESS ===
+            # Parent process.
             os.close(write_fd)
 
             try:
@@ -213,14 +207,14 @@ class ExternalProcessSandbox:
                     time.sleep(0.01)
 
                 if not child_done:
-                    # Timeout - kill child
+                    # Timeout, kill child.
                     try:
                         os.kill(pid, signal.SIGKILL)
                         os.waitpid(pid, 0)
                     except (ProcessLookupError, ChildProcessError):
                         pass
                     os.close(read_fd)
-                    return f"TIMEOUT: exceeded {self.timeout_secs}s", False, 0.0
+                    return f"Timeout: exceeded {self.timeout_secs}s", False, 0.0
 
                 # Check exit status
                 if not (os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0):
@@ -242,9 +236,9 @@ class ExternalProcessSandbox:
                         return error_detail, False, 0.0
                     if os.WIFSIGNALED(status):
                         sig = os.WTERMSIG(status)
-                        return f"RUNTIME_ERROR: killed by signal {sig} (OOM or crash)", False, 0.0
+                        return f"Runtime error: killed by signal {sig} (oom or crash)", False, 0.0
                     exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
-                    return f"RUNTIME_ERROR: child exited with code {exit_code}", False, 0.0
+                    return f"Runtime error: child exited with code {exit_code}", False, 0.0
 
                 # Read result from pipe
                 result_chunks = []
@@ -273,8 +267,5 @@ class ExternalProcessSandbox:
                     os.close(read_fd)
                 except OSError:
                     pass
-                return f"PARENT_ERROR: {type(e).__name__}: {e}", False, 0.0
+                return f"Parent error: {type(e).__name__}: {e}", False, 0.0
 
-    def cleanup_all(self):
-        """No-op. Fork-based sandbox doesn't create files."""
-        pass

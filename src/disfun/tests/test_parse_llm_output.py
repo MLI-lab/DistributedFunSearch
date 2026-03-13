@@ -18,28 +18,26 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from evaluator import parse_llm_output
+from disfun.utils.code_manipulation import parse_llm_output
 
 
 def print_test(name: str, raw_input: str):
     """Run a single test and print results."""
-    print(f"\n{'='*60}")
-    print(f"TEST: {name}")
-    print(f"{'='*60}")
+    print(f"\n--- {name} ---")
 
-    print(f"\nINPUT:")
+    print(f"\ninput.")
     for i, line in enumerate(raw_input.split('\n'), 1):
         print(f"{i:3}: {line}")
 
     body, description, thinking_trace, failure_reason = parse_llm_output(raw_input)
 
-    print(f"\nPARSED OUTPUT:")
-    print(f"description: {description}")
+    print(f"\nparsed output.")
+    print(f"description, {description}")
     if failure_reason:
-        print(f"failure_reason: {failure_reason}")
+        print(f"failure_reason, {failure_reason}")
     if thinking_trace:
-        print(f"thinking_trace: {thinking_trace[:200]}{'...' if len(thinking_trace) > 200 else ''}")
-    print(f"\nbody ({len(body)} chars):")
+        print(f"thinking_trace, {thinking_trace[:200]}{'...' if len(thinking_trace) > 200 else ''}")
+    print(f"\nbody ({len(body)} chars).")
     if body:
         for i, line in enumerate(body.rstrip('\n').split('\n'), 1):
             print(f"{i:3}: {line}")
@@ -49,14 +47,10 @@ def print_test(name: str, raw_input: str):
 
 def print_section(title: str):
     """Print a section header."""
-    print(f"\n\n{'#'*60}")
-    print(f"# {title}")
-    print(f"{'#'*60}")
+    print(f"\n\n--- {title} ---")
 
 
-# ============================================================
-# GROUP 1: Raw code (no wrapper, fallback tier)
-# ============================================================
+# Group 1, raw code (no wrapper, fallback tier).
 
 def test_raw_simple_function():
     """Simple function with basic logic, no wrapper."""
@@ -142,9 +136,7 @@ def test_raw_body_with_nested_helper():
     print_test("Raw: Body with Nested Helper", raw)
 
 
-# ============================================================
-# GROUP 2: <code> tags (tier 1 extraction)
-# ============================================================
+# Group 2, <code> tags (tier 1 extraction).
 
 def test_code_tags_simple():
     """Simple function wrapped in code tags."""
@@ -214,9 +206,7 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     print_test("Code Tags: Nested Fence Inside", raw)
 
 
-# ============================================================
-# GROUP 3: Markdown fences (tier 2 extraction)
-# ============================================================
+# Group 3, markdown fences (tier 2 extraction).
 
 def test_fence_simple():
     """Simple function in markdown fence."""
@@ -229,7 +219,7 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
 
 
 def test_fence_multiple_blocks():
-    """Multiple code blocks, should take the LAST one."""
+    """Multiple code blocks, should take the last one."""
     raw = """Here's a bad approach:
 ```python
 return 0  # wrong
@@ -269,14 +259,11 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     print_test("Fence: Plain (no language)", raw)
 
 
-# ============================================================
-# GROUP 4: Template integration
-# ============================================================
+# Group 4, template integration.
 
 def test_template_integration():
     """Test that parsed body integrates correctly into a template."""
-    from evaluator import _sample_to_program
-    from disfun.utils.code_manipulation import text_to_program
+    from disfun.utils.code_manipulation import sample_to_program, text_to_program
 
     template_code = """import graph_tool
 from graph_tool import Graph
@@ -296,41 +283,36 @@ def priority(node, G_gt, node_to_vertex, vertex_to_node, n, s):
     return -degree + len(node)
 </code>"""
 
-    evolved_function, program_str, description, thinking_trace, failure_reason = _sample_to_program(
+    evolved_function, program_str, description, thinking_trace, failure_reason = sample_to_program(
         llm_output, None, template, 'priority'
     )
 
-    print(f"\n{'='*60}")
-    print("TEST: Template Integration")
-    print(f"{'='*60}")
-    print(f"\nTEMPLATE (before integration):")
+    print(f"\n--- Template Integration ---")
+    print(f"\ntemplate (before integration).")
     for i, line in enumerate(str(template).split('\n'), 1):
         print(f"{i:3}: {line}")
-    print(f"\nLLM OUTPUT:")
+    print(f"\nllm output.")
     for i, line in enumerate(llm_output.split('\n'), 1):
         print(f"{i:3}: {line}")
-    print(f"\nINTEGRATED PROGRAM (after integration):")
+    print(f"\nintegrated program (after integration).")
     for i, line in enumerate(program_str.split('\n'), 1):
         print(f"{i:3}: {line}")
 
 
-# ============================================================
-# GROUP 5: Real-world LLM failure patterns
-# (derived from debug_samples/eval_1268124)
-# ============================================================
+# Group 5, real-world LLM failure patterns (derived from debug_samples/eval_1268124).
 
 def assert_body_compiles(body, test_name):
     """Verify that parsed body can be placed inside a function and compiled."""
     if not body:
-        print(f"  FAIL: empty body")
+        print(f"  fail, empty body.")
         return False
     wrapped = f"def priority(node, G, n, s):\n{body}"
     try:
         compile(wrapped, '<test>', 'exec')
-        print(f"  PASS: body compiles OK")
+        print(f"  pass, body compiles.")
         return True
     except SyntaxError as e:
-        print(f"  FAIL: {e}")
+        print(f"  fail, {e}")
         return False
 
 
@@ -354,8 +336,8 @@ def priority(node : str,
     body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "multiline_def")
     # Body must NOT contain continuation lines from the def signature
-    assert 'G    : object' not in body, "FAIL: def continuation leaked into body"
-    print(f"  CHECK: no def continuation in body: {'PASS' if 'G    : object' not in body else 'FAIL'}")
+    assert 'G    : object' not in body, "fail, def continuation leaked into body."
+    print(f"  check, no def continuation in body, {'pass' if 'G    : object' not in body else 'fail'}.")
 
 
 def test_mixed_indentation_3space():
@@ -377,7 +359,7 @@ def priority_new(node, G, n, s):
     # Verify body was normalized to 4-space
     first_line = next((l for l in body.splitlines() if l.strip()), '')
     indent = len(first_line) - len(first_line.lstrip())
-    print(f"  CHECK: normalized to 4-space indent: {'PASS' if indent == 4 else f'FAIL (got {indent})'}")
+    print(f"  check, normalized to 4-space indent, {'pass' if indent == 4 else f'fail (got {indent})'}.")
 
 
 def test_helper_before_priority_different_indent():
@@ -397,8 +379,8 @@ def priority_new(node, G, n, s):
     print_test("Helper before priority (3-space indent)", raw)
     body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "helper_different_indent")
-    assert 'hamming_weight' in body, "FAIL: helper function missing from body"
-    print(f"  CHECK: helper included: {'PASS' if 'hamming_weight' in body else 'FAIL'}")
+    assert 'hamming_weight' in body, "fail, helper function missing from body."
+    print(f"  check, helper included, {'pass' if 'hamming_weight' in body else 'fail'}.")
 
 
 def test_code_tags_with_double_fence():
@@ -415,8 +397,8 @@ def priority(node, G, n, s):
     print_test("Code tags with double fence", raw)
     body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "double_fence")
-    assert '```' not in body, "FAIL: fence markers leaked into body"
-    print(f"  CHECK: no fence markers in body: {'PASS' if '```' not in body else 'FAIL'}")
+    assert '```' not in body, "fail, fence markers leaked into body."
+    print(f"  check, no fence markers in body, {'pass' if '```' not in body else 'fail'}.")
 
 
 def test_except_pass_swallows_none_return():
@@ -453,9 +435,9 @@ def priority_new(node, G, n, s):
     print_test("Priority_new renamed to priority", raw)
     body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "priority_new_rename")
-    assert 'priority_new' not in body, "FAIL: priority_new not renamed"
-    assert 'priority(' in body, "FAIL: recursive call not renamed to priority"
-    print(f"  CHECK: renamed to priority: {'PASS' if 'priority_new' not in body and 'priority(' in body else 'FAIL'}")
+    assert 'priority_new' not in body, "fail, priority_new not renamed."
+    assert 'priority(' in body, "fail, recursive call not renamed to priority."
+    print(f"  check, renamed to priority, {'pass' if 'priority_new' not in body and 'priority(' in body else 'fail'}.")
 
 
 def test_combinations_import_inside_body():
@@ -476,15 +458,15 @@ def priority_new(node, G, n, s):
     print_test("Combinations import inside body", raw)
     body, _, _, _ = parse_llm_output(raw)
     ok = assert_body_compiles(body, "combinations_import")
-    assert 'combinations' in body, "FAIL: combinations reference missing from body"
-    print(f"  CHECK: combinations in body: {'PASS' if 'combinations' in body else 'FAIL'}")
+    assert 'combinations' in body, "fail, combinations reference missing from body."
+    print(f"  check, combinations in body, {'pass' if 'combinations' in body else 'fail'}.")
 
 
 def main():
     print("\n# parse_llm_output Test Suite\n")
 
     # Group 1: Raw code
-    print_section("GROUP 1: Raw Code (no wrapper)")
+    print_section("Group 1, raw code (no wrapper)")
     test_raw_simple_function()
     test_raw_nested_indentation()
     test_raw_helper_inside()
@@ -494,27 +476,27 @@ def main():
     test_raw_body_with_imports()
     test_raw_body_with_nested_helper()
 
-    # Group 2: <code> tags
-    print_section("GROUP 2: <code> Tags")
+    # Group 2, <code> tags.
+    print_section("Group 2, <code> tags")
     test_code_tags_simple()
     test_code_tags_multiple_functions()
     test_code_tags_body_before_func()
     test_code_tags_with_description()
     test_code_tags_with_nested_fence()
 
-    # Group 3: Markdown fences
-    print_section("GROUP 3: Markdown Fences")
+    # Group 3, markdown fences.
+    print_section("Group 3, markdown fences")
     test_fence_simple()
     test_fence_multiple_blocks()
     test_fence_with_think_block()
     test_fence_plain_no_language()
 
-    # Group 4: Template integration
-    print_section("GROUP 4: Template Integration")
+    # Group 4, template integration.
+    print_section("Group 4, template integration")
     test_template_integration()
 
-    # Group 5: Real-world LLM failure patterns
-    print_section("GROUP 5: Real-world LLM Failure Patterns")
+    # Group 5, real-world LLM failure patterns.
+    print_section("Group 5, real-world LLM failure patterns")
     test_multiline_def_signature()
     test_mixed_indentation_3space()
     test_helper_before_priority_different_indent()
@@ -523,9 +505,7 @@ def main():
     test_priority_new_renamed()
     test_combinations_import_inside_body()
 
-    print(f"\n{'='*60}")
-    print("Completed 25 tests")
-    print(f"{'='*60}\n")
+    print(f"\nCompleted 25 tests.\n")
 
 
 if __name__ == "__main__":

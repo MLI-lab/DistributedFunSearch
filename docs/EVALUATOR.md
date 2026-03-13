@@ -24,7 +24,7 @@ Evaluator process (caches graphs in memory)
     └── Child process (inherits graphs via copy-on-write), killed after timeout
 ```
 
-## Fork-based Sandboxing
+## Fork Sandboxing
 
 Uses `os.fork()` instead of `subprocess.Popen()` for massive performance gains:
 
@@ -135,9 +135,9 @@ Memory has two values: **Final** (after loading, in-use) and **Peak** (during LM
 ```python
 EvaluatorConfig(
     timeout=30,                    # Seconds before sandbox killed
-    max_workers=2,                 # Parallel workers per evaluator
+    max_workers=2,                 # Parallel threads per evaluator
     sandbox_memory_limit_gb=1.0,   # Memory limit per sandbox
-    sandbox_debug=False,           # True to log sandbox errors to stderr
+    debug_samples=False,           # Save debug sample files to log_dir/debug_samples
     prefetch_count=15,             # RabbitMQ message buffer
 
     evaluation_script_path="...",  # Path to evaluation script with evaluate and priority
@@ -145,31 +145,31 @@ EvaluatorConfig(
     s_values=[1],                  # Problem parameters
     start_n=[6],                   # Range start
     end_n=[11],                    # Range end
-    mode="last",                   # Score aggregation, last, average, weighted, relative_difference
+    mode="last_relative",          # Score aggregation: last, average, weighted, relative_difference, last_relative
 )
 ```
 
 ## Debugging
 
-Graphs are cached in memory. No files written to disk during evaluation (fork-based).
+Graphs are cached in memory. No files written to disk during evaluation (fork based).
 
-To see why sandbox evaluations fail (compile errors, runtime exceptions), enable `sandbox_debug` in your config:
+To save debug samples (raw LLM output, parsed code, evaluation results) for inspection, enable `debug_samples` in your config:
 
 ```python
 EvaluatorConfig(
-    sandbox_debug=True,  # Default: False. Logs errors with full tracebacks to stderr.
+    debug_samples=True,  # Default: False. Saves debug files to log_dir/debug_samples/.
 )
 ```
 
-This prints `SANDBOX COMPILE ERROR` and `SANDBOX ERROR` messages to stderr (visible in SLURM `.err` logs). Off by default to avoid excessive output during normal runs.
+Sandbox errors (compile errors, runtime exceptions, timeouts) are returned as strings in the result and logged by the evaluator. Check the main log for lines containing "Compile error", "Runtime error", or "Timeout".
 
 ```bash
 # Check memory usage (graphs cached in evaluator)
 ps aux | grep evaluator
 
 # Check evaluator logs for errors
-journalctl -u disfun-evaluator -f
+grep -i "error\|timeout" logs/main.log
 
-# Monitor child processes (short-lived forks)
+# Monitor child processes (short lived forks)
 watch -n 0.1 'ps --ppid <evaluator_pid>'
 ```

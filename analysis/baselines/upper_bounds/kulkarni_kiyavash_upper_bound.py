@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Kulkarni-Kiyavash Upper Bounds for Deletion Correcting Codes
-=============================================================
 
 Implementation based on:
 Kulkarni, A. A., & Kiyavash, N. (2013). Nonasymptotic upper bounds for deletion correcting codes. IEEE Transactions on Information Theory, 59(8), 5115-5130.

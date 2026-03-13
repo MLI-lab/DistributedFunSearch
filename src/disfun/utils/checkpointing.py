@@ -1,7 +1,7 @@
-"""Checkpoint save/load functionality for ProgramsDatabase.
+"""Checkpoint save/load for ProgramsDatabase.
 
-These functions take a ProgramsDatabase instance and access its internals directly.
-This is intentional. They are extensions of ProgramsDatabase, not independent modules.
+These functions read and write ProgramsDatabase internal state (islands, counters, etc.)
+directly. They are split out to keep programs_database.py shorter.
 """
 
 import ast
@@ -87,7 +87,7 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
     reevo_state = checkpoint_data.get("reevo_state")
     if reevo_state:
         database.reevo_state = reevo_state
-        logger.info(f"Restored ReEvo state: {len(reevo_state.get('new_reflections', []))} short-term reflections")
+        logger.info(f"Restored ReEvo state: {len(reevo_state.get('new_reflections', []))} short term reflections")
 
     pending_reflection_type = checkpoint_data.get("_pending_reflection_type")
     if pending_reflection_type:
@@ -98,8 +98,7 @@ def load_checkpoint(checkpoint_file: str, database) -> None:
         }
         logger.info(f"Restored {len(database._pending_reflection_type)} pending reflection types")
 
-    # Note: final_metrics is saved to checkpoint but NOT restored here.
-    # It's only computed at termination and used for post-hoc analysis (e.g., inspector.py).
+    database.final_metrics = checkpoint_data.get("final_metrics", None)
 
     # Restore best scores
     for i, score in enumerate(checkpoint_data["best_score_per_island"]):

@@ -37,7 +37,7 @@ class ProgramsDatabaseConfig:
     """ProgramsDatabase settings."""
     num_islands: int = 10
     reset_programs: int = 1200  # Programs per island before weak islands reset
-    cluster_sampling_temperature_init: float = 1 #1 #0.1
+    cluster_sampling_temperature_init: float = 1 # 0.1 for starcoder
     cluster_sampling_temperature_period: int = 30_000
     no_deduplication: bool = False
     save_lineage: bool = True  # Track parent/child relationships
@@ -56,24 +56,24 @@ class SamplerConfig:
     samples_per_prompt_mutation: int = 5  # Override for ReEvo mutation phase
     temperature_period = None  # Programs until LLM temperature decays (exploration to exploitation), None for fixed
     temperature: float = 0.9444444
-    max_new_tokens: int = 16000 #246 for starcoder2-15b, 1024 for qwen3-8b
+    max_new_tokens: int = 2048 # 246 for starcoder2-15b, 2048 for qwen models
     top_p: float = 0.7777777777777778
     repetition_penalty: float = 1.222222
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "Qwen/Qwen3-32B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
-    cost_model: str = "fireworks_ai/accounts/fireworks/models/starcoder2-15b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+    model: str = "Qwen/Qwen3-14B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
+    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-14b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
     use_chat_api: bool = True  # True to use vLLM chat() instead of generate(), use when providing system/user messages
-    enable_thinking: bool = True  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
-    model_params_billions: float = None # For FLOP estimation, None to disable
+    enable_thinking: bool = False  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
+
     api_base: str = None
     api_key: str = None  # None loads from .env
     cache_dir: str = "/mnt/models"
     gpu_memory_utilization: float = 0.85
     prefetch_multiplier: int = 2
-    tensor_parallel_size: int = 2  # GPUs per sampler (1, 2, 4, 8). Ensure num_samplers × tensor_parallel_size ≤ total GPUs
+    tensor_parallel_size: int = 1  # GPUs per sampler (1, 2, 4, 8). Ensure num_samplers × tensor_parallel_size ≤ total GPUs
     enforce_eager: bool = False  # True to skip CUDA graph compilation (faster startup, required for multi-GPU)
     assistant_prefix: str | None = None #"<code>"  # Prefix forcing: e.g. "<code>" forces model to start output with <code> (None=disabled)
 
@@ -83,10 +83,16 @@ class EvaluatorConfig:
     """Evaluator settings."""
     evaluation_script_path: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/evaluation/graph_nx.py"
     initial_functions_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC/initial_functions/graph"
-    s_values: List[int] = dataclasses.field(default_factory=lambda: [2])  # Deletions to correct 
-    start_n: List[int] = dataclasses.field(default_factory=lambda: [7])  # Shortest code length to evaluate
-    end_n: List[int] = dataclasses.field(default_factory=lambda: [12])  # Longest code length to evaluate
-    mode: str = "last"  # last, average, weighted, relative_difference
+    s_values: List[int] = dataclasses.field(default_factory=lambda: [1])  # Deletions to correct 
+    start_n: List[int] = dataclasses.field(default_factory=lambda: [6])  # Shortest code length to evaluate
+    end_n: List[int] = dataclasses.field(default_factory=lambda: [11])  # Longest code length to evaluate
+    # Scoring modes:
+    #   last             - score from largest n only.
+    #   average          - mean score across all n values.
+    #   weighted         - weighted mean, larger n counts more.
+    #   relative_difference - sum of (score - baseline) / baseline across n.
+    #   last_relative    - relative improvement at largest n only.
+    mode: str = "last"
     timeout: int = 30
     max_workers: int = 2  # Parallel CPU processes per evaluator
     q: int = 2  # Alphabet size (2 for binary, 4 for DNA)
@@ -101,7 +107,11 @@ class EvaluatorConfig:
 @dataclasses.dataclass(frozen=True)
 class PromptConfig:
     """Prompt building settings."""
-    strategy: str = "funsearch"  # funsearch, eoh, reevo
+    # Prompt strategies:
+    #   funsearch - few-shot prompting with ranked examples from the database.
+    #   eoh       - Evolution of Heuristics, style-guided mutation prompts.
+    #   reevo     - Reflective Evolution, generates then reflects on solutions.
+    strategy: str = "funsearch"
     spec_dir: str = "/workspace/DistributedFunSearch/src/disfun/specifications/ECC"
     variant: str = "deletions"  # ECC variant: "deletions" or "ids"
     imports_file: str = "imports/networkx.txt"
@@ -132,17 +142,15 @@ class PromptConfig:
 
     # Score display
     show_scores: bool = True
-    score_display_mode: str = "relative"  # absolute, relative
+    # Score display: absolute (raw scores) or relative (% of best known).
+    score_display_mode: str = "relative"
     best_known_solutions: dict = dataclasses.field(default_factory=lambda: {  # Best known or upper bound scores
-        (9, 1): 52,  # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (6, 1): 10,  # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (7,1): 16,
+        (8,1): 30,
+        (9, 1): 52, 
         (10,1): 94,
         (11,1): 172,
-        (7, 2): 5,
-        (8, 2): 7,
-        (9, 2): 11,
-        (10,2): 16,
-        (11,2): 24,
-        (12,2): 37
     })
 
     # Docstring templates for priority functions in few-shot examples (paths relative to spec_dir)
@@ -156,13 +164,13 @@ class PromptConfig:
 class WandbConfig:
     """Weights & Biases settings."""
     enabled: bool = False
-    project: str = "disfun_s2"
-    entity: str = "franziweindel-technical-university-of-munich"
+    project: str = None
+    entity: str = None
     run_name: str = None  # None for auto-generated
-    run_name_tag: str = "test_refl_8B"
+    run_name_tag: str = None
     log_interval: int = 300  # Seconds
     tags: List[str] = dataclasses.field(default_factory=list)
-    checkpoints_base_path: str = "/mnt/disfun/checkpoints/s1/final"
+    checkpoints_base_path: str = "/mnt/disfun/checkpoints/"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -208,23 +216,22 @@ class ScalingConfig:
 @dataclasses.dataclass(frozen=True)
 class TerminationConfig:
     """Experiment termination conditions."""
-    termination_mode: str = "iterations"  # "iterations" or "cost" 
+    # Termination modes:
+    #   iterations - stop after iteration_limit prompts.
+    #   cost       - stop after cost_limit USD spent on inference.
+    termination_mode: str = "cost"
     iteration_limit: int = 11100 #400_000  # Used when termination_mode="iterations"   Next: 150,763 at checkpoint_2026-02-16_12-55-04.pkl
     cost_limit: float = 120  # Max cost in USD, used when termination_mode="cost"
     stop_on_optimal: bool = False  # If True, stop early after finding optimal solution
     optimal_solution_programs: int = 20_000  # Extra iterations after optimal found (only if stop_on_optimal=True)
     target_solutions: dict = dataclasses.field(default_factory=lambda: {
-        (9, 1): 52,  # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (6, 1): 10,  # (n, s): score, q is constant per run, set in EvaluatorConfig
+        (7,1): 16,
+        (8,1): 30,
+        (9, 1): 52, 
         (10,1): 94,
         (11,1): 172,
-        (7, 2): 5,
-        (8, 2): 7,
-        (9, 2): 11,
-        (10,2): 16,
-        (11,2): 24,
-        (12,2): 37
     })
-
 
 @dataclasses.dataclass(frozen=True)
 class ThroughputConfig:
@@ -263,7 +270,7 @@ class Config:
     termination: TerminationConfig = dataclasses.field(default_factory=TerminationConfig)
     throughput: ThroughputConfig = dataclasses.field(default_factory=ThroughputConfig)
     sweep: SweepConfig = dataclasses.field(default_factory=SweepConfig)
-    num_samplers: int = 2  # With 4 GPUs and tensor_parallel_size=2: sampler 0 → GPUs 0,1; sampler 1 → GPUs 2,3
-    num_evaluators: int = 50
+    num_samplers: int = 1  # With 4 GPUs and tensor_parallel_size=2: sampler 0 → GPUs 0,1; sampler 1 → GPUs 2,3
+    num_evaluators: int = 5
     num_pdb: int = 1
     random_seed: int = 1  # None for non-deterministic

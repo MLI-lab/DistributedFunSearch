@@ -27,6 +27,3 @@ These compute theoretical limits on how large a code can be.
 
 Wrapper around the KaMIS maximum independent set solver (compiled C++ binary). See `kamis/README.md`.
 
-## HPC scripts (`hpc_scripts/`)
-
-Shell scripts for running baselines on a SLURM cluster. Also contains the Gurobi license file.

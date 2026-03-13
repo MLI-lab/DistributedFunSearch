@@ -23,9 +23,9 @@ python analyze_eval_failures.py /path/to/debug_samples/ --skip-llm
 python analyze_parse_failures.py /path/to/debug_samples/ --skip-llm
 python analyze_successes.py /path/to/debug_samples/ --skip-llm
 
-# with LLM classification (default model: claude-sonnet-4-20250514)
+# with LLM classification (default model: gpt-5)
 python analyze_eval_failures.py /path/to/debug_samples/ --model gpt-4o-mini
-python analyze_successes.py /path/to/debug_samples/ --model gpt-5
+python analyze_successes.py /path/to/debug_samples/ --model claude-sonnet-4-20250514
 
 # verbose (prints per sample details)
 python analyze_eval_failures.py /path/to/debug_samples/ --skip-llm -v

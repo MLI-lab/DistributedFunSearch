@@ -19,7 +19,7 @@ In each iteration:
 3. The function is [evaluated](docs/EVALUATOR.md) in a sandboxed environment on user-defined problem instances
 4. If executable and producing unique outputs (not a duplicate), the new function is stored with its scores and metadata
 
-Our implementation includes an example application for discovering large deletion correcting codes. For details on this specific use case, see [our paper](https://arxiv.org/abs/2504.00613).
+Our implementation includes an example application for discovering large deletion correcting codes.
 
 ## Quickstart
 
@@ -71,4 +71,4 @@ You can monitor message load in real time at `http://localhost:15672` (login: gu
 
 ## Evolve your problem
 
-Adapt DistributedFunSearch to your problem by creating a specification directory with evaluation scripts, prompt templates, and initial functions. See `src/disfun/specifications/Deletions/` and its [README](src/disfun/specifications/Deletions/README.md) for a complete working example and detailed documentation.
+Adapt DistributedFunSearch to your problem by creating a specification directory with evaluation scripts, prompt templates, and initial functions. See `src/disfun/specifications/ECC/` and its [README](src/disfun/specifications/ECC/README.md) for a complete working example and documentation.

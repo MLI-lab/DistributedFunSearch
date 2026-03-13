@@ -1,7 +1,7 @@
 """Evaluation script using precomputed graphs with native NetworkX.
 
 Same as graph_fastgraph.py but receives a real nx.Graph instead of FastGraph.
-All nx functions work natively without wrappers.
+All nx functions work without wrappers.
 """
 
 import hashlib
@@ -14,9 +14,6 @@ import numpy as np
 import networkx as nx
 import random
 
-# Common aliases LLMs use
-mean = np.mean
-inf = float('inf')
 
 
 def hash_priority_mapping(priorities, nodes):

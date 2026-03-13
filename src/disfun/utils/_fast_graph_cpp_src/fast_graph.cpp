@@ -94,13 +94,13 @@ static void open_lmdb(const std::string& path, MDB_env*& env, MDB_txn*& txn,
     rc = mdb_env_open(env, path.c_str(), MDB_RDONLY | MDB_NOLOCK, 0644);
     if (rc) {
         mdb_env_close(env);
-        throw std::runtime_error("mdb_env_open failed: " + path);
+        throw std::runtime_error("mdb_env_open failed: " + path + " (" + mdb_strerror(rc) + ")");
     }
 
     rc = mdb_txn_begin(env, nullptr, MDB_RDONLY, &txn);
     if (rc) {
         mdb_env_close(env);
-        throw std::runtime_error("mdb_txn_begin failed");
+        throw std::runtime_error("mdb_txn_begin failed: " + path + " (" + mdb_strerror(rc) + ")");
     }
 
     rc = mdb_dbi_open(txn, nullptr, 0, &dbi);
@@ -254,7 +254,7 @@ void FastGraphCpp::load_from_lmdb(const std::string& path) {
     rc = mdb_env_open(env, path.c_str(), MDB_RDONLY | MDB_NOLOCK, 0644);
     if (rc) {
         mdb_env_close(env);
-        throw std::runtime_error("mdb_env_open failed: " + path);
+        throw std::runtime_error("mdb_env_open failed: " + path + " (" + mdb_strerror(rc) + ")");
     }
 
     // Get database statistics

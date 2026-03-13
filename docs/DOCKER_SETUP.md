@@ -53,7 +53,6 @@ Then build:
 ./tools/build_fast_graph.sh
 ```
 
-The script automatically handles multiarch header symlinks on Ubuntu/Debian systems.
 
 **Install C compiler (required for local models):**
 

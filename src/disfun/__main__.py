@@ -20,8 +20,7 @@ single-threaded version. It uses RabbitMQ and asyncio for asynchronous message p
 enabling parallel evaluation and sampling across multiple processes and nodes.
 
 Runs ProgramsDatabase in the main process and spawns Sampler/Evaluator as child
-processes. Child process entry points live in startup.py because multiprocessing
-with 'spawn' context can only pickle functions from importable modules.
+processes. Child process entry points are in startup.py.
 """
 
 import os
@@ -43,7 +42,6 @@ import shutil
 import signal
 import pickle
 import argparse
-import logging
 import asyncio
 import datetime
 from typing import Any
@@ -56,7 +54,6 @@ import atexit
 
 from disfun import programs_database
 from disfun.utils import rabbitmq
-from disfun.sandbox import cleanup_orphaned_sandbox_processes
 from disfun.utils import code_manipulation, prompt_builder, wandb_logging
 from disfun.utils import checkpointing as checkpoint
 from disfun.utils.resource_manager import ResourceManager, ScalingContext
@@ -67,16 +64,9 @@ from disfun.startup import sampler_process_entry, evaluator_process_entry, load_
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-def _cleanup_sandbox_processes():
-    """No-op. Fork-based sandbox children are reaped automatically by parent.
-
-    Kept for API compatibility.
-    """
-    cleanup_orphaned_sandbox_processes(max_age_seconds=0)
-
 
 def _cleanup_orphaned_vllm_workers():
-    """Kill orphaned multiprocessing.spawn workers."""
+    """Kill orphaned vLLM GPU worker processes if a sampler crashes."""
     for proc in psutil.process_iter(['cmdline']):
         try:
             if proc.info['cmdline'] and 'multiprocessing.spawn' in ' '.join(proc.info['cmdline']):
@@ -85,7 +75,7 @@ def _cleanup_orphaned_vllm_workers():
             pass
 
 
-atexit.register(_cleanup_sandbox_processes)
+# Ensures cleanup functions are called automatically when the Python process exits
 atexit.register(_cleanup_orphaned_vllm_workers)
 
 
@@ -98,18 +88,12 @@ except RuntimeError:
     pass  # Already set
 
 
-def backup_python_files(src, dest, exclude_dirs=[]):
-    """Recursively copy all Python files in src to dest."""
-    for file_path in glob.glob(os.path.join(src, '**', '*.py'), recursive=True):
-        if "/code_backup/" in file_path:
-            continue
-        if any([file_path.startswith(dir) for dir in exclude_dirs]):
-            continue
-        new_path = f"{dest}/{file_path.replace('./', '')}"
-        dirname = os.path.dirname(new_path)
-        if not os.path.exists(dirname):
-            os.makedirs(dirname)
-        shutil.copy(file_path, new_path)
+def backup_python_files(src, dest):
+    """Recursively copy all .py files from src to dest, preserving directory structure."""
+    def _ignore_non_python(directory, files):
+        return [f for f in files if not f.endswith('.py') and not os.path.isdir(os.path.join(directory, f))
+                or 'code_backup' in directory]
+    shutil.copytree(src, dest, dirs_exist_ok=True, ignore=_ignore_non_python)
 
 
 def parse_args():
@@ -128,33 +112,21 @@ def parse_args():
         default=os.path.join(os.getcwd(), "config.py"),
         help="Path to configuration file. Defaults to './config.py'.")
     parser.add_argument(
-        "--log-dir", type=str,
-        default=os.path.join(os.getcwd(), "logs"),
-        help="Directory for logs. Defaults to './logs'.")
+        "--log-dir", type=str, default=None,
+        help="Directory for logs. Defaults to config value or './logs'.")
     # Resource scaling
     parser.add_argument(
         "--no-dynamic-scaling", action="store_true",
         help="Disable dynamic scaling of evaluators and samplers.")
-    parser.add_argument(
-        "--check_interval", type=int, default=120,
-        help="Seconds between scaling checks. Defaults to 120.")
-    parser.add_argument(
-        "--max_evaluators", type=int, default=1000,
-        help="Maximum evaluators to scale up to.")
-    parser.add_argument(
-        "--max_samplers", type=int, default=1000,
-        help="Maximum samplers to scale up to.")
-
     # Termination
     parser.add_argument(
-        "--iteration_limit", type=int, default=400_000_000,
+        "--iteration_limit", type=int, default=None,
         help="Maximum iterations before shutdown.")
     parser.add_argument(
-        "--optimal_solution_programs", type=int, default=200_000,
+        "--optimal_solution_programs", type=int, default=None,
         help="Programs to generate after first optimal solution.")
     parser.add_argument(
-        "--target_solutions", type=str,
-        default='{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}',
+        "--target_solutions", type=str, default=None,
         help="JSON dict of (n, s) target solutions for early termination.")
     parser.add_argument(
         "--stop_on_optimal", action="store_true", dest="stop_on_optimal", default=None,
@@ -179,27 +151,22 @@ def parse_args():
     return parser.parse_args()
 
 
+def _cli_or_config(cli_val, config_val):
+    """Return CLI value if explicitly set (not None), otherwise config value."""
+    return cli_val if cli_val is not None else config_val
+
+
 def merge_config_with_args(args, config):
     """Merge CLI arguments with config. CLI overrides config when explicitly set."""
-    # Paths
-    default_log_dir = os.path.join(os.getcwd(), "logs")
-    log_dir = args.log_dir if args.log_dir != default_log_dir else config.paths.log_dir
+    log_dir = _cli_or_config(args.log_dir, config.paths.log_dir)
     backup_enabled = args.backup or config.paths.backup_enabled
-
-    # Scaling
     enable_dynamic_scaling = not args.no_dynamic_scaling if args.no_dynamic_scaling else config.scaling.enabled
 
-    # Termination values
-    iteration_limit = args.iteration_limit if args.iteration_limit != 400_000_000 else config.termination.iteration_limit
-    optimal_solution_programs = args.optimal_solution_programs if args.optimal_solution_programs != 200_000 else config.termination.optimal_solution_programs
-    stop_on_optimal = args.stop_on_optimal if args.stop_on_optimal is not None else config.termination.stop_on_optimal
-
-    # Target solutions
-    default_targets = '{"(6, 1)": 10, "(7, 1)": 16, "(8, 1)": 30, "(9, 1)": 52, "(10, 1)": 94, "(11, 1)": 172}'
-    if args.target_solutions != default_targets:
+    # Parse target solutions from JSON string if provided
+    if args.target_solutions is not None:
         try:
-            target_signatures = json.loads(args.target_solutions)
-            target_signatures = {ast.literal_eval(k): v for k, v in target_signatures.items()}
+            raw = json.loads(args.target_solutions)
+            target_signatures = {ast.literal_eval(k): v for k, v in raw.items()}
         except json.JSONDecodeError as e:
             raise ValueError("Invalid JSON for --target_solutions") from e
     else:
@@ -207,13 +174,12 @@ def merge_config_with_args(args, config):
 
     termination_config = dataclasses.replace(
         config.termination,
-        iteration_limit=iteration_limit,
-        stop_on_optimal=stop_on_optimal,
-        optimal_solution_programs=optimal_solution_programs,
-        target_solutions=target_signatures
+        iteration_limit=_cli_or_config(args.iteration_limit, config.termination.iteration_limit),
+        stop_on_optimal=_cli_or_config(args.stop_on_optimal, config.termination.stop_on_optimal),
+        optimal_solution_programs=_cli_or_config(args.optimal_solution_programs, config.termination.optimal_solution_programs),
+        target_solutions=target_signatures,
     )
 
-    # Evaluation inputs - graphs are preloaded by each evaluator during init
     inputs = [
         (n, s, config.evaluator.q)
         for s, start_n, end_n in zip(
@@ -387,131 +353,86 @@ class TaskManager:
                     self.logger.error("Max retries reached. Failed to publish initial program.")
                     raise e  # Re-raise the exception after max retries
 
-    async def monitor_evaluator_health(self, check_interval=60):
-        """Monitor evaluator processes and respawn any that have crashed.
+    @staticmethod
+    def _describe_exit(exitcode):
+        """Human-readable description of a process exit code."""
+        if exitcode is None:
+            return "unknown (still running?)"
+        if exitcode < 0:
+            return f"killed by {signal.Signals(-exitcode).name} (unhandled)"
+        return {0: "normal exit", 143: "SIGTERM", 130: "SIGINT"}.get(exitcode, f"exitcode {exitcode}")
 
-        This runs even when dynamic scaling is disabled, ensuring crashed
-        evaluators are restarted to maintain throughput.
+    async def _monitor_worker_health(self, worker_type, process_list, respawn_fn, check_interval=60):
+        """Monitor worker processes and respawn any that have crashed.
+
+        Runs even when dynamic scaling is disabled.
         """
-        startup_delay = getattr(self.config.evaluator, 'startup_delay', 0)
         ctx = mp.get_context('spawn')
 
         while not self.shutting_down:
             await asyncio.sleep(check_interval)
-
             if self.shutting_down:
                 break
 
-            # Check each evaluator process
-            dead_evaluators = []
-            for i, proc in enumerate(self.evaluator_processes):
-                if not proc.is_alive():
-                    dead_evaluators.append((i, proc))
-
-            if not dead_evaluators:
+            dead = [(i, p) for i, p in enumerate(process_list) if not p.is_alive()]
+            if not dead:
                 continue
 
-            for _, proc in dead_evaluators:
-                ec = proc.exitcode
-                if ec is None:
-                    reason = "unknown (still running?)"
-                elif ec < 0:
-                    reason = f"killed by {signal.Signals(-ec).name} (unhandled)"
-                elif ec == 0:
-                    reason = "normal exit (consume loop finished or reconnects exhausted)"
-                elif ec == 143:
-                    reason = "received SIGTERM (handled gracefully)"
-                elif ec == 130:
-                    reason = "received SIGINT (handled gracefully)"
-                else:
-                    reason = f"exitcode {ec}"
-                self.logger.warning(f"Dead evaluator PID={proc.pid}: {reason}")
-            self.logger.warning(f"Detected {len(dead_evaluators)} dead evaluator(s), respawning...")
+            for _, proc in dead:
+                self.logger.warning(f"Dead {worker_type} PID={proc.pid}: {self._describe_exit(proc.exitcode)}")
+            self.logger.warning(f"Detected {len(dead)} dead {worker_type}(s), respawning...")
 
-            for i, old_proc in dead_evaluators:
+            for i, old_proc in dead:
                 if self.shutting_down:
                     break
-
                 try:
-                    proc = ctx.Process(
-                        target=evaluator_process_entry,
-                        args=(self.config_path, self.template, self.inputs,
-                              self.termination_config.target_solutions,
-                              self.log_dir, self.log_filename),
-                        name=f"Evaluator-respawn-{old_proc.pid}"
-                    )
-                    proc.start()
-
-                    # Update tracking
-                    self.evaluator_processes[i] = proc
-                    self.logger.info(f"Respawned evaluator PID={proc.pid} (was {old_proc.pid})")
-
-                    # Stagger restarts to avoid memory spike during graph loading
-                    if startup_delay > 0 and len(dead_evaluators) > 1:
-                        await asyncio.sleep(startup_delay)
-
+                    new_proc, stagger = respawn_fn(ctx, old_proc)
+                    new_proc.start()
+                    process_list[i] = new_proc
+                    self.logger.info(f"Respawned {worker_type} PID={new_proc.pid} (was {old_proc.pid})")
+                    if stagger and len(dead) > 1:
+                        await asyncio.sleep(stagger)
                 except Exception as e:
-                    self.logger.error(f"Failed to respawn evaluator: {e}")
+                    self.logger.error(f"Failed to respawn {worker_type}: {e}")
+
+    def _respawn_evaluator(self, ctx, old_proc):
+        """Create a replacement evaluator process. Returns (process, stagger_seconds)."""
+        proc = ctx.Process(
+            target=evaluator_process_entry,
+            args=(self.config_path, self.template, self.inputs,
+                  self.termination_config.target_solutions,
+                  self.log_dir, self.log_filename),
+            name=f"Evaluator-respawn-{old_proc.pid}"
+        )
+        stagger = getattr(self.config.evaluator, 'startup_delay', 0) or None
+        return proc, stagger
+
+    def _respawn_sampler(self, ctx, old_proc):
+        """Create a replacement sampler process. Returns (process, stagger_seconds)."""
+        device = self.process_to_device_map.get(old_proc.pid)
+        sampler_id = self.resource_manager.next_sampler_id
+        self.resource_manager.next_sampler_id += 1
+
+        proc = ctx.Process(
+            target=sampler_process_entry,
+            args=(self.config_path, device, self.log_dir, self.log_filename, sampler_id),
+            name=f"Sampler-{sampler_id}"
+        )
+
+        # Update GPU device tracking
+        if device:
+            self.process_to_device_map[proc.pid] = device
+        if old_proc.pid in self.process_to_device_map:
+            del self.process_to_device_map[old_proc.pid]
+
+        stagger = 90 if self.config.sampler.use_local_vllm else None
+        return proc, stagger
+
+    async def monitor_evaluator_health(self, check_interval=60):
+        await self._monitor_worker_health("evaluator", self.evaluator_processes, self._respawn_evaluator, check_interval)
 
     async def monitor_sampler_health(self, check_interval=60):
-        """Monitor sampler processes and respawn any that have crashed.
-
-        This runs even when dynamic scaling is disabled, ensuring crashed
-        samplers are restarted to maintain throughput.
-        """
-        while not self.shutting_down:
-            await asyncio.sleep(check_interval)
-
-            if self.shutting_down:
-                break
-
-            # Check each sampler process
-            dead_samplers = []
-            for i, proc in enumerate(self.sampler_processes):
-                if not proc.is_alive():
-                    device = self.process_to_device_map.get(proc.pid)
-                    dead_samplers.append((i, proc, device))
-
-            if not dead_samplers:
-                continue
-
-            self.logger.warning(f"Detected {len(dead_samplers)} dead sampler(s), respawning...")
-
-            use_local = self.config.sampler.use_local_vllm
-            ctx = mp.get_context('spawn')
-
-            for i, old_proc, device in dead_samplers:
-                if self.shutting_down:
-                    break
-
-                # Get next sampler ID from resource manager
-                sampler_id = self.resource_manager.next_sampler_id
-                self.resource_manager.next_sampler_id += 1
-
-                try:
-                    proc = ctx.Process(
-                        target=sampler_process_entry,
-                        args=(self.config_path, device, self.log_dir, self.log_filename, sampler_id),
-                        name=f"Sampler-{sampler_id}"
-                    )
-                    proc.start()
-
-                    # Update tracking
-                    self.sampler_processes[i] = proc
-                    if device:
-                        self.process_to_device_map[proc.pid] = device
-                    # Clean up old mapping
-                    if old_proc.pid in self.process_to_device_map:
-                        del self.process_to_device_map[old_proc.pid]
-
-                    self.logger.info(f"Respawned sampler (ID={sampler_id}) with PID={proc.pid} on device {device}")
-
-                    # Stagger restarts to avoid simultaneous model loading
-                    if use_local and len(dead_samplers) > 1:
-                        await asyncio.sleep(90)
-
-                except Exception as e:
-                    self.logger.error(f"Failed to respawn sampler: {e}")
+        await self._monitor_worker_health("sampler", self.sampler_processes, self._respawn_sampler, check_interval)
 
     def _load_initial_programs(self):
         """Load initial functions from the initial_functions directory."""
@@ -552,29 +473,9 @@ class TaskManager:
 
     def _create_scaling_context(self, evaluator_queue, sampler_queue, for_attach_mode=False):
         """Create ScalingContext for dynamic scaling."""
-        if for_attach_mode:
-            is_eval = self.attach_mode == "evaluators"
-            return ScalingContext(
-                config=self.config,
-                config_path=self.config_path,
-                log_dir=self.log_dir,
-                log_filename=self.log_filename,
-                evaluator_queue=evaluator_queue if is_eval else None,
-                sampler_queue=None if is_eval else sampler_queue,
-                evaluator_processes=self.evaluator_processes if is_eval else [],
-                sampler_processes=[] if is_eval else self.sampler_processes,
-                sampler_entry_function=None if is_eval else sampler_process_entry,
-                evaluator_entry_function=evaluator_process_entry if is_eval else None,
-                template=self.template if is_eval else None,
-                inputs=self.inputs if is_eval else None,
-                target_signatures=self.termination_config.target_solutions if is_eval else None,
-                max_evaluators=self.config.scaling.max_evaluators if is_eval else 0,
-                max_samplers=0 if is_eval else self.config.scaling.max_samplers,
-                check_interval=self.config.scaling.check_interval,
-            )
-
         scaling = self.config.scaling if hasattr(self.config, 'scaling') and self.config.scaling else None
-        return ScalingContext(
+
+        base = dict(
             config=self.config,
             config_path=self.config_path,
             log_dir=self.log_dir,
@@ -592,6 +493,25 @@ class TaskManager:
             max_samplers=scaling.max_samplers if scaling else 1000,
             check_interval=scaling.check_interval if scaling else 120,
         )
+
+        if for_attach_mode:
+            is_eval = self.attach_mode == "evaluators"
+            base.update(
+                evaluator_queue=evaluator_queue if is_eval else None,
+                sampler_queue=None if is_eval else sampler_queue,
+                evaluator_processes=self.evaluator_processes if is_eval else [],
+                sampler_processes=[] if is_eval else self.sampler_processes,
+                sampler_entry_function=None if is_eval else sampler_process_entry,
+                evaluator_entry_function=evaluator_process_entry if is_eval else None,
+                template=self.template if is_eval else None,
+                inputs=self.inputs if is_eval else None,
+                target_signatures=self.termination_config.target_solutions if is_eval else None,
+                max_evaluators=self.config.scaling.max_evaluators if is_eval else 0,
+                max_samplers=0 if is_eval else self.config.scaling.max_samplers,
+                check_interval=self.config.scaling.check_interval,
+            )
+
+        return ScalingContext(**base)
 
     async def _run_attach_mode(self, evaluator_queue, sampler_queue, enable_scaling):
         """Run in attach mode: only start workers, no database/checkpoint/wandb."""
@@ -773,56 +693,43 @@ class TaskManager:
         # Start samplers (skip if attach_mode == "evaluators")
         if self.attach_mode != "evaluators":
             use_local = self.config.sampler.use_local_vllm
+            tp_size = int(self.config.sampler.tensor_parallel_size) if use_local else 0
 
             if use_local:
-                tp_size = int(self.config.sampler.tensor_parallel_size)
                 gpus_needed = self.config.num_samplers * tp_size
                 total_gpus = get_gpu_count()
-
                 if gpus_needed > total_gpus:
                     raise RuntimeError(
                         f"Not enough GPUs: need {gpus_needed} ({self.config.num_samplers} samplers × {tp_size} tp), "
                         f"but only {total_gpus} available."
                     )
-
                 self.logger.info(
-                    f"Starting {self.config.num_samplers} sampler(s) with LOCAL model: {self.config.sampler.model} "
+                    f"Starting {self.config.num_samplers} sampler(s) with local model: {self.config.sampler.model} "
                     f"(tp={tp_size}, using {gpus_needed}/{total_gpus} GPUs)"
                 )
-
-                for i in range(self.config.num_samplers):
-                    sampler_id = next_sampler_id
-                    next_sampler_id += 1
-                    base_gpu = sampler_id * tp_size
-
-                    # GPU assignment handled in startup.py based on sampler_id
-                    proc = ctx.Process(
-                        target=sampler_process_entry,
-                        args=(self.config_path, None, self.log_dir, self.log_filename, sampler_id),
-                        name=f"Sampler-{sampler_id}"
-                    )
-                    proc.start()
-                    self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid} on GPUs {base_gpu}-{base_gpu + tp_size - 1}")
-                    self.sampler_processes.append(proc)
-                    gpu_ids = ",".join(str(base_gpu + g) for g in range(tp_size))
-                    self.process_to_device_map[proc.pid] = gpu_ids  # Track GPU(s) for respawn
-
-                    if i < self.config.num_samplers - 1:
-                        time.sleep(90)
             else:
                 self.logger.info(f"Starting {self.config.num_samplers} sampler(s) with API model: {self.config.sampler.model}")
 
-                for _ in range(self.config.num_samplers):
-                    sampler_id = next_sampler_id
-                    next_sampler_id += 1
-                    proc = ctx.Process(
-                        target=sampler_process_entry,
-                        args=(self.config_path, None, self.log_dir, self.log_filename, sampler_id),
-                        name=f"Sampler-{sampler_id}"
-                    )
-                    proc.start()
+            for i in range(self.config.num_samplers):
+                sampler_id = next_sampler_id
+                next_sampler_id += 1
+                proc = ctx.Process(
+                    target=sampler_process_entry,
+                    args=(self.config_path, None, self.log_dir, self.log_filename, sampler_id),
+                    name=f"Sampler-{sampler_id}"
+                )
+                proc.start()
+                self.sampler_processes.append(proc)
+
+                if use_local:
+                    base_gpu = sampler_id * tp_size
+                    gpu_ids = ",".join(str(base_gpu + g) for g in range(tp_size))
+                    self.process_to_device_map[proc.pid] = gpu_ids
+                    self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid} on GPUs {base_gpu}-{base_gpu + tp_size - 1}")
+                    if i < self.config.num_samplers - 1:
+                        time.sleep(90)
+                else:
                     self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid}")
-                    self.sampler_processes.append(proc)
 
             self.resource_manager.next_sampler_id = next_sampler_id
 
@@ -906,34 +813,22 @@ if __name__ == "__main__":
             # Check if sweep mode (has sweep parameters configured)
             has_sweep = hasattr(config, 'sweep') and config.sweep and _generate_sweep_combinations(config)
 
-            if has_sweep:
-                print("\n" + "=" * 60)
-                print("THROUGHPUT SWEEP MODE")
-                print("=" * 60)
-                await run_sweep(
-                    config=config,
-                    config_path=args.config_path,
-                    log_dir=log_dir,
-                    specification=specification,
-                    inputs=inputs,
-                    target_signatures=target_signatures,
-                )
-            else:
-                print("\n" + "=" * 60)
-                print("THROUGHPUT MEASUREMENT MODE")
-                print("=" * 60)
+            mode = "sweep" if has_sweep else "measurement"
+            print(f"\n{'=' * 60}\nThroughput {mode} mode\n{'=' * 60}")
+            if not has_sweep:
                 print(f"Samplers: {config.num_samplers}, Evaluators: {config.num_evaluators}")
                 print(f"Duration: {config.throughput.warmup_minutes} min warmup + {config.throughput.run_duration_minutes} min measurement")
                 print("=" * 60 + "\n")
 
-                await run_throughput(
-                    config=config,
-                    config_path=args.config_path,
-                    log_dir=log_dir,
-                    specification=specification,
-                    inputs=inputs,
-                    target_signatures=target_signatures,
-                )
+            run_fn = run_sweep if has_sweep else run_throughput
+            await run_fn(
+                config=config,
+                config_path=args.config_path,
+                log_dir=log_dir,
+                specification=specification,
+                inputs=inputs,
+                target_signatures=target_signatures,
+            )
             return
 
         # Initialize the task manager
@@ -974,9 +869,6 @@ if __name__ == "__main__":
 
         # Terminate child processes
         await terminate_child_processes(task_manager)
-
-        # Kill orphaned sandbox processes
-        _cleanup_sandbox_processes()
 
         # Kill orphaned vLLM workers
         _cleanup_orphaned_vllm_workers()

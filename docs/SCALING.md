@@ -82,9 +82,9 @@ Resource metrics logged to `logs/resources_<hostname>_pid<pid>.log` and wandb:
 - `net_sent_mb`, `net_recv_mb`
 
 **GPU (per device):**
-- `gpu_N_utilization`, `gpu_N_memory_util`
-- `gpu_N_memory_used_gib`, `gpu_N_memory_free_gib`, `gpu_N_memory_total_gib`
-- `gpu_N_temperature_c`, `gpu_N_power_w`
+- `gpu_{idx}_utilization`, `gpu_{idx}_memory_util`
+- `gpu_{idx}_memory_used_gib`, `gpu_{idx}_memory_free_gib`, `gpu_{idx}_memory_total_gib`
+- `gpu_{idx}_temperature_c`, `gpu_{idx}_power_w`
 
 **Queue depths:**
 - `sampler_queue_depth`, `evaluator_queue_depth`, `database_queue_depth`

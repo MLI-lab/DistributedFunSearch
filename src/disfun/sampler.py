@@ -16,7 +16,7 @@
 """Unified LiteLLM-based Sampler with vLLM support.
 
 Key features:
-* Supports 100+ LLM providers through LiteLLM (OpenAI, Anthropic, Together AI, local vLLM, etc.)
+* Supports many LLM providers through LiteLLM (OpenAI, Anthropic, Together AI, local vLLM, etc.)
 * Dynamic batching based on message load 
 * Dynamic temperature adjustment based on stored program count
 * Token tracking for both input and output
@@ -90,7 +90,6 @@ class LLM_model:
             enable_thinking: Optional[bool] = None,  # Qwen3 thinking mode control
             cost_model: Optional[str] = None,  # LiteLLM model name for pricing lookup
             tensor_parallel_size: int | str = "auto",  # "auto" or explicit 1, 2, 4, 8
-            model_params_billions: Optional[float] = None,  # Model size for auto tensor parallelism
             sampler_id: int = 0,  # Sampler index for GPU block allocation
             enforce_eager: bool = True,  # Skip CUDA graph compilation
             assistant_prefix: Optional[str] = None,  # Prefix forcing: e.g. "<code>" to start output
@@ -185,9 +184,9 @@ class LLM_model:
             # Log retry configuration for API models
             logger.info(f"API retry configuration: max_retries={self.max_retries} (exponential backoff)")
 
-        mode_str = 'LOCAL_VLLM' if self.use_local_vllm else 'API'
+        mode_str = 'local_vllm' if self.use_local_vllm else 'api'
         if self.use_local_vllm and self.use_chat_api:
-            mode_str += f"_CHAT (enable_thinking={self.enable_thinking})"
+            mode_str += f"_chat (enable_thinking={self.enable_thinking})"
         logger.info(f"Model initialized: mode={mode_str}, temp={temperature}, top_p={top_p}, max_tokens={max_new_tokens}")
 
     def adjust_temperature(self, total_registered_programs: int, temperature_period: int):
@@ -648,12 +647,11 @@ class Sampler:
                 enable_thinking=getattr(self._config, 'enable_thinking', None),
                 cost_model=getattr(self._config, 'cost_model', None),
                 tensor_parallel_size=getattr(self._config, 'tensor_parallel_size', 'auto'),
-                model_params_billions=getattr(self._config, 'model_params_billions', None),
                 sampler_id=sampler_id,
                 enforce_eager=getattr(self._config, 'enforce_eager', True),
                 assistant_prefix=getattr(self._config, 'assistant_prefix', None),
             )
-            mode = "LOCAL_VLLM" if self._llm.use_local_vllm else "API"
+            mode = "local_vllm" if self._llm.use_local_vllm else "api"
             logger.info(f"Sampler initialized: mode={mode}, model={self._config.model}, device={device}")
         except Exception as e:
             logger.error(f"Error initializing model: {e}")
@@ -673,7 +671,7 @@ class Sampler:
         while reconnect_count < max_reconnects:
             try:
                 if not await self._conn.connect_with_retry():
-                    logger.warning(f"Sampler ({self._config.model}, PID {pid}): EXIT REASON: shutdown requested during connect")
+                    logger.warning(f"Sampler ({self._config.model}, PID {pid}): Exit reason: shutdown requested during connect")
                     break  # Shutdown requested
 
                 loop_start = asyncio.get_event_loop().time()
@@ -684,7 +682,7 @@ class Sampler:
                     reconnect_count = 0
 
             except asyncio.CancelledError:
-                logger.warning(f"Sampler ({self._config.model}, PID {pid}): EXIT REASON: CancelledError (signal or shutdown)")
+                logger.warning(f"Sampler ({self._config.model}, PID {pid}): Exit reason: CancelledError (signal or shutdown)")
                 break
 
             except Exception as e:
@@ -694,7 +692,7 @@ class Sampler:
             reconnect_count += 1
             logger.info(f"Sampler ({self._config.model}, PID {pid}): Reconnecting ({reconnect_count}/{max_reconnects})...")
         else:
-            logger.error(f"Sampler ({self._config.model}, PID {pid}): EXIT REASON: {max_reconnects} consecutive reconnect failures")
+            logger.error(f"Sampler ({self._config.model}, PID {pid}): Exit reason: {max_reconnects} consecutive reconnect failures")
 
     async def _consume_loop(self):
         """Inner consume loop, processes messages from the queue."""

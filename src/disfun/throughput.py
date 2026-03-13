@@ -13,7 +13,6 @@ import wandb
 import torch.multiprocessing as mp
 
 from disfun.utils import code_manipulation, prompt_builder
-from disfun.sandbox import cleanup_orphaned_sandbox_processes
 from disfun.utils.wandb_logging import convert_tuple_keys
 from disfun.utils.resource_manager import ResourceManager
 from disfun import programs_database
@@ -61,7 +60,7 @@ class ThroughputRunner:
         return depths
 
     async def check_queue_state(self):
-        """Check and log state of all queues before starting. Returns True if clean, False if dirty."""
+        """Check and log state of all queues before starting. Returns True if clean, False if left over messages."""
         self.logger.info("Checking queue state before starting...")
         is_clean = True
         try:
@@ -113,7 +112,7 @@ class ThroughputRunner:
             wandb_config = dataclasses.asdict(self.config)
             # Convert tuple keys to strings (JSON doesn't support tuple keys)
             wandb_config = convert_tuple_keys(wandb_config)
-            # Add evaluation script content (helpers available to LLM-generated code)
+            # Add evaluation script content (helpers available to LLM generated code)
             eval_script_path = getattr(self.config.evaluator, 'evaluation_script_path', None)
             if eval_script_path:
                 try:
@@ -150,12 +149,12 @@ class ThroughputRunner:
         # Load prompt specification
         prompt_spec = prompt_builder.load_prompt_spec_from_config(modified_config)
 
-        # Create termination config for throughput mode (time-based, not iteration-based)
+        # Create termination config for throughput mode (time based, not iteration based)
         throughput_termination = dataclasses.replace(
             modified_config.termination,
-            iteration_limit=999_999_999,  # High value to prevent iteration-based termination
+            iteration_limit=999_999_999,  # High value to prevent iteration based termination
             stop_on_optimal=False,  # Disable early stopping on optimal
-            target_solutions=None  # Disable target-based termination
+            target_solutions=None  # Disable target based termination
         )
 
         # Create connection manager for ProgramsDatabase
@@ -209,8 +208,8 @@ class ThroughputRunner:
                 for prog in initial_progs * copies:
                     await ch.default_exchange.publish(aio_pika.Message(body=prog.encode()), routing_key="evaluator_queue")
 
-        # Warm-up
-        self.logger.info(f"Warm-up: {tc.warmup_minutes} min")
+        # Warmup
+        self.logger.info(f"Warmup: {tc.warmup_minutes} min")
         await asyncio.sleep(tc.warmup_minutes * 60)
 
         # Collect window metrics
@@ -269,7 +268,7 @@ class ThroughputRunner:
             window_evaluator_q_depths.append(mean_evaluator_q)
             window_database_q_depths.append(mean_database_q)
 
-            # Calculate per-hour rate for this window
+            # Calculate per hour rate for this window
             factor = 60 / tc.window_duration_minutes
             window_per_hour = window_iters[-1] * factor
 
@@ -300,7 +299,7 @@ class ThroughputRunner:
         except asyncio.CancelledError:
             pass
 
-        # Calculate stats (extrapolate to per-hour)
+        # Calculate stats (extrapolate to per hour)
         factor = 60 / tc.window_duration_minutes
         per_hour = [w * factor for w in window_iters]
 
@@ -465,9 +464,6 @@ class ThroughputRunner:
         except Exception as e:
             self.logger.warning(f"Queue cleanup failed: {e}")
 
-        # Kill orphaned sandbox processes
-        cleanup_orphaned_sandbox_processes(self.logger)
-
         if self.config.wandb.enabled:
             wandb.finish()
 
@@ -630,7 +626,7 @@ async def run_sweep(config, config_path, log_dir, specification, inputs, target_
             print(f"Config {idx + 1} result: {result['iterations_per_hour_mean']:.0f} +/- {result['iterations_per_hour_std']:.0f} iter/hr")
 
         except Exception as e:
-            print(f"ERROR in config {idx + 1}: {e}")
+            print(f"Error in config {idx + 1}: {e}")
             all_results.append({"sweep_params": sweep_params, "config_idx": idx, "error": str(e)})
 
         # Save intermediate results

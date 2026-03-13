@@ -19,33 +19,29 @@
 Flow:
 1. Parse LLM output from XML tags, markdown fences, or raw code
 2. Integrate into evaluation template by replacing priority function body
-3. Compile in worker thread with caching: base is cached, only priority recompiled
-4. Fork child process (inherits parent memory via copy-on-write)
-5. Child sets memory limits, runs evaluation, returns result via pipe
-6. Publish scores to database queue
+3. Fork child process (inherits parent memory via copy-on-write)
+4. Child compiles code with caching (base cached, only priority recompiled),
+   sets memory limits, runs evaluation, returns result via pipe
+5. Publish scores to database queue
 
-Graphs are loaded lazily from LMDB and cached. Forked children inherit the cache
-via copy-on-write, so graphs are never reloaded. See docs/EVALUATOR.md for details.
+Graphs are pre-loaded from LMDB during init and cached. Forked children inherit
+the cache via copy-on-write, so graphs are never reloaded.
 """
 
 
-import ast
-import copy
 import logging
 import os
-from disfun.utils import code_manipulation
+from disfun.utils.code_manipulation import sample_to_program
 from disfun.utils.profiling import async_time_execution
 from disfun import sandbox
 import json
 import aio_pika
-import sys
 import asyncio
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 import gc
 import psutil
-import re
 
 from disfun.utils.fast_graph import load_graph_from_lmdb, load_nx_graph_from_lmdb
 
@@ -60,10 +56,11 @@ _graph_cache_lock = Lock()
 
 
 def _build_graph_path(graph_dir, graph_type, s, n, q):
-    """Build graph path: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb"""
-    subdir = "deletion" if graph_type in ("deletion", "deletions", "d", "graph_d") else "ids"
+    """Build path like: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb"""
+    is_deletion = graph_type in ("deletion", "deletions")
+    subdir = "deletion" if is_deletion else "ids"
     alphabet = "binary" if q == 2 else "quaternary" if q == 4 else f"q{q}"
-    prefix = "graph_d" if subdir == "deletion" else "graph_ids"
+    prefix = "graph_d" if is_deletion else "graph_ids"
     return os.path.join(graph_dir, subdir, alphabet, f"s{s}", f"{prefix}_s{s}_n{n}_q{q}.lmdb")
 
 
@@ -71,7 +68,6 @@ def get_cached_graph(n, s, q, graph_dir, graph_type="deletion", use_nx=False):
     """Get graph from cache or load and cache it.
 
     Thread-safe. Forked children inherit the cached graphs.
-    Path structure: graph_dir/ids/quaternary/s1/graph_ids_s1_n6_q4.lmdb
     Returns None if graph_dir is not configured (no-graph mode).
     If use_nx is True, loads into a real nx.Graph instead of FastGraph.
     """
@@ -98,376 +94,6 @@ def get_cached_graph(n, s, q, graph_dir, graph_type="deletion", use_nx=False):
         logger.info(f"Cached graph n={n}, s={s}, q={q}, nodes={len(G)}")
 
     return G
-
-
-def extract_evaluation_result(test_output, problem_instance):
-    """
-    Extract score and hash from evaluation output for a single problem instance.
-    Customize this function to change what gets extracted from each evaluation.
-
-    Args:
-        test_output: The output from evaluate(problem_instance)
-        problem_instance: The tuple defining the problem instance (e.g., (n, s, q))
-
-    Returns:
-        tuple: (score_key, score_value, hash_value)
-    """
-    # Use (n, s) as score key, stripping q since it's constant per run
-    score_key = (problem_instance[0], problem_instance[1])
-    score_value = test_output[0]
-    hash_value = test_output[1] if test_output[1] is not None else None
-    return score_key, score_value, hash_value
-
-
-def _find_function_lines(tree: ast.Module, function_name: str) -> tuple[int, int]:
-  """Find body start and end line of a function in the AST.
-
-  Returns (body_start, end_line) where body_start is suitable as a 0-based
-  slice index that skips the entire def signature (handles multi-line defs).
-  """
-  for node in ast.walk(tree):
-    if isinstance(node, ast.FunctionDef) and node.name == function_name:
-      body_start = node.body[0].lineno - 1  # skip entire def signature
-      return body_start, node.end_lineno
-  raise ValueError(f"Function '{function_name}' not found in AST")
-
-
-def _parse_code(code: str) -> tuple[ast.Module | None, str]:
-  """Parse Python code, truncating from the first syntax error onward until it compiles.
-
-  This helps when LLMs append trailing junk (bad comments, extra braces, markdown
-  artifacts). Keeps truncating until the code compiles or is empty, so a good
-  priority function body followed by arbitrarily long rambling will still be
-  recovered. Mid function errors will lose the return statement, but that is
-  caught later during evaluation.
-
-  Returns:
-      (parsed_tree, remaining_code) where parsed_tree is None if parsing failed.
-  """
-  tree = None
-  deletion_count = 0
-
-  while tree is None:
-    try:
-      tree = ast.parse(code)
-    except SyntaxError as e:
-      deletion_count += 1
-      lines = code.splitlines()
-      deleted_line = lines[e.lineno - 1] if e.lineno <= len(lines) else "(unknown)"
-      logger.warning(f"AST SyntaxError at line {e.lineno}: {e.msg}. Deleting: {deleted_line[:100]}")
-      code = '\n'.join(lines[:e.lineno - 1])
-      if not code.strip():
-        logger.error("AST parsing consumed all lines, code is entirely invalid.")
-        return None, ''
-
-  if not code:
-    logger.warning("AST parsing resulted in empty code after deletions")
-    return None, ''
-
-  if deletion_count > 0:
-    logger.info(f"AST parsing required {deletion_count} line deletions")
-
-  return tree, code
-
-
-def _normalize_indent(lines, target=4):
-  """Normalize indentation of body lines to target spaces.
-
-  Detects actual indent from first non-empty line and scales proportionally.
-  Fixes LLM output that uses 2/3/5/6-space indent mixing with 4-space helpers.
-  """
-  first = next((l for l in lines if l.strip()), '')
-  if not first:
-    return lines
-  actual = len(first) - len(first.lstrip())
-  if actual == target or actual == 0:
-    return lines
-  result = []
-  for line in lines:
-    if not line.strip():
-      result.append(line)
-    else:
-      stripped = line.lstrip()
-      current = len(line) - len(stripped)
-      new_indent = round(current * target / actual)
-      result.append(' ' * new_indent + stripped)
-  return result
-
-
-def parse_llm_output(raw_output: str) -> tuple[str, str | None, str | None, str | None]:
-  """
-  Parse raw LLM output and extract a valid Python function body.
-
-  Pipeline:
-  0. Extract <think> reasoning traces (Qwen3 thinking mode)
-  1. Extract and strip <description> tags
-  2. Extract code: <code> tags > last markdown fence > raw text
-  3. Strip any nested markdown fences
-  4. Detect structure: has def priority() -> extract body, else treat all as body
-  5. Parse with AST (delete invalid lines until it compiles)
-
-  Returns:
-      (function_body, description, thinking_trace, failure_reason)
-      failure_reason is None on success, or a string describing why parsing failed.
-  """
-  if not raw_output:
-    return '', None, None, 'LLM returned empty output'
-
-  # Extract thinking trace from Qwen3 <think> blocks
-  think_match = re.search(r'<think>(.*?)</think>', raw_output, re.DOTALL)
-  thinking_trace = think_match.group(1).strip() if think_match else None
-
-  # Extract description and clean input
-  description_match = re.search(r'<description>(.*?)</description>', raw_output, re.DOTALL)
-  description = description_match.group(1).strip() if description_match else None
-
-  # Remove thinking and description tags from text we'll search for code
-  text = re.sub(r'<think>.*?</think>\s*', '', raw_output, flags=re.DOTALL)
-  text = re.sub(r'<description>.*?</description>\s*', '', text, flags=re.DOTALL)
-
-  # Extract code (3 tier priority)
-
-  # Tier 1: <code> tags (highest priority, take LAST match like markdown fences)
-  code_matches = list(re.finditer(r'<code>(.*?)</code>', text, re.DOTALL))
-  if not code_matches:
-    # Fallback: unclosed <code> tag (output truncated before </code>)
-    unclosed = re.search(r'<code>(.*)', text, re.DOTALL)
-    if unclosed:
-      code_matches = [unclosed]
-      logger.debug(f"Extracted code from unclosed <code> tag (truncated output)")
-  if code_matches:
-    code = code_matches[-1].group(1)  # Take LAST match
-    logger.debug(f"Extracted code from <code> tags ({len(code)} chars, match {len(code_matches)} of {len(code_matches)})")
-  else:
-    # Tier 2: Last markdown fence (most likely final answer)
-    # Handles: ```python, ```py, ```Python, ```python3, or plain ```
-    fence_matches = list(re.finditer(r'```(?:python|py|python3)?\s*\n(.*?)```', text, re.DOTALL | re.IGNORECASE))
-    if fence_matches:
-      code = fence_matches[-1].group(1)  # Take LAST match
-      logger.debug(f"Extracted code from markdown fence {len(fence_matches)} of {len(fence_matches)} ({len(code)} chars)")
-    else:
-      # Tier 3: No code tags or fences found — check if text has any code
-      if not re.search(r'\b(def |return |import |from \w+ import )\b', text):
-        return '', description, thinking_trace, 'LLM returned no code (no code tags and no code found in output)'
-      code = text
-      logger.debug(f"Using raw text as code ({len(code)} chars)")
-
-  # Cleanup: strip any fences that might be nested inside (e.g., inside <code> tags)
-  fence_in_code = re.search(r'```(?:python|py|python3)?\s*\n(.*?)```', code, re.DOTALL | re.IGNORECASE)
-  if fence_in_code:
-    code = fence_in_code.group(1)
-
-  # Strip trailing whitespace and leading newlines, but PRESERVE leading indentation
-  # (strip() would break indented body code by removing indent from first line only)
-  code = code.lstrip('\n').rstrip()
-  if not code:
-    return '', description, thinking_trace, 'LLM returned no code (only markdown/description tags)'
-
-  # Determine if this is body only or full function
-
-  # 3 tier function detection:
-  # Tier 1: Any function starting with "priority" (e.g. priority_improved, priority_v2_degree_based)
-  priority_match = re.search(r'^\s*def\s+(priority\w*)\s*\(', code, re.MULTILINE)
-
-  # Tier 2/3: No priority-prefixed function — find all defs, filter skip names
-  # But only when code starts at column 0 (full function output).
-  # If first non-empty line is indented, this is completion-mode output and
-  # any def appearing later is a helper or trailing junk, not the priority function.
-  if not priority_match:
-    first_non_empty = next((l for l in code.splitlines() if l.strip()), '')
-    is_completion = first_non_empty and first_non_empty[0].isspace()
-
-    if not is_completion:
-      skip_names = {'main', 'evaluate', 'test', 'unused', 'helper', '__init__'}
-      all_funcs = list(re.finditer(r'^\s*def\s+(\w+)\s*\(', code, re.MULTILINE))
-      candidates = [m for m in all_funcs if m.group(1) not in skip_names]
-      if len(candidates) >= 1:
-        priority_match = candidates[0]
-        logger.info(f"No priority-prefixed function, using '{candidates[0].group(1)}' as priority function")
-
-  if priority_match:
-    # Full function output, extract priority body
-    function_name = priority_match.group(1)
-    logger.debug(f"Found {function_name} definition, extracting body")
-
-    tree, parsed_code = _parse_code(code)
-    if tree is None:
-      return '', description, thinking_trace, 'code too broken to compile (no valid lines survived AST truncation)'
-
-    parsed_lines = parsed_code.splitlines()
-
-    # Collect module level imports to move inside function body
-    imports = []
-    for node in tree.body:
-      if isinstance(node, (ast.Import, ast.ImportFrom)):
-        imports.append(parsed_lines[node.lineno - 1])
-      elif isinstance(node, ast.FunctionDef):
-        break
-
-    # Collect helper functions (any function that is not priority)
-    # Skip common test/utility function names
-    skip_functions = {function_name, 'main', 'evaluate', 'test', 'unused'}
-    helper_lines = []
-    for node in tree.body:
-      if isinstance(node, ast.FunctionDef) and node.name not in skip_functions:
-        # Extract the full function source and add 4 spaces to each line
-        func_start = node.lineno - 1
-        func_end = node.end_lineno
-        func_lines = parsed_lines[func_start:func_end]
-        # Add 4 spaces to each line to make it a nested function
-        indented_func = ['    ' + line for line in func_lines]
-        helper_lines.extend(indented_func)
-        helper_lines.append('')  # blank line after helper
-        logger.debug(f"Including helper function '{node.name}' as nested function")
-
-    # Extract priority body lines (skips entire def signature, including multi-line)
-    try:
-      start_line, end_line = _find_function_lines(tree, function_name)
-    except ValueError:
-      # Function was found by regex but removed by _parse_code line deletions
-      logger.warning(f"Function '{function_name}' found by regex but lost during AST repair")
-      return '', description, thinking_trace, f"AST repair truncated '{function_name}' to no body (whole body had syntax errors)"
-    body_lines = parsed_lines[start_line:end_line]
-
-    # Normalize indentation to 4 spaces (LLMs sometimes use 2/3/5/6-space indent)
-    body_lines = _normalize_indent(body_lines)
-
-    # Prepend imports and helpers inside function body
-    prefix_lines = []
-    if imports:
-      logger.debug(f"Moving {len(imports)} import(s) inside function body")
-      prefix_lines.extend(['    ' + imp for imp in imports])
-    if helper_lines:
-      prefix_lines.extend(helper_lines)
-
-    if prefix_lines:
-      body_lines = prefix_lines + body_lines
-
-    body = '\n'.join(body_lines) + '\n\n'
-
-    # Rename any non-standard function name to 'priority' so the template works
-    if function_name != 'priority':
-      body = code_manipulation.rename_function_calls(body, function_name, 'priority')
-      logger.info(f"Renamed recursive calls '{function_name}' -> 'priority' in body")
-
-  else:
-    # Completion output, entire code is the body
-    logger.debug("No priority function found, treating as body code")
-
-    code_lines = code.splitlines()
-    skip_functions = {'main', 'evaluate', 'test', 'unused', '_fake_', 'priority'}
-
-    # Separate module level items (imports, functions at column 0) from body code (indented)
-    import_lines = []
-    helper_lines = []
-    body_code_lines = []
-
-    i = 0
-    while i < len(code_lines):
-      line = code_lines[i]
-
-      # Skip empty lines at module level
-      if not line.strip():
-        i += 1
-        continue
-
-      # Import at column 0
-      if re.match(r'^(import |from \w+ import )', line):
-        import_lines.append('    ' + line)
-        i += 1
-        continue
-
-      # Function at column 0
-      func_match = re.match(r'^def\s+(\w+)\s*\(', line)
-      if func_match:
-        func_name = func_match.group(1)
-        # Find end of function (next line at column 0 or end of code)
-        func_start = i
-        i += 1
-        while i < len(code_lines) and (not code_lines[i].strip() or code_lines[i][0].isspace()):
-          i += 1
-        func_end = i
-
-        if func_name not in skip_functions:
-          func_lines = code_lines[func_start:func_end]
-          indented_func = ['    ' + fl for fl in func_lines]
-          helper_lines.extend(indented_func)
-          helper_lines.append('')
-          logger.debug(f"Including helper function '{func_name}' as nested function")
-        continue
-
-      # Indented code (body) or non indented body
-      # Collect all remaining lines until we hit a module level item
-      while i < len(code_lines):
-        line = code_lines[i]
-        if line.strip() and not line[0].isspace():
-          # Check if it's a module level item
-          if re.match(r'^(import |from \w+ import |def\s+\w+\s*\()', line):
-            break
-        body_code_lines.append(line)
-        i += 1
-
-    body_code = '\n'.join(body_code_lines)
-
-    # Add indentation if code has none
-    if body_code and body_code.strip() and not body_code.lstrip('\n')[0].isspace():
-      body_code = '    ' + body_code.replace('\n', '\n    ')
-
-    # Validate by wrapping in fake function and parsing
-    wrapped = 'def _fake_():\n' + body_code
-    tree, parsed_code = _parse_code(wrapped)
-    if tree is None:
-      return '', description, thinking_trace, 'code too broken to compile (no valid lines survived AST truncation)'
-
-    # Extract validated body
-    _, end_line = _find_function_lines(tree, '_fake_')
-    body_lines = parsed_code.splitlines()[1:end_line]
-
-    # Normalize indentation to 4 spaces
-    body_lines = _normalize_indent(body_lines)
-
-    # Prepend imports and helpers to body
-    prefix_lines = import_lines + helper_lines
-    if prefix_lines:
-      body_lines = prefix_lines + body_lines
-
-    body = '\n'.join(body_lines) + '\n\n'
-
-  logger.debug(f"Parsed LLM output: {len(body)} chars, description={'yes' if description else 'no'}, thinking={'yes' if thinking_trace else 'no'}")
-  return body, description, thinking_trace, None
-
-
-def _sample_to_program(
-    generated_code: str,
-    version_generated: int | None,
-    template: code_manipulation.Program,
-    # function_to_evolve is set to priority
-    function_to_evolve: str,
-) -> tuple[code_manipulation.Function, str, str | None, str | None, str | None]:
-  """Integrates a generated code as string into a larger program template.
-
-  Returns:
-      tuple: (evolved_function, program_str, description, thinking_trace, failure_reason)
-  """
-  # Parse LLM output: extract from XML tags, strip markdown, validate with AST
-  body, description, thinking_trace, failure_reason = parse_llm_output(generated_code)
-  if version_generated is not None:
-
-    body = code_manipulation.rename_function_calls(
-        body,
-        f'{function_to_evolve}_v{version_generated}',
-        function_to_evolve)
-  program = copy.deepcopy(template)
-  evolved_function = program.get_function(function_to_evolve)
-
-  evolved_function.body = body
-  evolved_function.description = description
-  evolved_function.thinking_trace = thinking_trace
-  return evolved_function, str(program), description, thinking_trace, failure_reason
-
-
-def run_evaluation(sandbox, program, function_to_run, input):
-    return sandbox.run(program, function_to_run, input)
 
 
 class Evaluator:
@@ -574,7 +200,7 @@ class Evaluator:
                 with open(os.path.join(folder, "1b_thinking_trace.txt"), "w") as f:
                     f.write(thinking_trace)
             with open(os.path.join(folder, "2_parsed_body.py"), "w") as f:
-                f.write(debug_data.get("parsed_body", "PARSE_FAILED"))
+                f.write(debug_data.get("parsed_body", "Parse failed"))
             if debug_lines:
                 with open(os.path.join(folder, "3_eval_results.txt"), "w") as f:
                     f.write("\n".join(debug_lines) + "\n")
@@ -595,7 +221,7 @@ class Evaluator:
         while reconnect_count < max_reconnects:
             try:
                 if not await self._conn.connect_with_retry():
-                    logger.warning(f"Evaluator {self.local_id} (PID {pid}): EXIT REASON: shutdown requested during connect")
+                    logger.warning(f"Evaluator {self.local_id} (PID {pid}): Exit reason: shutdown requested during connect")
                     break  # Shutdown requested
 
                 loop_start = asyncio.get_event_loop().time()
@@ -607,7 +233,7 @@ class Evaluator:
                     reconnect_count = 0
 
             except asyncio.CancelledError:
-                logger.warning(f"Evaluator {self.local_id} (PID {pid}): EXIT REASON: CancelledError (signal or shutdown)")
+                logger.warning(f"Evaluator {self.local_id} (PID {pid}): Exit reason: CancelledError (signal or shutdown)")
                 break
 
             except Exception as e:
@@ -617,7 +243,7 @@ class Evaluator:
             reconnect_count += 1
             logger.info(f"Evaluator {self.local_id} (PID {pid}): Reconnecting ({reconnect_count}/{max_reconnects})...")
         else:
-            logger.error(f"Evaluator {self.local_id} (PID {pid}): EXIT REASON: {max_reconnects} consecutive reconnect failures")
+            logger.error(f"Evaluator {self.local_id} (PID {pid}): Exit reason: {max_reconnects} consecutive reconnect failures")
 
     async def _consume_loop(self):
         """Inner consume loop that processes messages from queue."""
@@ -649,7 +275,7 @@ class Evaluator:
             reflection_output = data.get("reflection_output")  # ReEvo reflection
 
             # Parse LLM output and integrate into evaluation template
-            new_function, program, description, thinking_trace, failure_reason = _sample_to_program(
+            new_function, program, description, thinking_trace, failure_reason = sample_to_program(
                 data["sample"], data.get("version_generated"), self.template, self.function_to_evolve
             )
 
@@ -659,7 +285,7 @@ class Evaluator:
                 "prompt": data.get("prompt", ""),
                 "raw_output": data.get("sample", ""),
                 "thinking_trace": thinking_trace,
-                "parsed_body": new_function.body if new_function.body else f"PARSE_FAILED: {failure_reason or 'unknown'}",
+                "parsed_body": new_function.body if new_function.body else f"Parse failed: {failure_reason or 'unknown'}",
                 "island_id": data.get("island_id", "x"),
             }
 
@@ -672,7 +298,7 @@ class Evaluator:
             # Early exit if parsing failed
             if not new_function.body:
                 logger.warning(f"Evaluator: Parsing failed ({failure_reason}), empty body. Island {data['island_id']}")
-                self._write_debug_sample("parse_failure", debug_data, [f"PARSE_FAILED ({failure_reason or 'unknown'}) - never reached evaluation"])
+                self._write_debug_sample("parse_failure", debug_data, [f"Parse failed ({failure_reason or 'unknown'}) - never reached evaluation"])
                 await self.publish_to_database(make_result("return", {}), None)
                 return
 
@@ -681,7 +307,7 @@ class Evaluator:
 
             # Submit evaluation tasks with cached graphs (forked children inherit cache)
             tasks = {
-                self.executor.submit(run_evaluation, self.sandbox, program, self.function_to_run,
+                self.executor.submit(self.sandbox.run, program, self.function_to_run,
                                      self._get_input_with_graph(input)): input
                 for input in self.inputs
             }
@@ -698,7 +324,9 @@ class Evaluator:
                     self.cumulative_cpu_time += cpu_time
 
                     if runs_ok and test_output[0] is not None:
-                        score_key, score_value, extracted_hash = extract_evaluation_result(test_output, input)
+                        score_key = (input[0], input[1])
+                        score_value = test_output[0]
+                        extracted_hash = test_output[1] if test_output[1] is not None else None
                         scores_per_test[score_key] = score_value
                         if extracted_hash is not None:
                             hash_value = extracted_hash
@@ -712,12 +340,12 @@ class Evaluator:
                             reason = "sandbox returned None"
                         else:
                             reason = f"test_output={test_output}"
-                        debug_lines.append(f"{input}: FAILED — {reason}")
+                        debug_lines.append(f"{input}: Failed — {reason}")
                         break
 
                 except (concurrent.futures.TimeoutError, concurrent.futures.CancelledError, Exception) as e:
                     logger.warning(f"Evaluator: input {input} error: {type(e).__name__}")
-                    debug_lines.append(f"{input}: ERROR {type(e).__name__}: {e}")
+                    debug_lines.append(f"{input}: Error {type(e).__name__}: {e}")
                     break
 
             else:
@@ -779,7 +407,7 @@ class Evaluator:
         await self.shutdown_subprocesses()
 
     async def shutdown_subprocesses(self):
-        """Cleanup ProcessPoolExecutor workers and sandbox subprocesses."""
+        """Cleanup ThreadPoolExecutor workers and sandbox subprocesses."""
         try:
             # Shutdown executor
             if self.executor:
@@ -799,11 +427,6 @@ class Evaluator:
             _, still_alive = psutil.wait_procs(children, timeout=5)
             for p in still_alive:
                 p.kill()
-
-            # Cleanup orphaned sandbox processes and directories
-            sandbox.cleanup_orphaned_sandbox_processes(logger)
-            if self.sandbox:
-                self.sandbox.cleanup_all()
 
             gc.collect()
             logger.info(f"Evaluator {self.local_id}: Subprocesses shutdown complete.")

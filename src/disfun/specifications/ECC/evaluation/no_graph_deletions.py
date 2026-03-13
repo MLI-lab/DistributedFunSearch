@@ -1,7 +1,7 @@
-"""Evaluation script for DELETIONS problem (no_graph variant).
+"""Evaluation script for deletions problem (no_graph variant).
 
-PROBLEM TYPE: Deletions only (binary strings, LCS-based neighbor check)
-DO NOT use this for IDS - use no_graph_ids.py instead.
+Problem type: Deletions only (binary strings, LCS-based neighbor check)
+Do not use this for IDS, use no_graph_ids.py instead.
 
 Neighbors are defined by: lcs_length(node1, node2) >= n - s
 This variant computes neighbors on the fly without loading precomputed graphs.

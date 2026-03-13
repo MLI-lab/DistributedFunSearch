@@ -1,6 +1,5 @@
 """
 Exact LP Upper Bounds for Deletion/Edit Correcting Codes
-=========================================================
 
 Computes the optimal fractional transversal bound by solving the LP relaxation.
 
@@ -86,7 +85,10 @@ def deletion_set(x: Tuple[int, ...], s: int) -> Set[Tuple[int, ...]]:
     return result
 
 
-def build_hypergraph(n: int, s: int, q: int = 2) -> Tuple[np.ndarray, List, List]:
+def build_hypergraph(n: int, s: int, q: int = 2,
+                     cache_dir: Optional[str] = None,
+                     checkpoint_interval: int = 100_000,
+                     verbose: bool = False) -> Tuple[np.ndarray, List, List]:
     """
     Build the incidence matrix for the hypergraph H^D_{q,s,n}.
 
@@ -94,15 +96,39 @@ def build_hypergraph(n: int, s: int, q: int = 2) -> Tuple[np.ndarray, List, List
     - Hyperedges: strings in F_q^n (potential codewords)
     - Vertices: strings in F_q^{n-s} (possible outputs after s deletions)
     - Incidence: vertex y is in hyperedge x iff y in D_s(x)
+
+    Supports checkpointing: saves partial rows/cols to disk every
+    checkpoint_interval hyperedges so the build can resume after interruption.
     """
     hyperedges = list(product(range(q), repeat=n))
     vertices = list(product(range(q), repeat=n-s))
 
     vertex_to_idx = {v: i for i, v in enumerate(vertices)}
 
-    rows, cols = [], []
+    num_vertices = len(vertices)
+    num_hyperedges = len(hyperedges)
 
-    for j, x in enumerate(hyperedges):
+    # Checkpoint paths
+    ckpt_path = None
+    if cache_dir:
+        ckpt_dir = Path(cache_dir)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_path = ckpt_dir / f"build_ckpt_deletion_n{n}_s{s}_q{q}.npz"
+
+    # Resume from checkpoint if available
+    start_j = 0
+    rows, cols = [], []
+    if ckpt_path and ckpt_path.exists():
+        ckpt = np.load(ckpt_path)
+        start_j = int(ckpt['next_j'])
+        rows = ckpt['rows'].tolist()
+        cols = ckpt['cols'].tolist()
+        if verbose:
+            print(f"  Resuming from checkpoint: {start_j}/{num_hyperedges} "
+                  f"({start_j/num_hyperedges*100:.1f}%), {len(rows)} non-zeros so far")
+
+    for j in range(start_j, num_hyperedges):
+        x = hyperedges[j]
         D_s_x = deletion_set(x, s)
         for y in D_s_x:
             if y in vertex_to_idx:
@@ -110,8 +136,23 @@ def build_hypergraph(n: int, s: int, q: int = 2) -> Tuple[np.ndarray, List, List
                 rows.append(i)
                 cols.append(j)
 
-    num_vertices = len(vertices)
-    num_hyperedges = len(hyperedges)
+        if verbose and (j + 1) % 1000 == 0:
+            print(f"    Processed {j + 1}/{num_hyperedges} hyperedges...")
+
+        if ckpt_path and (j + 1) % checkpoint_interval == 0:
+            np.savez(ckpt_path,
+                     rows=np.array(rows, dtype=np.int32),
+                     cols=np.array(cols, dtype=np.int32),
+                     next_j=j + 1)
+            if verbose:
+                print(f"    Checkpoint saved at {j + 1}/{num_hyperedges}")
+
+    # Clean up checkpoint after successful completion
+    if ckpt_path and ckpt_path.exists():
+        ckpt_path.unlink()
+        if verbose:
+            print(f"  Build complete, checkpoint removed")
+
     data = np.ones(len(rows))
     A = csr_matrix((data, (rows, cols)), shape=(num_vertices, num_hyperedges))
 
@@ -166,7 +207,9 @@ def edit_ball_1(x: Tuple[int, ...], q: int) -> Set[Tuple[int, ...]]:
     return result
 
 
-def build_edit_hypergraph(n: int, q: int, verbose: bool = False) -> Tuple[np.ndarray, List, List]:
+def build_edit_hypergraph(n: int, q: int, verbose: bool = False,
+                          cache_dir: Optional[str] = None,
+                          checkpoint_interval: int = 100_000) -> Tuple[np.ndarray, List, List]:
     """
     Build the incidence matrix for 1-edit error correcting codes.
 
@@ -175,10 +218,15 @@ def build_edit_hypergraph(n: int, q: int, verbose: bool = False) -> Tuple[np.nda
     - Vertices: F_q^{n-1} ∪ F_q^n ∪ F_q^{n+1} (all strings in edit balls)
     - Incidence: vertex y is in hyperedge x iff y ∈ B_1(x)
 
+    Supports checkpointing: saves partial rows/cols to disk every
+    checkpoint_interval hyperedges so the build can resume after interruption.
+
     Args:
         n: Codeword length
         q: Alphabet size
         verbose: Print progress
+        cache_dir: Directory for checkpoint files (required for resume)
+        checkpoint_interval: Save checkpoint every N hyperedges (default: 100k)
 
     Returns:
         A: Incidence matrix (num_vertices × num_hyperedges)
@@ -205,10 +253,28 @@ def build_edit_hypergraph(n: int, q: int, verbose: bool = False) -> Tuple[np.nda
               f"= {num_vertices}")
         print(f"  Hyperedges: {num_hyperedges}")
 
-    # Build sparse incidence matrix
-    rows, cols = [], []
+    # Checkpoint paths
+    ckpt_path = None
+    if cache_dir:
+        ckpt_dir = Path(cache_dir)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_path = ckpt_dir / f"build_ckpt_edit_n{n}_q{q}.npz"
 
-    for j, x in enumerate(hyperedges):
+    # Resume from checkpoint if available
+    start_j = 0
+    rows, cols = [], []
+    if ckpt_path and ckpt_path.exists():
+        ckpt = np.load(ckpt_path)
+        start_j = int(ckpt['next_j'])
+        rows = ckpt['rows'].tolist()
+        cols = ckpt['cols'].tolist()
+        if verbose:
+            print(f"  Resuming from checkpoint: {start_j}/{num_hyperedges} "
+                  f"({start_j/num_hyperedges*100:.1f}%), {len(rows)} non-zeros so far")
+
+    # Build sparse incidence matrix
+    for j in range(start_j, num_hyperedges):
+        x = hyperedges[j]
         ball = edit_ball_1(x, q)
         for y in ball:
             if y in vertex_to_idx:
@@ -218,6 +284,21 @@ def build_edit_hypergraph(n: int, q: int, verbose: bool = False) -> Tuple[np.nda
 
         if verbose and (j + 1) % 1000 == 0:
             print(f"    Processed {j + 1}/{num_hyperedges} hyperedges...")
+
+        if ckpt_path and (j + 1) % checkpoint_interval == 0:
+            np.savez(ckpt_path,
+                     rows=np.array(rows, dtype=np.int32),
+                     cols=np.array(cols, dtype=np.int32),
+                     next_j=j + 1)
+            if verbose:
+                print(f"    Checkpoint saved at {j + 1}/{num_hyperedges} "
+                      f"({len(rows)} non-zeros)")
+
+    # Clean up checkpoint after successful completion
+    if ckpt_path and ckpt_path.exists():
+        ckpt_path.unlink()
+        if verbose:
+            print(f"  Build complete, checkpoint removed")
 
     data = np.ones(len(rows))
     A = csr_matrix((data, (rows, cols)), shape=(num_vertices, num_hyperedges))
@@ -257,6 +338,7 @@ def solve_lp_gurobi(A, use_primal: bool, verbose: bool = False,
 
     model = gp.Model(env=env)
     model.Params.Threads = threads
+    model.Params.Crossover = 0  # Skip crossover - barrier solution suffices for LP bound
 
     # Convert sparse matrix to CSC format for efficient column access
     A_csc = A.tocsc()
@@ -537,7 +619,8 @@ def compute_lp_bound(n: int, s: int, q: int = 2, verbose: bool = False,
             print(f"  Vertices: {num_vertices}, Hyperedges: {num_hyperedges}")
 
         start = time.time()
-        A, vertices, hyperedges = build_hypergraph(n, s, q)
+        A, vertices, hyperedges = build_hypergraph(n, s, q, cache_dir=cache_dir,
+                                                    verbose=verbose)
         build_time = time.time() - start
 
         if cache_path:
@@ -604,7 +687,8 @@ def compute_edit_lp_bound(n: int, q: int = 2, verbose: bool = False,
             print(f"Building edit hypergraph: n={n}, q={q}")
 
         start = time.time()
-        A, vertices, hyperedges = build_edit_hypergraph(n, q, verbose)
+        A, vertices, hyperedges = build_edit_hypergraph(n, q, verbose,
+                                                         cache_dir=cache_dir)
         build_time = time.time() - start
 
         if cache_path:
@@ -647,9 +731,7 @@ def print_lp_table(max_n: int = 12, s: int = 1, q: int = 2, solver: str = 'auto'
     print("-" * 50)
 
     for n in range(s + 2, max_n + 1):
-        if q ** (n - s) > 50000:
-            print(f"{n:>4} | {'(too large)':>15} | {'-':>10}")
-            continue
+        # No size limit - let the solver try (use --cache-dir for large instances)
 
         try:
             result = compute_lp_bound(n, s, q, verbose=False, solver=solver,

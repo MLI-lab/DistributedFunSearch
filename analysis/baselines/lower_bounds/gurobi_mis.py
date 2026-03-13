@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Gurobi-based Maximum Independent Set solver.
+Gurobi based Maximum Independent Set solver.
 
 Solves MIS exactly via integer linear programming. Works well on dense graphs
 where kernelization based methods (KaMIS) fail. Even when it times out, provides
 both a feasible solution (lower bound on MIS size) and the dual bound (upper
 bound on MIS size).
 
-MIS-ILP formulation:
+MIS ILP formulation:
     maximize    Σ x_i              (maximize # nodes in IS)
     subject to  x_u + x_v ≤ 1      for each edge (u,v)
                 x_i ∈ {0, 1}       for each node i
@@ -16,8 +16,8 @@ For very large graphs (n>=17), the model may be too large to build.
 Use random_greedy.py with local search for those cases.
 
 Input formats:
-    --n/--s/--q:    Auto-constructs path: {graph-dir}/deletion/binary/s{s}/graph_d_s{s}_n{n}_q{q}.metis
-    --metis-file:   Use any METIS file directly (bypasses auto-path construction)
+    --n/--s/--q:    Constructs path: {graph_dir}/deletion/binary/s{s}/graph_d_s{s}_n{n}_q{q}.metis
+    --metis-file:   Use any METIS file directly (bypasses autopath construction)
 
 METIS format requirements:
     Header: num_nodes num_edges [format]  (format indicator ignored)
@@ -198,8 +198,8 @@ def solve_mis_gurobi(
     model.Params.TimeLimit = timeout
     model.Params.Threads = threads
     model.Params.MIPGap = mip_gap
-    model.Params.Method = 1  # dual simplex (avoids OOM from barrier factorization)
-    model.Params.Presolve = 0  # skip presolve (too slow on billion-edge graphs, MIS constraints too uniform to benefit)
+    model.Params.Method = 1  # dual simplex (avoids out of memory from barrier factorization)
+    model.Params.Presolve = 0  # skip presolve (too slow on billion edge graphs, MIS constraints too uniform to benefit)
 
     # Binary variable for each node: 1 if in independent set
     x = model.addVars(num_nodes, vtype=GRB.BINARY, name="x")

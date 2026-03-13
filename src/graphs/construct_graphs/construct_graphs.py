@@ -1,23 +1,30 @@
 """
-Construct graphs for IDS (Insertion/Deletion/Substitution) codes.
+Construct graphs for deletion-correcting codes or IDS (Insertion/Deletion/Substitution) codes.
 
-Nodes are q-ary strings of length n. Two nodes are connected if their edit
-distance < 2s+1. An independent set is an s-error-correcting code.
+Deletion graphs:
+    Nodes are q-ary strings of length n. Two nodes are connected if they share a
+    common subsequence of length >= n-s. An independent set is a deletion-correcting code.
+
+IDS graphs:
+    Nodes are q-ary strings of length n. Two nodes are connected if their edit
+    distance < 2s+1. An independent set is an s-error-correcting code.
 
 Usage:
-    python construct_ids_graphs.py --n 8,9,10 --s 1 --q 4 --workers 50
-    python construct_ids_graphs.py --n 12 --s 2 --q 2 --workers 100 --output /mnt/Graphs
+    python construct_graphs.py --type deletion --n 10,11,12 --s 1 --q 2 --workers 50
+    python construct_graphs.py --type ids --n 8,9,10 --s 1 --q 4 --workers 50
+    python construct_graphs.py --type deletion --n 15,16 --s 2 --workers 100 --output /mnt/Graphs
 
 Arguments:
+    --type      Graph type: "deletion" or "ids" (required)
     --n         Comma-separated string lengths (required)
-    --s         Number of errors to correct, requires distance >= 2s+1 (required)
-    --q         Alphabet size: 2=binary, 4=DNA (default: 4)
+    --s         Number of deletions/errors to correct (required)
+    --q         Alphabet size: 2=binary, 4=DNA (default: 2 for deletion, 4 for ids)
     --workers   Parallel workers (default: all CPUs)
-    --output    Base output directory (default: /mnt/Graphs). Structure: {base}/ids/{alphabet}/s{s}/
+    --output    Output directory (default: /mnt/Graphs/{type}/{alphabet}/s{s})
     --stream    Force streaming mode (writes edges to disk instead of memory)
     --no-stream Force in-memory mode even for large n
 
-Output: graph_ids_s{s}_n{n}_q{q}.lmdb
+Output: graph_d_s{s}_n{n}_q{q}.lmdb (deletion) or graph_ids_s{s}_n{n}_q{q}.lmdb (ids)
 
 Parallelization: Workers process index ranges [start_i, end_i) with load balancing
 (early indices have more pairs, so get fewer indices). Checkpoints after each worker.
@@ -32,16 +39,93 @@ import json
 import os
 import math
 import lmdb
-import Levenshtein
 import pickle
-import psutil
-import shutil
-import tempfile
 import threading
 import time
+import tempfile
+import shutil
+import psutil
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 
+
+# --- Thread-local DP arrays for deletion LCS ---
+
+_thread_local = threading.local()
+
+
+def _get_dp_arrays(n):
+    """Get thread-local pre-allocated DP arrays to avoid repeated allocation."""
+    if not hasattr(_thread_local, 'prev') or len(_thread_local.prev) < n + 1:
+        _thread_local.prev = [0] * (n + 1)
+        _thread_local.current = [0] * (n + 1)
+    return _thread_local.prev, _thread_local.current
+
+
+# --- Edge check functions ---
+
+def _has_common_subsequence_fast(seq1, seq2, n, threshold, prev, current):
+    """
+    Check if two sequences share a common subsequence of length >= threshold.
+    Uses pre-allocated DP arrays to avoid repeated memory allocation.
+
+    Args:
+        seq1: First sequence
+        seq2: Second sequence
+        n: Length of sequences
+        threshold: Minimum LCS length required (n - s)
+        prev: Pre-allocated array for previous DP row
+        current: Pre-allocated array for current DP row
+
+    Returns:
+        bool: True if LCS length >= threshold
+    """
+    if threshold <= 0:
+        return True  # Trivial case
+
+    # Reset arrays (faster than reallocating)
+    for i in range(n + 1):
+        prev[i] = 0
+        current[i] = 0
+
+    # Fill the DP table row by row
+    for i in range(1, n + 1):
+        for j in range(1, n + 1):
+            if seq1[i - 1] == seq2[j - 1]:
+                current[j] = prev[j - 1] + 1
+            else:
+                current[j] = max(prev[j], current[j - 1])
+            if current[j] >= threshold:
+                return True  # Early termination
+        # Swap rows
+        prev, current = current, prev
+
+    return False
+
+
+def has_common_subsequence(seq1, seq2, n, s):
+    """
+    Check if two sequences share a common subsequence of length >= n-s.
+    Public API that allocates its own arrays (for single-threaded use).
+    """
+    threshold = n - s
+    prev = [0] * (n + 1)
+    current = [0] * (n + 1)
+    return _has_common_subsequence_fast(seq1, seq2, n, threshold, prev, current)
+
+
+def _check_edge_deletion(seq1, seq2, n, threshold, prev, current):
+    """Check edge for deletion graphs: LCS-based."""
+    return _has_common_subsequence_fast(seq1, seq2, n, threshold, prev, current)
+
+
+def _check_edge_ids(seq1, seq2, threshold):
+    """Check edge for IDS graphs: Levenshtein-based."""
+    import Levenshtein
+    return Levenshtein.distance(seq1, seq2) < threshold
+
+
+# --- Memory monitoring ---
 
 class MemoryMonitor:
     """Monitor memory usage of process and all children."""
@@ -104,11 +188,14 @@ class MemoryMonitor:
         return self.peak_memory_gb
 
 
+# --- Memory estimation (IDS only) ---
+
 def estimate_memory_usage(n, s, q, max_workers):
     """
-    Estimate peak memory usage for graph construction (Upper bound).
+    Estimate peak memory usage for IDS graph construction (upper bound).
 
-    Uses Hamming ball formula to compute estimate of degree and edge distribution (Levenshtein distance <= Hamming distance)
+    Uses Hamming ball formula to compute estimate of degree and edge distribution
+    (Levenshtein distance <= Hamming distance).
 
     Args:
         n: Length of strings
@@ -124,26 +211,26 @@ def estimate_memory_usage(n, s, q, max_workers):
     total_sequences = q ** n
     r = 2 * s  # Hamming distance threshold
 
-    # Compute Hamming ball volume: V_q(n,r) = sum_{t=0}^{r} C(n,t) * (q-1)^t
+    # Compute Hamming ball volume, V_q(n,r) = sum_{t=0}^{r} C(n,t) * (q-1)^t
     hamming_ball_volume = sum(comb(n, t) * ((q - 1) ** t) for t in range(r + 1))
     avg_degree = hamming_ball_volume
 
-    # Edge probability: p_edge ~ V_q(n,r) / (N-1)
+    # Edge probability, p_edge ~ V_q(n,r) / (N-1)
     p_edge = hamming_ball_volume / (total_sequences - 1) if total_sequences > 1 else 0
 
     # Total pairs and pairs per worker
     total_pairs = total_sequences * (total_sequences - 1) // 2
     pairs_per_worker = total_pairs / max_workers if max_workers > 0 else 0
 
-    # Expected edges per worker: E_w ~ P_w * p_edge
+    # Expected edges per worker, E_w ~ P_w * p_edge
     expected_edges_per_worker = pairs_per_worker * p_edge
 
-    # Memory per edge: Python tuple of two strings (~120-200 bytes)
+    # Memory per edge, Python tuple of two strings (~120-200 bytes).
     # Using conservative 150 bytes per edge
     bytes_per_edge = 150
     edge_buffer_gb_per_worker = expected_edges_per_worker * bytes_per_edge / (1024**3)
 
-    # Per-worker memory: edge buffer + process overhead (~50-150 MB)
+    # Per-worker memory, edge buffer + process overhead (~50-150 MB).
     worker_memory_gb = max_workers * (edge_buffer_gb_per_worker + 0.1)
 
     # Main process memory components
@@ -168,18 +255,22 @@ def estimate_memory_usage(n, s, q, max_workers):
     }
 
 
+# --- Worker functions ---
+
 def _compute_edges_chunk(args):
     """
     Worker function to compute edges for a chunk of sequence pairs (in-memory mode).
 
     Args:
-        args: Tuple of (worker_id, start_i, end_i, sequences, threshold).
-              Worker generates pairs from range [start_i, end_i) to save memory.
+        args: Tuple of (worker_id, start_i, end_i, sequences, graph_type, edge_params, checkpoint_dir).
+              graph_type: "deletion" or "ids"
+              edge_params: {"n": n, "threshold": threshold} for deletion,
+                          {"threshold": threshold} for ids
 
     Returns:
         List of edges (seq1, seq2) that should be connected
     """
-    worker_id, start_i, end_i, sequences, threshold = args
+    worker_id, start_i, end_i, sequences, graph_type, edge_params, _checkpoint_dir = args
     edges = []
     n_sequences = len(sequences)
     total_iters = end_i - start_i
@@ -195,17 +286,29 @@ def _compute_edges_chunk(args):
         mininterval=0.5  # Reduce I/O overhead
     )
 
-    for idx, i in enumerate(range(start_i, end_i)):
-        for j in range(i + 1, n_sequences):
-            seq1, seq2 = sequences[i], sequences[j]
-            edit_dist = Levenshtein.distance(seq1, seq2)
+    threshold = edge_params["threshold"]
 
-            if edit_dist < threshold:
-                edges.append((seq1, seq2))
+    if graph_type == "deletion":
+        n = edge_params["n"]
+        prev, current = _get_dp_arrays(n)
 
-        # Update progress less frequently to reduce I/O overhead
-        if idx % update_interval == 0 or idx == total_iters - 1:
-            pbar.update(update_interval if idx > 0 else 1)
+        for idx, i in enumerate(range(start_i, end_i)):
+            for j in range(i + 1, n_sequences):
+                seq1, seq2 = sequences[i], sequences[j]
+                if _check_edge_deletion(seq1, seq2, n, threshold, prev, current):
+                    edges.append((seq1, seq2))
+            if idx % update_interval == 0 or idx == total_iters - 1:
+                pbar.update(update_interval if idx > 0 else 1)
+    else:
+        # IDS
+        import Levenshtein
+        for idx, i in enumerate(range(start_i, end_i)):
+            for j in range(i + 1, n_sequences):
+                seq1, seq2 = sequences[i], sequences[j]
+                if Levenshtein.distance(seq1, seq2) < threshold:
+                    edges.append((seq1, seq2))
+            if idx % update_interval == 0 or idx == total_iters - 1:
+                pbar.update(update_interval if idx > 0 else 1)
 
     pbar.close()
     return edges
@@ -216,13 +319,13 @@ def _compute_edges_chunk_streaming(args):
     Worker function to compute edges and write to disk (streaming mode).
 
     Args:
-        args: Tuple of (worker_id, start_i, end_i, sequences, threshold, temp_dir).
+        args: Tuple of (worker_id, start_i, end_i, sequences, graph_type, edge_params, temp_dir).
               Worker writes edges to temp_dir/worker_{worker_id}.edges
 
     Returns:
         Tuple of (worker_id, edge_count, output_file_path)
     """
-    worker_id, start_i, end_i, sequences, threshold, temp_dir = args
+    worker_id, start_i, end_i, sequences, graph_type, edge_params, temp_dir = args
     n_sequences = len(sequences)
     total_iters = end_i - start_i
     update_interval = max(1, total_iters // 100)
@@ -241,20 +344,33 @@ def _compute_edges_chunk_streaming(args):
         mininterval=0.5
     )
 
+    threshold = edge_params["threshold"]
+
     # Write edges to file with buffering
     with open(output_file, 'w', buffering=8192*16) as f:  # 128KB buffer
-        for idx, i in enumerate(range(start_i, end_i)):
-            for j in range(i + 1, n_sequences):
-                seq1, seq2 = sequences[i], sequences[j]
-                edit_dist = Levenshtein.distance(seq1, seq2)
+        if graph_type == "deletion":
+            n = edge_params["n"]
+            prev, current = _get_dp_arrays(n)
 
-                if edit_dist < threshold:
-                    f.write(f"{seq1}\t{seq2}\n")
-                    edge_count += 1
-
-            # Update progress
-            if idx % update_interval == 0 or idx == total_iters - 1:
-                pbar.update(update_interval if idx > 0 else 1)
+            for idx, i in enumerate(range(start_i, end_i)):
+                for j in range(i + 1, n_sequences):
+                    seq1, seq2 = sequences[i], sequences[j]
+                    if _check_edge_deletion(seq1, seq2, n, threshold, prev, current):
+                        f.write(f"{seq1}\t{seq2}\n")
+                        edge_count += 1
+                if idx % update_interval == 0 or idx == total_iters - 1:
+                    pbar.update(update_interval if idx > 0 else 1)
+        else:
+            # IDS
+            import Levenshtein
+            for idx, i in enumerate(range(start_i, end_i)):
+                for j in range(i + 1, n_sequences):
+                    seq1, seq2 = sequences[i], sequences[j]
+                    if Levenshtein.distance(seq1, seq2) < threshold:
+                        f.write(f"{seq1}\t{seq2}\n")
+                        edge_count += 1
+                if idx % update_interval == 0 or idx == total_iters - 1:
+                    pbar.update(update_interval if idx > 0 else 1)
 
     pbar.close()
 
@@ -266,11 +382,14 @@ def _compute_edges_chunk_streaming(args):
     return (worker_id, edge_count, output_file)
 
 
-def _get_checkpoint_path(output_dir, n, s, q):
+# --- Checkpointing ---
+
+def _get_checkpoint_path(output_dir, graph_type, n, s, q):
     """Get the checkpoint file path for a given graph."""
     checkpoint_dir = os.path.join(output_dir, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
-    return os.path.join(checkpoint_dir, f"checkpoint_ids_s{s}_n{n}_q{q}.pkl")
+    prefix = "d" if graph_type == "deletion" else "ids"
+    return os.path.join(checkpoint_dir, f"checkpoint_{prefix}_s{s}_n{n}_q{q}.pkl")
 
 
 def _save_checkpoint(checkpoint_path, edges_so_far, completed_workers):
@@ -296,14 +415,21 @@ def _load_checkpoint(checkpoint_path):
     return None
 
 
-def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_disk=None):
+# --- Main graph generation ---
+
+def generate_graph(graph_type, n, s, q=2, max_workers=None, output_dir=None, stream_to_disk=None):
     """
     Generate a graph where nodes are q-ary strings of length n.
-    Two nodes are connected if edit_distance(node1, node2) < 2s + 1.
+
+    For deletion graphs: Two nodes connected if they share a common subsequence
+    of length >= n-s.
+
+    For IDS graphs: Two nodes connected if edit_distance(node1, node2) < 2s + 1.
 
     Args:
+        graph_type: "deletion" or "ids"
         n: Length of strings
-        s: Number of errors to correct (requires min distance 2s + 1)
+        s: Number of deletions/errors to correct
         q: Alphabet size (default: 2 for binary, 4 for DNA)
         max_workers: Number of parallel workers (default: cpu_count())
         output_dir: Directory for checkpoints (optional)
@@ -321,38 +447,52 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
     if stream_to_disk is None:
         stream_to_disk = (n >= 19)
 
-    # Start memory monitoring (tracks main process + all worker processes)
+    # Start memory monitoring
     memory_monitor = MemoryMonitor(interval=0.5)
     memory_monitor.start()
 
-    mode_str = "STREAMING (disk)" if stream_to_disk else "IN-MEMORY"
-    print(f"Generating graph for n={n}, s={s}, q={q} (min required distance: {2*s + 1})")
+    # Compute threshold and description based on graph type
+    if graph_type == "deletion":
+        threshold = n - s
+        edge_params = {"n": n, "threshold": threshold}
+        desc = f"LCS threshold: {threshold}"
+        compute_desc = "common subsequences"
+    else:
+        threshold = 2 * s + 1
+        edge_params = {"threshold": threshold}
+        desc = f"min required distance: {threshold}"
+        compute_desc = "edit distances"
+
+    mode_str = "streaming (disk)" if stream_to_disk else "in-memory"
+    print(f"Generating graph for n={n}, s={s}, q={q} ({desc})")
     print(f"  Mode: {mode_str}")
     print(f"  Using {max_workers} workers for parallel computation")
     print(f"  Monitoring memory usage (sampling every 0.5s)...")
 
-    # Print memory estimate
-    mem_estimate = estimate_memory_usage(n, s, q, max_workers)
-    print(f"  Estimated memory usage (UPPER BOUND):")
-    print(f"    Total: {mem_estimate['total']:.2f} GB")
-    print(f"    - Adjacency dict: {mem_estimate['adjacency']:.2f} GB")
-    print(f"    - Sequences list: {mem_estimate['sequences']:.2f} GB")
-    print(f"    - Workers ({max_workers}): {mem_estimate['workers']:.2f} GB")
-    print(f"      * Edge buffer per worker: {mem_estimate['edge_buffer_per_worker']:.2f} GB (~{mem_estimate['expected_edges_per_worker']/1e6:.1f}M edges)")
-    print(f"      * Process overhead: 0.1 GB per worker")
-    print(f"    - Base overhead: {mem_estimate['overhead']:.2f} GB")
-    print(f"  Note: This is an UPPER BOUND because:")
-    print(f"    - Uses Hamming ball (Hamming >= Levenshtein, equality only without shifts)")
-    print(f"    - All workers peak simultaneously (actual: staggered due to load balancing)")
-    print(f"    - Conservative 150 bytes/edge (actual: ~100-120 bytes)")
-    print(f"    - No copy-on-write sharing (Linux/macOS: sequences are shared)")
-    print(f"    Actual memory usage typically 30-50% of estimate (or less if sparse).")
-    print(f"  Graph properties (based on Hamming ball approximation):")
-    print(f"    - Upper bound on degree: V_{q}(n,{2*s}) = {mem_estimate['avg_degree']:.0f}")
-    print(f"    - Upper bound on edge probability: {mem_estimate['p_edge']:.6f}")
-    print(f"    - Actual degree will be lower due to Levenshtein < Hamming for shifts")
+    # Print memory estimate for IDS graphs
+    mem_estimate = None
+    if graph_type == "ids":
+        mem_estimate = estimate_memory_usage(n, s, q, max_workers)
+        print(f"  Estimated memory usage (upper bound):")
+        print(f"    Total: {mem_estimate['total']:.2f} GB")
+        print(f"    - Adjacency dict: {mem_estimate['adjacency']:.2f} GB")
+        print(f"    - Sequences list: {mem_estimate['sequences']:.2f} GB")
+        print(f"    - Workers ({max_workers}): {mem_estimate['workers']:.2f} GB")
+        print(f"      * Edge buffer per worker: {mem_estimate['edge_buffer_per_worker']:.2f} GB (~{mem_estimate['expected_edges_per_worker']/1e6:.1f}M edges)")
+        print(f"      * Process overhead: 0.1 GB per worker")
+        print(f"    - Base overhead: {mem_estimate['overhead']:.2f} GB")
+        print(f"  Note, this is an upper bound because:")
+        print(f"    - Uses Hamming ball (Hamming >= Levenshtein, equality only without shifts).")
+        print(f"    - All workers peak simultaneously (actual, staggered due to load balancing).")
+        print(f"    - Conservative 150 bytes/edge (actual, ~100-120 bytes).")
+        print(f"    - No copy-on-write sharing (Linux/macOS, sequences are shared).")
+        print(f"    Actual memory usage typically 30-50% of estimate (or less if sparse).")
+        print(f"  Graph properties (based on Hamming ball approximation):")
+        print(f"    - Upper bound on degree: V_{q}(n,{2*s}) = {mem_estimate['avg_degree']:.0f}")
+        print(f"    - Upper bound on edge probability: {mem_estimate['p_edge']:.6f}")
+        print(f"    - Actual degree will be lower due to Levenshtein < Hamming for shifts")
 
-    # Generate q-ary alphabet: '0', '1', ..., 'q-1'
+    # Generate q-ary alphabet, '0', '1', ..., 'q-1'.
     alphabet = ''.join(str(i) for i in range(q))
     sequences = [''.join(seq) for seq in itertools.product(alphabet, repeat=n)]
     print(f"  Total nodes: {len(sequences)}")
@@ -360,7 +500,6 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
     n_sequences = len(sequences)
     total_pairs = n_sequences * (n_sequences - 1) // 2
     pairs_per_worker = total_pairs / max_workers
-    threshold = 2 * s + 1
 
     # Create temp directory for streaming mode (deterministic name for resume support)
     temp_dir = None
@@ -378,7 +517,7 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
     # Build worker arguments with balanced workload
     worker_args = []
     current_i = 0
-    checkpoint_path = _get_checkpoint_path(output_dir or ".", n, s, q) if output_dir and not stream_to_disk else None
+    checkpoint_path = _get_checkpoint_path(output_dir or ".", graph_type, n, s, q) if output_dir and not stream_to_disk else None
 
     # For streaming mode, check for resumable state via done marker files
     completed_workers = set()
@@ -454,9 +593,9 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
 
         if start_i < n_sequences:
             if stream_to_disk:
-                worker_args.append((worker_id, start_i, end_i, sequences, threshold, temp_dir))
+                worker_args.append((worker_id, start_i, end_i, sequences, graph_type, edge_params, temp_dir))
             else:
-                worker_args.append((worker_id, start_i, end_i, sequences, threshold))
+                worker_args.append((worker_id, start_i, end_i, sequences, graph_type, edge_params, checkpoint_path))
 
         current_i = end_i
 
@@ -473,11 +612,11 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
                 if checkpoint_data:
                     all_edges = checkpoint_data['edges']
     else:
-        print(f"  Computing edit distances in parallel...")
+        print(f"  Computing {compute_desc} in parallel...")
         print(f"  Each worker will show its own progress bar below:\n")
 
         if stream_to_disk:
-            # Streaming mode: workers write to temp files
+            # Streaming mode, workers write to temp files.
             total_edge_count = total_resumed_edges
             edge_files = []
 
@@ -498,13 +637,14 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
             if total_resumed_edges > 0:
                 print(f"    (includes {total_resumed_edges:,} edges from resumed workers)")
             print(f"    Peak memory during computation: {peak_memory_gb:.2f} GB")
-            print(f"    Estimated upper bound: {mem_estimate['total']:.2f} GB")
+            if mem_estimate:
+                print(f"    Estimated upper bound: {mem_estimate['total']:.2f} GB")
 
             # Return temp_dir info for streaming LMDB build
             return (temp_dir, total_edge_count, sequences)
 
         else:
-            # In-memory mode: collect edges in list
+            # In-memory mode, collect edges in list.
             all_edges = []
             if checkpoint_path:
                 checkpoint_data = _load_checkpoint(checkpoint_path)
@@ -544,15 +684,18 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
     print(f"    Degree distribution: min={min_deg}, max={max_deg}, avg={avg_deg:.1f}, median={median_deg}")
     print(f"    Graph density: {2 * edge_count / (n_sequences * (n_sequences - 1)) * 100:.4f}%")
 
-    # Stop memory monitoring and report actual usage
+    # Stop memory monitoring
     peak_memory_gb = memory_monitor.stop()
-    print(f"\n  ACTUAL peak memory usage: {peak_memory_gb:.2f} GB (main + all {max_workers} workers)")
-    print(f"    Estimated upper bound: {mem_estimate['total']:.2f} GB")
-    print(f"    Actual vs estimate: {peak_memory_gb / mem_estimate['total'] * 100:.1f}% of upper bound")
-    if peak_memory_gb < mem_estimate['total']:
-        print(f"    Within estimate (saved {mem_estimate['total'] - peak_memory_gb:.2f} GB)")
+    if mem_estimate:
+        print(f"\n  Actual peak memory usage: {peak_memory_gb:.2f} GB (main + all {max_workers} workers)")
+        print(f"    Estimated upper bound: {mem_estimate['total']:.2f} GB")
+        print(f"    Actual vs estimate: {peak_memory_gb / mem_estimate['total'] * 100:.1f}% of upper bound")
+        if peak_memory_gb < mem_estimate['total']:
+            print(f"    Within estimate (saved {mem_estimate['total'] - peak_memory_gb:.2f} GB)")
+        else:
+            print(f"    Warning, exceeded estimate by {peak_memory_gb - mem_estimate['total']:.2f} GB.")
     else:
-        print(f"    WARNING: Exceeded estimate by {peak_memory_gb - mem_estimate['total']:.2f} GB")
+        print(f"\n  Peak memory usage: {peak_memory_gb:.2f} GB")
 
     # Clean up checkpoint on success
     if checkpoint_path and os.path.exists(checkpoint_path):
@@ -561,6 +704,8 @@ def generate_ids_graph(n, s, q=2, max_workers=None, output_dir=None, stream_to_d
 
     return adjacency
 
+
+# --- LMDB saving ---
 
 def save_graph_to_lmdb(adjacency, output_path):
     """
@@ -598,7 +743,7 @@ def save_graph_to_lmdb(adjacency, output_path):
         value = json.dumps(neighbors).encode('utf-8')
         serialized_data.append((key, value))
 
-    # Create LMDB environment and write
+    # Create LMDB environment and write in batches
     env = lmdb.open(output_path, map_size=map_size_bytes)
 
     print(f"  Writing to LMDB...")
@@ -640,8 +785,8 @@ def save_graph_to_lmdb_streaming(temp_dir, sequences, output_path, chunked=None,
     if chunked is None:
         chunked = (n >= 19)
 
-    mode_str = "CHUNKED (low memory)" if chunked else "STANDARD (in-memory)"
-    print(f"  LMDB build mode: {mode_str}")
+    mode_str = "chunked (low memory)" if chunked else "standard (in-memory)"
+    print(f"  LMDB build mode, {mode_str}")
 
     # Count total edges
     print(f"  Counting edges...")
@@ -669,10 +814,10 @@ def save_graph_to_lmdb_streaming(temp_dir, sequences, output_path, chunked=None,
     env = lmdb.open(output_path, map_size=map_size_bytes)
 
     if chunked:
-        # === CHUNKED MODE ===
+        # Chunked mode.
         # Process nodes in chunks, scanning edge files for each chunk.
-        # Memory: O(nodes_per_chunk * avg_degree) instead of O(total_edges)
-        # Time: O(num_chunks * edge_file_size) - multiple passes over edge files
+        # Memory, O(nodes_per_chunk * avg_degree) instead of O(total_edges).
+        # Time, O(num_chunks * edge_file_size), multiple passes over edge files.
 
         num_chunks = (num_nodes + nodes_per_chunk - 1) // nodes_per_chunk
         print(f"\n  Processing {num_nodes:,} nodes in {num_chunks} chunks of {nodes_per_chunk:,} nodes each")
@@ -713,7 +858,7 @@ def save_graph_to_lmdb_streaming(temp_dir, sequences, output_path, chunked=None,
             print(f"  Chunk {chunk_idx + 1}/{num_chunks} done ({end_idx:,}/{num_nodes:,} nodes)")
 
     else:
-        # === STANDARD MODE ===
+        # Standard mode
         # Build full adjacency dict in memory (faster, but uses more RAM)
 
         print(f"  Building adjacency list from edge files...")
@@ -759,23 +904,28 @@ def save_graph_to_lmdb_streaming(temp_dir, sequences, output_path, chunked=None,
     print(f"  Graph saved successfully!")
 
 
-def construct_and_save_graph(n, s, q, output_dir, max_workers=None, stream_to_disk=None):
+# --- High-level API ---
+
+def construct_and_save_graph(graph_type, n, s, q, output_dir, max_workers=None, stream_to_disk=None):
     """
-    Construct an IDS graph and save it to LMDB.
+    Construct a graph and save it to LMDB.
 
     Args:
+        graph_type: "deletion" or "ids"
         n: Length of strings
-        s: Number of errors to correct
+        s: Number of deletions/errors to correct
         q: Alphabet size (2 for binary, 4 for DNA)
         output_dir: Directory to save the graph
         max_workers: Number of parallel workers (default: cpu_count())
         stream_to_disk: If True, use streaming mode. If None, auto-enable for n >= 19.
     """
-    # Create output path with hierarchical structure: {base}/ids/{alphabet}/s{s}/
+    # Create output path with hierarchical structure, {base}/{type}/{alphabet}/s{s}/.
     alphabet_name = "binary" if q == 2 else "quaternary" if q == 4 else f"q{q}"
-    subdir = os.path.join(output_dir, "ids", alphabet_name, f"s{s}")
+    type_dir = "deletion" if graph_type == "deletion" else "ids"
+    subdir = os.path.join(output_dir, type_dir, alphabet_name, f"s{s}")
     os.makedirs(subdir, exist_ok=True)
-    graph_name = f"graph_ids_s{s}_n{n}_q{q}.lmdb"
+    prefix = "d" if graph_type == "deletion" else "ids"
+    graph_name = f"graph_{prefix}_s{s}_n{n}_q{q}.lmdb"
     output_path = os.path.join(subdir, graph_name)
 
     # Check if LMDB already exists and is complete
@@ -798,41 +948,43 @@ def construct_and_save_graph(n, s, q, output_dir, max_workers=None, stream_to_di
             shutil.rmtree(output_path, ignore_errors=True)
 
     # Generate graph
-    result = generate_ids_graph(n, s, q, max_workers=max_workers, output_dir=output_dir,
-                                stream_to_disk=stream_to_disk)
+    result = generate_graph(graph_type, n, s, q, max_workers=max_workers, output_dir=output_dir,
+                            stream_to_disk=stream_to_disk)
 
     # Handle streaming vs in-memory mode
     if isinstance(result, tuple):
-        # Streaming mode: result is (temp_dir, edge_count, sequences)
+        # Streaming mode, result is (temp_dir, edge_count, sequences).
         temp_dir, edge_count, sequences = result
         save_graph_to_lmdb_streaming(temp_dir, sequences, output_path)
     else:
-        # In-memory mode: result is adjacency dict
+        # In-memory mode, result is adjacency dict.
         save_graph_to_lmdb(result, output_path)
 
     print()
 
+
+# --- CLI ---
 
 def parse_args():
     """Parse command line arguments."""
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Construct IDS (Insertion/Deletion/Substitution) code graphs.',
+        description='Construct deletion-correcting or IDS code graphs.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Build graphs for n=8,9,10 with s=1, quaternary alphabet (DNA)
-    python construct_ids_graphs.py --n 8,9,10 --s 1 --q 4
+    # Build deletion graphs for n=10,11,12 with s=1, binary alphabet
+    python construct_graphs.py --type deletion --n 10,11,12 --s 1 --q 2
 
-    # Build graph for n=12 with s=2, binary, 50 workers
-    python construct_ids_graphs.py --n 12 --s 2 --q 2 --workers 50
+    # Build IDS graphs for n=8,9,10 with s=1, quaternary alphabet (DNA)
+    python construct_graphs.py --type ids --n 8,9,10 --s 1 --q 4
 
-    # Custom output directory
-    python construct_ids_graphs.py --n 10,11 --s 1 --q 4 --output /mnt/Graphs/ids
+    # Build graph for n=15 with s=2, 100 workers, custom output
+    python construct_graphs.py --type deletion --n 15 --s 2 --workers 100 --output /mnt/Graphs
 
     # Force streaming mode for memory-limited systems
-    python construct_ids_graphs.py --n 18 --s 1 --q 4 --stream
+    python construct_graphs.py --type ids --n 18 --s 1 --q 4 --stream
 
 Memory efficiency:
     For n >= 19, streaming mode is auto-enabled. This writes edges to temp files
@@ -841,16 +993,18 @@ Memory efficiency:
         """
     )
 
+    parser.add_argument('--type', type=str, required=True, choices=['deletion', 'ids'],
+                        help='Graph type: "deletion" (LCS-based) or "ids" (Levenshtein-based)')
     parser.add_argument('--n', type=str, required=True,
-                        help='Comma-separated n values (string lengths), e.g., "8,9,10"')
+                        help='Comma-separated n values (string lengths), e.g., "10,11,12"')
     parser.add_argument('--s', type=int, required=True,
-                        help='Number of errors to correct (requires min distance 2s+1)')
-    parser.add_argument('--q', type=int, default=4,
-                        help='Alphabet size (default: 4 for DNA/quaternary, use 2 for binary)')
+                        help='Number of deletions/errors to correct')
+    parser.add_argument('--q', type=int, default=None,
+                        help='Alphabet size (default: 2 for deletion, 4 for ids)')
     parser.add_argument('--workers', '-w', type=int, default=None,
                         help='Number of parallel workers (default: all CPU cores)')
     parser.add_argument('--output', '-o', type=str, default=None,
-                        help='Base output directory (default: /mnt/Graphs). Structure: {base}/ids/{alphabet}/s{s}/')
+                        help='Base output directory (default: /mnt/Graphs)')
 
     # Streaming mode options
     stream_group = parser.add_mutually_exclusive_group()
@@ -868,9 +1022,11 @@ if __name__ == "__main__":
     # Parse n values
     n_values = [int(x.strip()) for x in args.n.split(',')]
 
-    # Set default output directory (structure created automatically in construct_and_save_graph)
-    output_dir = args.output if args.output else "/mnt/Graphs"
+    # Set default q based on graph type
+    q = args.q if args.q is not None else (2 if args.type == "deletion" else 4)
 
+    # Set default output directory
+    output_dir = args.output if args.output else "/mnt/Graphs"
     os.makedirs(output_dir, exist_ok=True)
 
     # Set workers
@@ -884,38 +1040,38 @@ if __name__ == "__main__":
     else:
         stream_to_disk = None  # Auto-detect based on n
 
+    type_label = "Deletion-Correcting" if args.type == "deletion" else "IDS (Insertion/Deletion/Substitution)"
+
     print("=" * 70)
-    print("Constructing IDS (Insertion/Deletion/Substitution) Code Graphs")
+    print(f"Constructing {type_label} Code Graphs")
     print("=" * 70)
     print()
     print(f"Parameters:")
+    print(f"  type: {args.type}")
     print(f"  n values: {n_values}")
-    print(f"  s (errors): {args.s} (requires min distance {2*args.s + 1})")
-    print(f"  q (alphabet): {args.q}")
+    if args.type == "deletion":
+        print(f"  s (deletions): {args.s}")
+    else:
+        print(f"  s (errors): {args.s} (requires min distance {2*args.s + 1})")
+    print(f"  q (alphabet): {q}")
     print(f"  workers: {max_workers}")
     print(f"  output: {output_dir}")
     if stream_to_disk is True:
-        print(f"  mode: STREAMING (forced)")
+        print(f"  mode: streaming (forced)")
     elif stream_to_disk is False:
-        print(f"  mode: IN-MEMORY (forced)")
+        print(f"  mode: in-memory (forced)")
     else:
-        print(f"  mode: AUTO (streaming for n >= 19)")
+        print(f"  mode: auto (streaming for n >= 19)")
     print()
 
     # Build graphs
     params = [(n, args.s) for n in n_values]
 
     for n, s in tqdm(params, desc="Overall progress", unit="graph"):
-        construct_and_save_graph(n, s, args.q, output_dir, max_workers=max_workers,
+        construct_and_save_graph(args.type, n, s, q, output_dir, max_workers=max_workers,
                                 stream_to_disk=stream_to_disk)
 
     print("=" * 70)
     print("All graphs constructed successfully!")
     print(f"Graphs saved to: {output_dir}")
-    print("=" * 70)
-    print()
-    print("SLURM Memory Reporting:")
-    print("  To get SLURM's memory report after job completion, use:")
-    print("    sacct -j <job_id> --format=JobID,MaxRSS,ReqMem,Elapsed")
-    print("  MaxRSS shows the actual peak memory used by the job")
     print("=" * 70)
