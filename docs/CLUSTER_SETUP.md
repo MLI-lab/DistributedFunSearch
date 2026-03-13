@@ -9,7 +9,7 @@ For clusters with enroot/pyxis.
 **Build container image** (once, on a compute node):
 
 ```bash
-salloc -p lrz-cpu --qos=cpu --mem=64G && srun --pty bash
+salloc -p <partition-name> --qos=<qos-name> --mem=64G && srun --pty bash
 
 # Download PyTorch image
 enroot import -o /path/to/disfun.sqsh docker://pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime
