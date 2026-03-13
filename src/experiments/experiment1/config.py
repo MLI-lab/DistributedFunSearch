@@ -62,10 +62,10 @@ class SamplerConfig:
     reasoning_effort: str = None  # Only for OpenAI o1/o3/gpt-5 models
     max_retries: int = 3
     inference_timeout: int = 300
-    model: str = "Qwen/Qwen3-14B"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
-    cost_model: str = "fireworks_ai/accounts/fireworks/models/qwen3-14b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
+    model: str = "bigcode/starcoder2-15b"  # See https://docs.vllm.ai/en/latest/models/supported_models.html e.g., Qwen/Qwen3-8B, bigcode/starcoder2-15b
+    cost_model: str = "fireworks_ai/accounts/fireworks/models/starcoder2-15b"  # fireworks_ai/accounts/fireworks/models/starcoder2-15b or fireworks_ai/accounts/fireworks/models/qwen3-8b, LiteLLM model name for pricing, see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
     use_local_vllm: bool = True  # False for LiteLLM API calls
-    use_chat_api: bool = True  # True to use vLLM chat() instead of generate(), use when providing system/user messages
+    use_chat_api: bool = False  # True to use vLLM chat() instead of generate(), use when providing system/user messages
     enable_thinking: bool = False  # Qwen3 thinking mode: None=model default (on), True=force on, False=force off
 
     api_base: str = None
@@ -117,10 +117,10 @@ class PromptConfig:
     imports_file: str = "imports/networkx.txt"
 
     # FunSearch
-    funsearch_template: str = "funsearch/templates/single_turn/reflection"
-    funsearch_problem_desc: str = "funsearch/problem_descriptions/instruction.txt"
+    funsearch_template: str = "funsearch/templates/completion.txt"
+    funsearch_problem_desc: str = "funsearch/problem_descriptions/completion.txt"
     funsearch_string_hint: str | None = None #"funsearch/problem_descriptions/string_hint.txt"  # e.g., "funsearch/problem_descriptions/string_hint.txt"
-    funsearch_system_message: str | None = "funsearch/system_messages/single_turn/reflection.txt" #"funsearch/system_messages/single_turn/basic.txt" #"funsearch/system_messages/single_turn/basic.txt" #
+    funsearch_system_message: str | None = None  # No system message for completion models
     funsearch_evaluation_preamble: str | None = None  # Include evaluation setup in prompt
     funsearch_evaluation_script: str | None = None  # Include evaluation script in prompt (shows LLM how functions are scored)
     fewshot_num_examples: int = 2
