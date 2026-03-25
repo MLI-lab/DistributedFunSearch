@@ -89,12 +89,12 @@ def _group_scores_by_params(scores_dict: dict) -> dict:
     return groups
 
 
-def _reduce_score(
+def _fitness_score(
     scores_per_test: dict,
     mode: str,
     baseline_scores: dict | None = None
 ) -> float:
-    """Reduce per-test scores into a single aggregate score.
+    """Compute fitness score for evolutionary sampling (cluster scores, softmax probabilities).
 
     Groups by (s, q, ...), reduces each group by mode, averages across groups.
     Modes: "last" (largest n), "average", "weighted" (by n), "relative_difference" (vs baseline),
@@ -524,7 +524,7 @@ class ProgramsDatabase:
         program.hash_value = hash_value
 
         # Calculate score once and reuse
-        score = _reduce_score(scores_per_test, self.evaluator_config.mode, self.best_known_solutions)
+        score = _fitness_score(scores_per_test, self.evaluator_config.mode, self.best_known_solutions)
 
         # Capture baseline score from first program (initial/seed function) for softmax normalization
         # Only if enabled via config, and skip for relative_difference mode (uses its own baseline)
@@ -592,24 +592,15 @@ class ProgramsDatabase:
             logger.error(f"Could not append program: {e}")
 
         try:
-            # Check if the new score is higher than the current best score
-            if score > self._best_score_per_island[island_id]:
+            # Compare by full signature (largest n first, then next n, etc.)
+            current_best_scores = self._best_scores_per_test_per_island[island_id]
+            current_best_signature = self._get_signature(current_best_scores) if current_best_scores is not None else ()
+
+            if signature > current_best_signature:
                 self._best_program_per_island[island_id] = program
                 self._best_scores_per_test_per_island[island_id] = scores_per_test
                 self._best_score_per_island[island_id] = score
                 logger.info(f'Best score of island {island_id} increased to {score} with program {program} and scores {scores_per_test}')
-
-            # If the score equals the best score, check the program signature
-            elif score == self._best_score_per_island[island_id]:
-                # Get the current best program's signature
-                current_best_signature = self._get_signature(self._best_scores_per_test_per_island[island_id])
-
-                # Compare signatures: if the new signature is lexicographically "larger"
-                if signature > current_best_signature:
-                    self._best_program_per_island[island_id] = program
-                    self._best_scores_per_test_per_island[island_id] = scores_per_test
-                    self._best_score_per_island[island_id] = score
-                    logger.info(f'Best program of island {island_id} replaced with program {program} (signature comparison)')
 
         except Exception as e:
             logger.error(f"Could not update best score: {e}")
@@ -662,6 +653,7 @@ class ProgramsDatabase:
                     island['num_programs'] = 0
 
                     self._best_score_per_island[island_id] = -float('inf')
+                    self._best_scores_per_test_per_island[island_id] = None
                     founder_island_id = np.random.choice(keep_islands_ids)
                     founder = self._best_program_per_island[founder_island_id]
                     founder_scores = self._best_scores_per_test_per_island[founder_island_id]
@@ -839,13 +831,9 @@ class ProgramsDatabase:
         if not sampled_programs:
             return empty_result
 
-        # Sort by score (ascending) so best program is last (v1 = improved version)
-        # Tie-break by signature (larger n scores first)
+        # Sort by signature (ascending) so best program is last (v1 = improved version)
         sampled_programs.sort(
-            key=lambda x: (
-                _reduce_score(x[1], self.evaluator_config.mode, self.best_known_solutions),
-                self._get_signature(x[1]) if x[1] else ()
-            )
+            key=lambda x: self._get_signature(x[1]) if x[1] else ()
         )
 
         # Check for duplicate few-shot examples (same hash = low diversity)
@@ -882,7 +870,7 @@ class ProgramsDatabase:
             result["reflection_prompt"] = refl_prompt
             result["generation_prompt"] = gen_prompt
             result["system_message"] = self.prompt_spec.system_message
-            result["reflection_system_message"] = None  # FunSearch uses same system message for both
+            result["reflection_system_message"] = self.prompt_spec.reflector_system_message
         else:
             # EoH: single generation prompt
             result["generation_prompt"] = prompt_builder.build_prompt(
@@ -958,10 +946,10 @@ class ProgramsDatabase:
         return hash_value in island['hash_set']
 
     def _get_signature(self, scores_per_test):
-        """Get signature for tie-breaking when aggregate scores are equal.
+        """Lexicographic signature for comparing programs across all test inputs.
 
         Returns tuple of scores sorted by keys in descending order (largest n first).
-        This prioritizes harder test cases (larger n) in tie-breaking.
+        Used as the primary comparison for best-program tracking, island resets, and prompt sorting.
         """
         if all(isinstance(k, str) for k in scores_per_test.keys()):
             scores_per_test = {ast.literal_eval(k): v for k, v in scores_per_test.items()}

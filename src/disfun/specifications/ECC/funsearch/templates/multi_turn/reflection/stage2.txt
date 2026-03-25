@@ -1,3 +1,7 @@
+Previous functions:
+
+{fewshot_examples}
+
 Your analysis:
 {reflection}
 

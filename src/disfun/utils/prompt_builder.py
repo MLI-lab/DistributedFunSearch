@@ -364,7 +364,13 @@ def load_specification(
         problem_description = problem_description.replace("{string_hint}", string_hint)
 
         if funsearch_system_message:
-            system_message = _load_file(base / funsearch_system_message).strip()
+            sys_msg_path = base / funsearch_system_message
+            if sys_msg_path.is_dir():
+                # Multi-turn: stage1 = reflection system message, stage2 = generation system message
+                system_message = _load_file(sys_msg_path / "stage2.txt").strip()
+                reflector_system_message = _load_file(sys_msg_path / "stage1.txt").strip() or None
+            else:
+                system_message = _load_file(sys_msg_path).strip()
 
         if funsearch_evaluation_script:
             evaluation_script = _load_file(base / funsearch_evaluation_script)
@@ -616,7 +622,7 @@ def build_funsearch_prompts(
     # Select appropriate templates based on available programs
     if available_programs == 1 and "funsearch_stage1_single" in spec.templates:
         stage1_template_name = "funsearch_stage1_single"
-        stage2_template_name = "funsearch_single"
+        stage2_template_name = "funsearch_single" if "funsearch_single" in spec.templates else "funsearch"
     else:
         stage1_template_name = "funsearch_stage1"
         stage2_template_name = "funsearch"
@@ -625,7 +631,9 @@ def build_funsearch_prompts(
     stage1_prompt = build_prompt(spec, stage1_template_name, programs)
 
     # Build stage2 template (keep {reflection} placeholder for sampler to fill)
-    stage2_template = spec.templates.get(stage2_template_name, "")
+    if stage2_template_name not in spec.templates:
+        raise ValueError(f"Stage2 template '{stage2_template_name}' not found. Available: {list(spec.templates.keys())}")
+    stage2_template = spec.templates[stage2_template_name]
     # Fill program placeholders but NOT {reflection}
     stage2_prompt = _fill_program_placeholders(stage2_template, spec, programs)
 

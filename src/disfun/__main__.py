@@ -516,7 +516,7 @@ class TaskManager:
     async def _run_attach_mode(self, evaluator_queue, sampler_queue, enable_scaling):
         """Run in attach mode: only start workers, no database/checkpoint/wandb."""
         self.logger.info(f"Attach mode: starting {self.attach_mode} only")
-        self.start_initial_processes(starting_sampler_id=0)
+        await self.start_initial_processes(starting_sampler_id=0)
         self.logger.info(f"Started {self.attach_mode} processes")
 
         self.tasks = [asyncio.create_task(self.resource_manager.log_resource_stats_periodically())]
@@ -606,7 +606,7 @@ class TaskManager:
         starting_sampler_id = database.next_sampler_id if checkpoint_file else 0
         if checkpoint_file:
             self.logger.info(f"Resuming from checkpoint: starting sampler IDs at {starting_sampler_id}")
-        self.start_initial_processes(starting_sampler_id)
+        await self.start_initial_processes(starting_sampler_id)
         self.logger.info("Initial processes started successfully.")
 
         # Sync sampler ID counter
@@ -686,7 +686,7 @@ class TaskManager:
             self.logger.error(f"Exception occurred in main_task: {e}")
 
 
-    def start_initial_processes(self, starting_sampler_id=0):
+    async def start_initial_processes(self, starting_sampler_id=0):
         ctx = mp.get_context('spawn')
         next_sampler_id = starting_sampler_id
 
@@ -711,6 +711,9 @@ class TaskManager:
                 self.logger.info(f"Starting {self.config.num_samplers} sampler(s) with API model: {self.config.sampler.model}")
 
             for i in range(self.config.num_samplers):
+                if self.shutting_down:
+                    self.logger.info("Shutdown requested, aborting sampler startup")
+                    break
                 sampler_id = next_sampler_id
                 next_sampler_id += 1
                 proc = ctx.Process(
@@ -727,7 +730,7 @@ class TaskManager:
                     self.process_to_device_map[proc.pid] = gpu_ids
                     self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid} on GPUs {base_gpu}-{base_gpu + tp_size - 1}")
                     if i < self.config.num_samplers - 1:
-                        time.sleep(90)
+                        await asyncio.sleep(90)
                 else:
                     self.logger.info(f"Started Sampler (ID={sampler_id}) PID={proc.pid}")
 
@@ -739,6 +742,9 @@ class TaskManager:
 
         startup_delay = getattr(self.config.evaluator, 'startup_delay', 0)
         for i in range(self.config.num_evaluators):
+            if self.shutting_down:
+                self.logger.info("Shutdown requested, aborting evaluator startup")
+                break
             proc = ctx.Process(
                 target=evaluator_process_entry,
                 args=(self.config_path, self.template, self.inputs, self.termination_config.target_solutions, self.log_dir, self.log_filename),
@@ -750,7 +756,7 @@ class TaskManager:
 
             # Stagger evaluator starts to avoid memory spike during graph loading
             if startup_delay > 0 and i < self.config.num_evaluators - 1:
-                time.sleep(startup_delay)
+                await asyncio.sleep(startup_delay)
 
 
 if __name__ == "__main__":

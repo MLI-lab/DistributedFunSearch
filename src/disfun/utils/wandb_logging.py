@@ -421,8 +421,12 @@ def compute_wandb_metrics(database) -> dict:
     # 2. Overall best score across all islands
     metrics["overall/best_score"] = max(database._best_score_per_island)
 
-    # Log overall best detailed scores
-    best_island_id = np.argmax(database._best_score_per_island)
+    # Log overall best detailed scores (pick island by full signature, not just reduced score)
+    best_island_id = max(
+        range(len(database._islands)),
+        key=lambda i: database._get_signature(database._best_scores_per_test_per_island[i])
+        if database._best_scores_per_test_per_island[i] is not None else ()
+    )
     best_scores_per_test = database._best_scores_per_test_per_island[best_island_id]
     if best_scores_per_test is not None:
         for test_key, test_score in best_scores_per_test.items():
